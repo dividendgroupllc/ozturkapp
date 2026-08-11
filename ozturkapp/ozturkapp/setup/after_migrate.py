@@ -20,11 +20,13 @@ def run():
 	from ozturkapp.ozturkapp.setup.ury_custom_fields import (
 		create_fields as create_ury_pos_fields,
 	)
+	from ozturkapp.ozturkapp.setup.ury_permissions import create_permissions
 
 	tasks = [
 		create_fields,
 		create_property_setters,
 		create_ury_pos_fields,
+		create_permissions,
 		create_party_types,
 		create_sales_order_print_format,
 	]

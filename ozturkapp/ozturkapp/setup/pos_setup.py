@@ -28,19 +28,26 @@ from frappe.utils import cint, flt
 # KONFIGURATSIYA — kerak bo'lsa shu yerdan o'zgartiring
 # =============================================================================
 
-BRANCH = "O'zTurk"
-RESTAURANT = "O'zTurk Kafe"
-ROOM = "Default O'zTurk"
+# DIQQAT: nomlar ozturk.local'da QO'LDA yaratilgan yozuvlarga mos. O'zgartirsangiz
+# skript mavjudini topa olmay YANGISINI yaratadi (dublikat).
+BRANCH = "Maksim Gorkiy"
+RESTAURANT = "O'zTurk"
+ROOM = "Ichki zal"
 MENU = "O'zTurk Menu"
-POS_PROFILE = "O'zTurk Profil"
-POS_CUSTOMER = "Нахт Клиент"
-POS_WAREHOUSE_NAME = "Restoran Sklad"
+POS_PROFILE = "kassa"
+POS_CUSTOMER = "Ozturk Maksim Gorkiy klient"
 INVOICE_SERIES_PREFIX = "OZT-.YYYY.-"
 
+#: POS ombori. None bo'lsa — mavjud POS Profile'dagi ombor ishlatiladi,
+#: u ham bo'lmasa shu nomda yangisi yaratiladi.
+POS_WAREHOUSE_NAME = None
+
+#: 0 qo'yilsa stollar yaratilmaydi. «Stiker» rejimida stol kerak emas —
+#: lekin keyinchalik «Stol» rejimiga o'tsangiz kerak bo'ladi.
 TABLE_COUNT = 10
 SEATS_PER_TABLE = 4
 
-CASHIER_EMAIL = "kassir1@ozturk.uz"
+CASHIER_EMAIL = "kassa@gmail.com"
 CASHIER_FIRST_NAME = "Kassir"
 CASHIER_PIN = "1111"
 ADMIN_PIN = "1234"
@@ -299,6 +306,22 @@ def configure_stock_settings():
 # =============================================================================
 
 def create_warehouse(company):
+    """POS ombori. Mavjud POS Profile'niki ustuvor — qo'lda tanlangan omborni
+    almashtirib yubormaslik uchun."""
+    existing = frappe.db.get_value("POS Profile", POS_PROFILE, "warehouse")
+    if existing:
+        _log(f"⏭️  Warehouse POS Profile'dan olindi: {existing}")
+        return existing
+
+    if not POS_WAREHOUSE_NAME:
+        fallback = frappe.db.get_value(
+            "Warehouse", {"company": company, "is_group": 0}, "name", order_by="lft"
+        )
+        if not fallback:
+            frappe.throw(f"'{company}' uchun ombor topilmadi")
+        _log(f"⏭️  Warehouse (birinchi mavjud): {fallback}")
+        return fallback
+
     abbr = _abbr(company)
     full_name = f"{POS_WAREHOUSE_NAME} - {abbr}"
     if frappe.db.exists("Warehouse", full_name):
@@ -633,6 +656,9 @@ def create_restaurant(company, menu):
 # =============================================================================
 
 def create_tables():
+    if not TABLE_COUNT:
+        _log("⏭️  TABLE_COUNT=0 — stollar yaratilmadi (Stiker rejimi)")
+        return
     created = 0
     for i in range(1, TABLE_COUNT + 1):
         name = f"{i}-stol"
@@ -731,9 +757,23 @@ def create_pos_profile(company, warehouse, customer, price_list, modes, cashier)
         # xato beradi — shuning uchun menyu price list'iga bog'lab qo'yamiz
         pl_changed = False
         if price_list and doc.selling_price_list != price_list:
+            _log(f"   selling_price_list: {doc.selling_price_list} -> {price_list}")
             doc.selling_price_list = price_list
             pl_changed = True
-        if applied or pins_changed or pl_changed:
+
+        # To'lov usullari: profilda faqat ERPNext standartlari (Cash, Bank Draft…)
+        # qolgan bo'lsa, ular `create_payment_modes` da o'chirilgan — POS ularni
+        # ko'rsatib, to'lov qila olmaydi. Shuning uchun almashtiramiz.
+        pay_changed = False
+        if modes and not any(r.mode_of_payment in modes for r in doc.payments):
+            old = [r.mode_of_payment for r in doc.payments]
+            doc.set("payments", [])
+            for i, mode in enumerate(modes):
+                doc.append("payments", {"mode_of_payment": mode, "default": 1 if i == 0 else 0})
+            _log(f"   to'lov usullari: {old} -> {modes}")
+            pay_changed = True
+
+        if applied or pins_changed or pl_changed or pay_changed:
             doc.save(ignore_permissions=True)
             _log(f"✅ POS Profile yangilandi: {POS_PROFILE} ({len(applied)} sozlama)")
         else:
