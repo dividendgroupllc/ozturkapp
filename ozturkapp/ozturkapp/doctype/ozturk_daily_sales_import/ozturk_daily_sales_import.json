@@ -1,0 +1,217 @@
+{
+    "actions": [],
+    "allow_rename": 0,
+    "autoname": "naming_series:",
+    "creation": "2024-01-01 00:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "section_settings",
+        "company",
+        "source_warehouse",
+        "customer",
+        "column_break_1",
+        "posting_date",
+        "allow_negative_stock",
+        "section_import",
+        "excel_file",
+        "column_break_2",
+        "status",
+        "naming_series",
+        "section_results",
+        "stock_entry",
+        "sales_invoice",
+        "column_break_3",
+        "external_ref",
+        "section_logs",
+        "error_log",
+        "import_log"
+    ],
+    "fields": [
+        {
+            "fieldname": "section_settings",
+            "fieldtype": "Section Break",
+            "label": "Import Settings"
+        },
+        {
+            "fieldname": "company",
+            "fieldtype": "Link",
+            "label": "Company",
+            "options": "Company",
+            "reqd": 1,
+            "in_list_view": 1,
+            "in_standard_filter": 1
+        },
+        {
+            "fieldname": "source_warehouse",
+            "fieldtype": "Link",
+            "label": "Oshxona Ombori",
+            "options": "Warehouse",
+            "reqd": 1,
+            "in_list_view": 1,
+            "description": "Xomashyo va tayyor mahsulotlar shu omborda"
+        },
+        {
+            "fieldname": "column_break_1",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "posting_date",
+            "fieldtype": "Date",
+            "label": "Posting Date (Savdo Sanasi)",
+            "reqd": 1,
+            "default": "Today",
+            "in_list_view": 1
+        },
+        {
+            "fieldname": "allow_negative_stock",
+            "fieldtype": "Check",
+            "label": "Allow Negative Stock",
+            "default": 1,
+            "description": "Agar ingredient yetishmasa ham jarayon davom etsin"
+        },
+        {
+            "fieldname": "customer",
+            "fieldtype": "Link",
+            "label": "Mijoz (Customer)",
+            "options": "Customer",
+            "reqd": 1,
+            "in_list_view": 1,
+            "in_standard_filter": 1,
+            "description": "Sales Invoice uchun mijoz. Odatda Walk-in Customer, lekin istalgan mijozni tanlash mumkin."
+        },
+        {
+            "fieldname": "section_import",
+            "fieldtype": "Section Break",
+            "label": "Excel Import"
+        },
+        {
+            "fieldname": "excel_file",
+            "fieldtype": "Attach",
+            "label": "Excel File",
+            "description": "POS hisoboti Excel fayli (.xlsx)"
+        },
+        {
+            "fieldname": "column_break_2",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "status",
+            "fieldtype": "Select",
+            "label": "Status",
+            "options": "Draft\nProcessing\nProcessed\nFailed",
+            "default": "Draft",
+            "read_only": 1,
+            "in_list_view": 1,
+            "in_standard_filter": 1
+        },
+        {
+            "fieldname": "naming_series",
+            "fieldtype": "Select",
+            "label": "Naming Series",
+            "options": "RDS-.YYYY.-.#####",
+            "default": "RDS-.YYYY.-.#####",
+            "hidden": 1
+        },
+        {
+            "fieldname": "section_results",
+            "fieldtype": "Section Break",
+            "label": "Results",
+            "collapsible": 1
+        },
+        {
+            "fieldname": "stock_entry",
+            "fieldtype": "Long Text",
+            "label": "Stock Entries (Manufacture)",
+            "read_only": 1,
+            "description": "Har bir BOM li item uchun alohida Manufacture Stock Entry"
+        },
+        {
+            "fieldname": "sales_invoice",
+            "fieldtype": "Long Text",
+            "label": "Sales Invoice",
+            "read_only": 1
+        },
+        {
+            "fieldname": "column_break_3",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "external_ref",
+            "fieldtype": "Data",
+            "label": "External Reference (Excel Hash)",
+            "read_only": 1,
+            "unique": 1,
+            "description": "Duplicate import prevention"
+        },
+        {
+            "fieldname": "section_logs",
+            "fieldtype": "Section Break",
+            "label": "Logs",
+            "collapsible": 1
+        },
+        {
+            "fieldname": "error_log",
+            "fieldtype": "Long Text",
+            "label": "Error Log",
+            "read_only": 1
+        },
+        {
+            "fieldname": "import_log",
+            "fieldtype": "Long Text",
+            "label": "Import Log",
+            "read_only": 1
+        }
+    ],
+    "index_web_pages_for_search": 1,
+    "links": [],
+    "modified": "2024-01-01 00:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Ozturkapp",
+    "name": "Ozturk Daily Sales Import",
+    "naming_rule": "By \"Naming Series\" field",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "create": 1,
+            "delete": 0,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Accounts Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "create": 1,
+            "delete": 0,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Stock Manager",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "states": [],
+    "title_field": "posting_date",
+    "track_changes": 1
+}

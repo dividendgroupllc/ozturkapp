@@ -10,6 +10,38 @@ app_license = "mit"
 
 # required_apps = []
 
+# =============================================================================
+# SETUP (migrate'dan keyin)
+# =============================================================================
+# Har bir sozlama alohida try/except bilan chaqiriladi (bittasi xato bersa ham
+# qolganlari ishlaydi) — qarang setup/after_migrate.py
+after_migrate = [
+	"ozturkapp.ozturkapp.setup.after_migrate.run",
+]
+
+# =============================================================================
+# DOCUMENT EVENTS
+# =============================================================================
+doc_events = {
+	"POS Invoice": {
+		# To'lov qilinganda (submit) URY Table occupied flagini tozalash —
+		# counter-service modelda stiker raqamlari qayta ishlatilishi uchun
+		"on_submit": "ozturkapp.ozturkapp.overrides.pos_invoice.on_submit",
+	},
+}
+
+# =============================================================================
+# WHITELISTED METHOD OVERRIDES
+# =============================================================================
+# Upstream `sync_order` Desktop POS yuboradigan `ticket_number`,
+# `active_cashier`, `active_cashier_role`, `client_ref` kwarg'larini jimgina
+# tashlab yuboradi (funksiya signaturasida yo'q). O'ram ularni POS Invoice'ga
+# yozadi va `client_ref` bo'yicha dublikat chekni to'sadi.
+# Qarang: overrides/ury_order.py
+override_whitelisted_methods = {
+	"ury.ury.doctype.ury_order.ury_order.sync_order": "ozturkapp.ozturkapp.overrides.ury_order.sync_order",
+}
+
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
 # 	{
@@ -26,7 +58,12 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/ozturkapp/css/ozturkapp.css"
-# app_include_js = "/assets/ozturkapp/js/ozturkapp.js"
+app_include_js = [
+	# «Profit and Loss Statement» hisobotiga «Ozturk PDF» tugmasini qo'shadi
+	"/assets/ozturkapp/js/pl_pdf_button.js",
+	# doctype_js fayllari ishlatadigan Item Group filtri yordamchisi
+	"/assets/ozturkapp/js/item_group_filter.js",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/ozturkapp/css/ozturkapp.css"
@@ -43,7 +80,14 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	# Menejerlar uchun soddalashtirilgan Employee formasi
+	"Employee": "public/js/employee.js",
+	# Xarid/sotuv hujjatlarida item ro'yxatini filtrlash
+	"Purchase Invoice": "public/js/purchase_invoice_item_filter.js",
+	"Purchase Order": "public/js/purchase_order_item_filter.js",
+	"Sales Order": "public/js/sales_order_item_filter.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

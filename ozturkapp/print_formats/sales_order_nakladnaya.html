@@ -1,0 +1,220 @@
+{% macro qty(value) -%}
+	{{ "{:,.3f}".format((value or 0)|float).rstrip("0").rstrip(".") }}
+{%- endmacro %}
+
+<style>
+	@page {
+		size: A4 portrait;
+		margin: 8mm;
+	}
+
+	.print-format {
+		orientation: Portrait;
+		page-size: A4;
+		padding: 0 !important;
+		width: 100% !important;
+		max-width: none !important;
+		color: #000;
+		font-family: Calibri, Arial, sans-serif;
+		font-size: 14px;
+		line-height: 1.35;
+	}
+
+	.print-format * {
+		box-sizing: border-box;
+	}
+
+	.sheet {
+		width: 100%;
+	}
+
+	.meta-table,
+	.party-table,
+	.items-table,
+	.signature-table {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+
+	/* Tepadagi keng jadval: Рақам / Сана / Босма санаси */
+	.meta-table {
+		margin-bottom: 8px;
+	}
+
+	.meta-table th {
+		padding: 6px 8px;
+		border: 1px solid #000;
+		text-align: center;
+		font-size: 17px;
+		font-weight: 800 !important;
+		color: #000 !important;
+	}
+
+	.meta-table td {
+		padding: 8px;
+		border: 1px solid #000;
+		text-align: center;
+		font-size: 22px;
+		font-weight: 800;
+		color: #000;
+	}
+
+	.party-table {
+		margin-bottom: 8px;
+		border: 1px solid #000;
+	}
+
+	.party-table td {
+		padding: 6px 8px;
+		vertical-align: top;
+	}
+
+	.field-value {
+		min-height: 14px;
+		font-size: 26px;
+		font-weight: 800;
+		color: #000;
+		text-align: center;
+	}
+
+	.items-table {
+		border: 1px solid #000;
+	}
+
+	.items-table col.idx {
+		width: 7%;
+	}
+
+	.items-table col.item {
+		width: 50%;
+	}
+
+	.items-table col.check {
+		width: 8%;
+	}
+
+	.items-table col.qty {
+		width: 17%;
+	}
+
+	.items-table col.uom {
+		width: 18%;
+	}
+
+	.items-table th {
+		padding: 6px 4px;
+		border: 1px solid #000;
+		text-align: center;
+		font-size: 16px;
+		font-weight: 800 !important;
+		color: #000 !important;
+	}
+
+	.items-table td {
+		height: 24px;
+		padding: 5px 6px;
+		border: 1px solid #000;
+		vertical-align: middle;
+		font-size: 12.5px;
+		page-break-inside: avoid;
+	}
+
+	.idx-cell,
+	.center {
+		text-align: center;
+	}
+
+	.item-name {
+		font-weight: 700;
+	}
+
+	.item-code {
+		margin-top: 1px;
+		font-size: 10.5px;
+	}
+
+	.signature-table {
+		margin-top: 28px;
+		page-break-inside: avoid;
+	}
+
+	.signature-table td {
+		width: 33.33%;
+		padding: 0 12px;
+		text-align: left;
+		font-size: 13px;
+		vertical-align: bottom;
+	}
+
+	.signature-line {
+		margin-top: 34px;
+		border-top: 1px solid #000;
+		padding-top: 5px;
+		font-size: 15px;
+		font-weight: 700;
+	}
+</style>
+
+<div class="sheet">
+	<table class="meta-table">
+		<tbody>
+			<tr>
+				<td>{{ doc.name }}</td>
+				<td>{{ doc.get_formatted("transaction_date") }}</td>
+				<td>{{ frappe.utils.format_datetime(frappe.utils.now_datetime(), "dd-MM-yyyy HH:mm") }}</td>
+			</tr>
+		</tbody>
+	</table>
+
+	<table class="party-table">
+		<tr>
+			<td>
+				<div class="field-value">{{ doc.customer_name or doc.customer }}</div>
+			</td>
+		</tr>
+	</table>
+
+	<table class="items-table">
+		<colgroup>
+			<col class="idx">
+			<col class="item">
+			<col class="check">
+			<col class="qty">
+			<col class="uom">
+		</colgroup>
+		<thead>
+			<tr>
+				<th>№</th>
+				<th>Маҳсулот</th>
+				<th>✓</th>
+				<th>Сони</th>
+				<th>Ўлчов бирлиги</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for item in doc.items %}
+				<tr>
+					<td class="idx-cell">{{ loop.index }}</td>
+					<td>
+						<div class="item-name">{{ item.item_name or item.item_code }}</div>
+						{% if item.item_code and item.item_code != item.item_name %}
+							<div class="item-code">{{ item.item_code }}</div>
+						{% endif %}
+					</td>
+					<td class="center"></td>
+					<td class="center">{{ qty(item.qty) }}</td>
+					<td class="center">{{ item.uom or item.stock_uom or "" }}</td>
+				</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+
+	<table class="signature-table">
+		<tr>
+			<td><div class="signature-line">Складчи</div></td>
+			<td><div class="signature-line">Етказиб берувчи</div></td>
+			<td><div class="signature-line">Қабул қилувчи</div></td>
+		</tr>
+	</table>
+</div>

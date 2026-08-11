@@ -1,0 +1,231 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-04-07 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "posting_date",
+  "posting_time",
+  "set_posting_time",
+  "column_break_1",
+  "company",
+  "status",
+  "section_break_product",
+  "item_to_manufacture",
+  "item_name",
+  "column_break_2",
+  "bom_no",
+  "qty_to_manufacture",
+  "target_warehouse",
+  "section_break_items",
+  "items",
+  "section_break_remarks",
+  "remarks",
+  "amended_from",
+  "stock_entry"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "PE-.YYYY.-",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Sana",
+   "reqd": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "posting_time",
+   "fieldtype": "Time",
+   "label": "Vaqt",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "set_posting_time",
+   "fieldtype": "Check",
+   "label": "Sana va vaqtni tahrirlash"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Kompaniya",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Holat",
+   "options": "Draft\nSubmitted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_product",
+   "fieldtype": "Section Break",
+   "label": "Ishlab chiqarish"
+  },
+  {
+   "fieldname": "item_to_manufacture",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Mahsulot",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_to_manufacture.item_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Mahsulot nomi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bom_no",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "BOM",
+   "options": "BOM",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "qty_to_manufacture",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Ishlab chiqarish miqdori",
+   "reqd": 1
+  },
+  {
+   "fieldname": "target_warehouse",
+   "fieldtype": "Link",
+   "label": "Tayyor mahsulot ombori",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_items",
+   "fieldtype": "Section Break",
+   "label": "Xom ashyo va materiallar"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Materiallar",
+   "options": "Production Entry Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_remarks",
+   "fieldtype": "Section Break",
+   "label": "Qo'shimcha"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Production Entry",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "label": "Stock Entry",
+   "no_copy": 1,
+   "options": "Stock Entry",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [
+  {
+   "link_doctype": "Stock Entry",
+   "link_fieldname": "custom_production_entry"
+  }
+ ],
+ "modified": "2026-04-07 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Production Entry",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Manufacturing User",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

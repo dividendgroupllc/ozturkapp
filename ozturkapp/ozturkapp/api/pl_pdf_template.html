@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+	@page {
+		size: A4 {{ "landscape" if period_headers|length > 1 else "portrait" }};
+		margin: 10mm 10mm 14mm 10mm;
+
+		@bottom-center {
+			content: "Бет " counter(page) " / " counter(pages);
+			font-family: Calibri, Arial, sans-serif;
+			font-size: 8pt;
+			color: #666;
+		}
+	}
+
+	* { box-sizing: border-box; margin: 0; padding: 0; }
+
+	body {
+		font-family: Calibri, Arial, sans-serif;
+		font-size: 10pt;
+		color: #1a1a1a;
+		background: #fff;
+	}
+
+	/* ── Title bar ── */
+	.title-bar {
+		display: table;
+		width: 100%;
+		background: #1c1c1c;
+		color: #fff;
+		padding: 10px 14px;
+	}
+	.title-bar-left { display: table-cell; vertical-align: middle; }
+	.title-bar-right { display: table-cell; vertical-align: middle; text-align: right; }
+
+	.brand {
+		font-size: 12px;
+		font-weight: 800;
+		letter-spacing: 1.5px;
+		color: #d94a4a;
+	}
+	.report-title {
+		font-size: 15px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.3px;
+		margin-top: 2px;
+	}
+	.company-name {
+		font-size: 11.5px;
+		font-weight: 700;
+		color: #e6e6e6;
+	}
+	.meta-sub {
+		font-size: 8.5pt;
+		color: #b7b7b7;
+		margin-top: 2px;
+	}
+
+	/* ── Meta band (period) ── */
+	table.meta-table {
+		width: 100%;
+		border-collapse: collapse;
+		margin-bottom: 2px;
+	}
+	table.meta-table td {
+		background: #8a8a8a;
+		color: #fff;
+		padding: 5px 14px;
+		font-size: 9.5pt;
+		font-weight: 700;
+		border-top: 1px solid #fff;
+	}
+	table.meta-table td.meta-value {
+		text-align: right;
+	}
+
+	/* ── Table ── */
+	table.pl-table {
+		width: 100%;
+		border-collapse: collapse;
+		margin-top: 10px;
+		table-layout: fixed;
+	}
+
+	table.pl-table thead tr { background: #1c1c1c; }
+	table.pl-table th {
+		padding: 6px 8px;
+		text-align: right;
+		font-size: {{ layout.font_size }}pt;
+		font-weight: 800;
+		color: #fff;
+		white-space: normal;
+		line-height: 1.2;
+	}
+	table.pl-table th.col-account { text-align: left; }
+
+	table.pl-table td {
+		padding: 4px 8px;
+		font-size: {{ layout.font_size }}pt;
+	}
+	table.pl-table td.col-account { white-space: normal; }
+	table.pl-table td.num { text-align: right; white-space: nowrap; }
+
+	tr.row-blank td { padding: 3px 0; }
+
+	/* Leaf line items — zebra striping */
+	tr.row-leaf td { background: #ffffff; }
+	tr.row-leaf.row-odd td { background: #f2f2f2; }
+
+	/* Mid-level group header — warm cream band */
+	tr.row-subheader td {
+		background: #f4d9a0;
+		font-weight: 700;
+		padding-top: 5px;
+		padding-bottom: 5px;
+	}
+
+	/* Section subtotal ("Итого ...") — bold, plain, ruled */
+	tr.row-subtotal td {
+		background: #ffffff;
+		font-weight: 800;
+		border-top: 1px solid #1c1c1c;
+		border-bottom: 1px solid #1c1c1c;
+	}
+
+	/* Headline metric (root category / net profit) — solid brand-red band */
+	tr.row-headline td {
+		background: #c22030;
+		color: #fff;
+		font-weight: 800;
+		padding-top: 6px;
+		padding-bottom: 6px;
+	}
+	tr.row-headline.row-negative td.num { color: #ffd6d6; }
+
+	.footer-note {
+		margin-top: 16px;
+		font-size: 8pt;
+		color: #777;
+	}
+</style>
+</head>
+<body>
+
+<div class="title-bar">
+	<div class="title-bar-left">
+		<div class="brand">O'ZTURK</div>
+		<div class="report-title">Отчет о прибылях и убытках</div>
+	</div>
+	<div class="title-bar-right">
+		<div class="company-name">{{ company }}</div>
+		<div class="meta-sub">Валюта: {{ currency }} &nbsp;·&nbsp; Печать: {{ print_datetime }}</div>
+	</div>
+</div>
+
+<table class="meta-table">
+	<tr>
+		<td>Период</td>
+		<td class="meta-value">{{ period_label }}</td>
+	</tr>
+</table>
+
+<table class="pl-table">
+	<colgroup>
+		<col style="width: {{ layout.account_width }}%">
+		{% for h in period_headers %}
+		<col style="width: {{ layout.period_width }}%">
+		{% endfor %}
+		{% if show_total_column %}
+		<col style="width: {{ layout.period_width }}%">
+		{% endif %}
+	</colgroup>
+	<thead>
+		<tr>
+			<th class="col-account">Статья</th>
+			{% for h in period_headers %}
+			<th>{{ h }}</th>
+			{% endfor %}
+			{% if show_total_column %}
+			<th>Итого</th>
+			{% endif %}
+		</tr>
+	</thead>
+	<tbody>
+		{% for row in rows %}
+		{% if row.blank %}
+		<tr class="row-blank"><td colspan="{{ 1 + period_headers|length + (1 if show_total_column else 0) }}"></td></tr>
+		{% else %}
+		<tr class="row-{{ row.style }} {{ 'row-odd' if row.zebra_odd else '' }} {{ 'row-negative' if row.negative else '' }}">
+			<td class="col-account" style="padding-left: {{ 8 + row.indent|int * 16 }}px;">{{ row.label }}</td>
+			{% for v in row.period_values %}
+			<td class="num">{{ v }}</td>
+			{% endfor %}
+			{% if show_total_column %}
+			<td class="num">{{ row.total }}</td>
+			{% endif %}
+		</tr>
+		{% endif %}
+		{% endfor %}
+	</tbody>
+</table>
+
+<div class="footer-note">Ушбу ҳужжат Ozturkapp орқали автоматик яратилди.</div>
+
+</body>
+</html>
