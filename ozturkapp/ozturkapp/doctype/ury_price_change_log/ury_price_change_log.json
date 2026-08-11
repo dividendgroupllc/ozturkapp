@@ -1,0 +1,242 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-03 12:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item",
+  "entry_type",
+  "posting_date",
+  "reason",
+  "applied",
+  "column_break_head",
+  "branch",
+  "menu",
+  "run",
+  "user",
+  "section_price",
+  "old_rate",
+  "new_rate",
+  "base_rate",
+  "cost_rate",
+  "column_break_price",
+  "old_shadow",
+  "new_shadow",
+  "min_rate",
+  "max_rate",
+  "grid",
+  "section_demand",
+  "demand_score",
+  "qty_recent",
+  "qty_base"
+ ],
+ "fields": [
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item",
+   "options": "Item",
+   "read_only": 1
+  },
+  {
+   "default": "change",
+   "fieldname": "entry_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Entry Type",
+   "options": "change\nsnapshot\nrebaseline\nrevert",
+   "read_only": 1
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Posting Date",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Reason",
+   "options": "\ndemand_up\ndemand_down\nreversion\ncost_floor\nband_clamp\nhold\nrebaseline\nmanual\nrevert\nsnapshot\ninvalid_rate\nlow_price\ngrace_period\nlocked\nexcluded",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "applied",
+   "fieldtype": "Check",
+   "label": "Applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Branch",
+   "options": "Branch",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "menu",
+   "fieldtype": "Link",
+   "label": "Menu",
+   "options": "URY Menu",
+   "read_only": 1
+  },
+  {
+   "fieldname": "run",
+   "fieldtype": "Link",
+   "label": "Run",
+   "options": "URY Price Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Data",
+   "label": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_price",
+   "fieldtype": "Section Break",
+   "label": "Price"
+  },
+  {
+   "fieldname": "old_rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Old Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "New Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_rate",
+   "fieldtype": "Currency",
+   "label": "Base Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_rate",
+   "fieldtype": "Currency",
+   "label": "Cost Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_price",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "old_shadow",
+   "fieldtype": "Float",
+   "label": "Old Shadow",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_shadow",
+   "fieldtype": "Float",
+   "label": "New Shadow",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "min_rate",
+   "fieldtype": "Currency",
+   "label": "Min Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "max_rate",
+   "fieldtype": "Currency",
+   "label": "Max Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "grid",
+   "fieldtype": "Int",
+   "label": "Rounding Grid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_demand",
+   "fieldtype": "Section Break",
+   "label": "Demand"
+  },
+  {
+   "fieldname": "demand_score",
+   "fieldtype": "Float",
+   "label": "Demand Score",
+   "precision": "4",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty_recent",
+   "fieldtype": "Float",
+   "label": "Qty (recent window)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qty_base",
+   "fieldtype": "Float",
+   "label": "Qty (baseline window)",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "URY Price Change Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "URY Manager",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

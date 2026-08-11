@@ -4,9 +4,9 @@
 
 """URY «desktop POS» (/urypos) talab qiladigan Custom Field'lar.
 
-Bu maydonlar URY app kodida ishlatiladi (ury/ury_pos/desktop_pos.py va h.k.),
-lekin URY app'ning o'zida fixture sifatida YO'Q — jazira.local bazasida qo'lda
-yaratilgan edi. Ularsiz POS yuklanmaydi:
+Bu maydonlar Desktop POS server kodida ishlatiladi
+(`ozturkapp/api/desktop_pos.py`), lekin upstream URY app'da YO'Q —
+jazira.local bazasida qo'lda yaratilgan edi. Ularsiz POS yuklanmaydi:
 
     OperationalError: Unknown column 'custom_quick_items' in 'SELECT'
 
@@ -16,11 +16,10 @@ avtomatik yaratiladi (idempotent).
     bench --site ozturk.local execute \
         ozturkapp.ozturkapp.setup.ury_custom_fields.create_fields
 
-Eslatma: `Branch` va `URY Menu Item` dagi dinamik narxlash maydonlarini URY
-app'ning o'zi ham `fixtures` + `v2_0/add_dynamic_pricing_fields` patch'i orqali
-yaratadi. Ta'riflar bir xil — bu yerdagilar zaxira nusxa (URY patch'i ishlamay
-qolsa POS baribir yuklanadi). `create_custom_fields` idempotent, dublikat
-yaratmaydi.
+MUHIM: `Branch` va `URY Menu Item` dagi dinamik narxlash maydonlari ham shu
+yerda — ular ilgari `ury` app'ining fixture/patch'ida edi, lekin `ury` toza
+upstream holatiga qaytarilgandan keyin bu fayl ularning YAGONA manbai bo'lib
+qoldi. O'chirmang.
 """
 
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
@@ -39,7 +38,7 @@ URY_CUSTOM_FIELDS = {
             "label": "Dynamic Pricing Settings (JSON)",
             "fieldtype": "Long Text",
             "insert_after": "custom_dynamic_pricing_section",
-            "description": "Bo'sh bo'lsa standart qiymatlar ishlatiladi. `ury.ury_pos.dynamic_pricing.DEFAULTS` ga qarang.",
+            "description": "Bo'sh bo'lsa standart qiymatlar ishlatiladi. `ozturkapp.ozturkapp.api.dynamic_pricing.DEFAULTS` ga qarang.",
         },
         {
             "fieldname": "custom_pricing_version",
@@ -181,7 +180,7 @@ URY_CUSTOM_FIELDS = {
             "insert_after": "custom_order_number_type",
         },
         # ── Mijoz cheki printeri ────────────────────────────────────────────
-        # `ury.ury_pos.desktop_pos.get_printer_config` aynan shu 4 maydonni
+        # `ozturkapp.ozturkapp.api.desktop_pos.get_printer_config` aynan shu 4 maydonni
         # o'qiydi. `customer_qz_printer_name` bo'sh bo'lsa `print_enabled=False`
         # qaytadi — ya'ni POS mijoz chekini umuman chiqarmaydi.
         {

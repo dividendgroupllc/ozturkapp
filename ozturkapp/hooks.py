@@ -31,16 +31,94 @@ doc_events = {
 }
 
 # =============================================================================
+# SCHEDULER — dinamik narxlash
+# =============================================================================
+scheduler_events = {
+	"cron": {
+		# Har 5 daqiqada tekshiriladi, lekin qaysi filial haqiqatan
+		# hisoblanishi `interval_minutes` va sikl kaliti bilan belgilanadi —
+		# bu yerdagi qadam faqat aniqlik chegarasi.
+		"*/5 * * * *": [
+			"ozturkapp.ozturkapp.api.dynamic_pricing.run_due_branches"
+		],
+		"0 3 * * *": [
+			"ozturkapp.ozturkapp.api.dynamic_pricing.prune_price_logs"
+		],
+	}
+}
+
+# =============================================================================
 # WHITELISTED METHOD OVERRIDES
 # =============================================================================
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ Desktop POS server API'si `ozturkapp/api/desktop_pos.py` da turadi, lekin │
+# │ POS mijozi uni `ury.ury_pos.api.<metod>` yo'li bilan chaqiradi.          │
+# │                                                                          │
+# │ Bu ishlaydi, chunki `frappe/handler.py:67` da override satri             │
+# │ `get_attr` (75-qator) dan OLDIN qo'llanadi — ya'ni upstream `ury` da     │
+# │ MAVJUD BO'LMAGAN nomni ham yo'naltirish mumkin.                          │
+# │                                                                          │
+# │ Sabab: `ury` upstream repo (ury-erp/ury), unga push qila olmaymiz.       │
+# │ Kod shu app'da tursa — `ury` toza qoladi, yangilanishlari muammosiz      │
+# │ tortiladi, POS mijozini qayta yig'ish esa shart emas.                    │
+# │                                                                          │
+# │ ⚠️  Yangi metod qo'shsangiz — quyidagi ro'yxatga ham qo'shing.            │
+# │ ⚠️  Deploy'dan keyin `bench clear-cache` MAJBURIY (hook'lar keshda).      │
+# └───────────────────────────────────────────────────────────────────────────┘
+DESKTOP_POS_METHODS = [
+	# Kassa smenasi
+	"checkPosOpening",
+	"createPosOpening",
+	"getPosClosingData",
+	"createPosClosing",
+	# Kutilayotgan buyurtmalar
+	"getPendingOrders",
+	"getPendingOrderCounts",
+	"getPendingOrderDetail",
+	"cancelPendingOrder",
+	# Stol / xona
+	"getTables",
+	"getRoomsForBranch",
+	"freeTable",
+	"cleanupOrphanTables",
+	# Sozlamalar
+	"get_pos_cashiers",
+	"get_printer_config",
+	"save_pos_quick_items",
+	# Menyu tartibi
+	"saveMenuCourseOrder",
+	"saveMenuItemOrder",
+	# Profil — upstream `getPosProfile` ustiga qo'shimcha maydonlar qo'shadi
+	"getPosProfile",
+	# Dinamik narxlash
+	"getPricingVersion",
+	"getPricingSnapshot",
+	"getPricingSettings",
+	"getPriceHistory",
+	"getPricingAlerts",
+	"verifyCartPrices",
+	"recalcPricing",
+	"savePricingSettings",
+	"setBasePrices",
+	"setItemPriceLock",
+	"revertPricingToBase",
+	"seedPricingDemo",
+	"simulatePricing",
+]
+
+override_whitelisted_methods = {
+	f"ury.ury_pos.api.{_m}": f"ozturkapp.ozturkapp.api.desktop_pos.{_m}"
+	for _m in DESKTOP_POS_METHODS
+}
+
 # Upstream `sync_order` Desktop POS yuboradigan `ticket_number`,
 # `active_cashier`, `active_cashier_role`, `client_ref` kwarg'larini jimgina
 # tashlab yuboradi (funksiya signaturasida yo'q). O'ram ularni POS Invoice'ga
 # yozadi va `client_ref` bo'yicha dublikat chekni to'sadi.
 # Qarang: overrides/ury_order.py
-override_whitelisted_methods = {
-	"ury.ury.doctype.ury_order.ury_order.sync_order": "ozturkapp.ozturkapp.overrides.ury_order.sync_order",
-}
+override_whitelisted_methods[
+	"ury.ury.doctype.ury_order.ury_order.sync_order"
+] = "ozturkapp.ozturkapp.overrides.ury_order.sync_order"
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [

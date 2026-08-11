@@ -1,0 +1,219 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "URY-PRUN-.YYYY.-.#####",
+ "creation": "2026-08-03 12:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "run_key",
+  "branch",
+  "menu",
+  "mode",
+  "column_break_head",
+  "started_at",
+  "finished_at",
+  "duration_ms",
+  "pricing_version",
+  "triggered_by",
+  "section_counts",
+  "evaluated",
+  "shadow_moved",
+  "price_changed",
+  "locked_count",
+  "column_break_counts",
+  "new_count",
+  "no_data_count",
+  "cost_violation_count",
+  "skipped_count",
+  "section_debug",
+  "settings_snapshot",
+  "error"
+ ],
+ "fields": [
+  {
+   "fieldname": "run_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Run Key",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Branch",
+   "options": "Branch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "menu",
+   "fieldtype": "Link",
+   "label": "Menu",
+   "options": "URY Menu",
+   "read_only": 1
+  },
+  {
+   "default": "dry",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Mode",
+   "options": "dry\nlive\nmanual\nrevert\nseed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "duration_ms",
+   "fieldtype": "Int",
+   "label": "Duration (ms)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pricing_version",
+   "fieldtype": "Int",
+   "label": "Pricing Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "triggered_by",
+   "fieldtype": "Data",
+   "label": "Triggered By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_counts",
+   "fieldtype": "Section Break",
+   "label": "Counts"
+  },
+  {
+   "fieldname": "evaluated",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Evaluated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shadow_moved",
+   "fieldtype": "Int",
+   "label": "Shadow Moved",
+   "read_only": 1
+  },
+  {
+   "fieldname": "price_changed",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Price Changed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "locked_count",
+   "fieldtype": "Int",
+   "label": "Locked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_counts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "new_count",
+   "fieldtype": "Int",
+   "label": "New Items",
+   "read_only": 1
+  },
+  {
+   "fieldname": "no_data_count",
+   "fieldtype": "Int",
+   "label": "No Sales Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_violation_count",
+   "fieldtype": "Int",
+   "label": "Cost Violations",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skipped_count",
+   "fieldtype": "Int",
+   "label": "Skipped (low price)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_debug",
+   "fieldtype": "Section Break",
+   "label": "Diagnostics"
+  },
+  {
+   "description": "Sikl paytidagi sozlamalar nusxasi — har qanday tarixiy hisoblashni qayta tiklash uchun.",
+   "fieldname": "settings_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Settings Snapshot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Long Text",
+   "label": "Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "URY Price Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "URY Manager",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
