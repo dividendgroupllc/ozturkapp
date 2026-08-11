@@ -1,0 +1,36 @@
+# ozturkapp deploy webhook xizmati
+#
+# O'rnatish (root nomidan):
+#   cp deploy/ozturkapp-webhook.service /etc/systemd/system/
+#   # User/WorkingDirectory qiymatlarini serveringizga moslang
+#   systemctl daemon-reload
+#   systemctl enable --now ozturkapp-webhook
+#
+# Jurnalni ko'rish:  journalctl -u ozturkapp-webhook -f
+
+[Unit]
+Description=ozturkapp GitHub deploy webhook
+After=network.target
+
+[Service]
+Type=simple
+
+# Bench egasi bo'lgan foydalanuvchi (odatda "frappe")
+User=frappe
+Group=frappe
+
+WorkingDirectory=/home/frappe/frappe-bench/apps/ozturkapp
+Environment=DEPLOY_CONFIG=/home/frappe/frappe-bench/apps/ozturkapp/deploy/deploy.env
+Environment=PATH=/home/frappe/frappe-bench/env/bin:/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/usr/bin/python3 /home/frappe/frappe-bench/apps/ozturkapp/deploy/webhook_server.py
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ozturkapp-webhook
+
+[Install]
+WantedBy=multi-user.target

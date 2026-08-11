@@ -5,3 +5,5 @@
 tags
 node_modules
 __pycache__
+# deploy sozlamalari (serverga xos, git ga tushmaydi)
+deploy/deploy.env
