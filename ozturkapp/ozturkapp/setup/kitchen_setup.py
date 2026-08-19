@@ -31,6 +31,12 @@ Ishga tushirish::
 
     bench --site ozturk.local execute \
         ozturkapp.ozturkapp.setup.kitchen_setup.setup
+
+    # Oshxona/bar marshruti — KOT yaratilishi uchun MAJBURIY.
+    # `after_migrate` da ATAYLAB yo'q: bu ma'lumot sozlamasi, har
+    # migratsiyada qayta yozilmasligi kerak.
+    bench --site ozturk.local execute \
+        ozturkapp.ozturkapp.setup.kitchen_setup.create_production_units
 """
 
 import frappe
@@ -124,9 +130,40 @@ def setup():
     frappe.db.commit()
 
 
+#: `URY Production Unit` uchun — "o'zi olib boriladi" bayrog'i.
+#:
+#: NEGA STANSIYA DARAJASIDA
+#: ========================
+#: Ichimlikni oshxona tayyorlamaydi: ofitsant barga borib oladi va
+#: mijozga eltadi. Ya'ni unga "Tayyorlanmoqda -> Tayyor" bosqichlari
+#: ma'nosiz — faqat "berildi" kerak.
+#:
+#: Bayroq TAOM darajasida emas, STANSIYA darajasida turadi: item guruhini
+#: bir joyda (stansiya sozlamasida) belgilash yetarli, har bir taomga
+#: alohida tegish shart emas. Yangi ichimlik qo'shilsa u avtomatik shu
+#: qoidaga tushadi.
+SELF_SERVICE_FIELD = {
+    "URY Production Unit": [
+        {
+            "fieldname": "custom_self_service",
+            "label": "O'zi olib boriladi (bar)",
+            "fieldtype": "Check",
+            "default": "0",
+            "insert_after": "warehouse",
+            "description": (
+                "Belgilansa: bu nuqta OSHXONA EKRANIDA KO'RINMAYDI. "
+                "Mahsulotni ofitsant mobil ilovadan «Berildi» deb belgilaydi "
+                "(Kutilmoqda -> Berildi, oraliq bosqichlarsiz)."
+            ),
+        }
+    ]
+}
+
+
 def create_fields():
     create_custom_fields(KITCHEN_FIELDS, ignore_validate=True)
-    print("✅ Oshxona custom fieldlari tayyor (URY KOT Items)")
+    create_custom_fields(SELF_SERVICE_FIELD, ignore_validate=True)
+    print("✅ Oshxona custom fieldlari tayyor (URY KOT Items, URY Production Unit)")
 
 
 def create_role():
@@ -180,3 +217,148 @@ def create_permissions():
     frappe.clear_cache()
     print(f"✅ Oshxona ruxsatlari tayyor ({granted} ta yangi)")
     return granted
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  URY Production Unit — oshxona/bar marshruti
+# ═══════════════════════════════════════════════════════════════════
+#
+# NEGA BU KERAK
+# =============
+# `URY Production Unit` bo'lmasa KOT UMUMAN yaratilmaydi. URY buni
+# `ury/ury/api/ury_kot_generate.py:183` da to'xtatadi:
+#
+#     Create URY Production unit against POS Profile: <profil>
+#
+# Xato esa `ury_order.py:950` da `frappe.log_error()` bilan YUTIB
+# YUBORILADI — buyurtma muvaffaqiyatli yaratilgandek ko'rinadi, lekin
+# oshxona ekraniga hech narsa tushmaydi. Nosozlik faqat Error Log'da
+# ko'rinadi, shuning uchun uni sezish qiyin.
+#
+# `pos_setup.py` da ham shunday funksiya bor, lekin u QATTIQ YOZILGAN
+# filial/profil nomlariga tayanadi va butun demo-sozlashning bir qismi.
+# Bu yerdagi variant esa saytdagi HAQIQIY ma'lumotdan kelib chiqadi,
+# shuning uchun istalgan filialda ishlaydi.
+
+#: Ichimlik guruhini nomi bo'yicha aniqlash — qolgani oshxonaga ketadi.
+#: Qisqa so'zlar (bar) FAQAT to'liq moslikda — aks holda "Barbecue" ham
+#: barga tushib ketardi.
+_DRINK_HINTS = ("напит", "drink", "beverage", "ichimlik", "coffee", "чай", "кофе")
+_DRINK_EXACT = ("bar", "бар")
+
+BAR_UNIT = "Bar"
+KITCHEN_UNIT = "Oshxona"
+
+
+def _menu_item_groups(pos_profile: str) -> list:
+    """Faol menyudagi taomlarning Item Group'lari."""
+    restaurant = frappe.db.get_value("POS Profile", pos_profile, "restaurant")
+    menu = frappe.db.get_value("URY Restaurant", restaurant, "active_menu") if restaurant else None
+    if not menu:
+        return []
+
+    groups = frappe.db.sql(
+        """
+        SELECT DISTINCT i.item_group
+        FROM `tabURY Menu Item` m
+        INNER JOIN `tabItem` i ON i.name = m.item
+        WHERE m.parent = %s AND IFNULL(m.disabled, 0) = 0
+        """,
+        menu,
+        pluck=True,
+    )
+    return [g for g in groups if g]
+
+
+def _is_drink(item_group: str) -> bool:
+    low = (item_group or "").strip().lower()
+    return low in _DRINK_EXACT or any(hint in low for hint in _DRINK_HINTS)
+
+
+def create_production_units(pos_profile: str = None):
+    """Oshxona va bar nuqtalarini yaratadi (idempotent).
+
+    Guruhlar faol menyudan olinadi: ichimliklar `Bar` ga, qolgan hamma
+    narsa `Oshxona` ga yo'naltiriladi.
+
+    Args:
+        pos_profile: POS Profile nomi. Berilmasa — saytdagi yagonasi.
+    """
+    if not pos_profile:
+        profiles = frappe.get_all("POS Profile", pluck="name")
+        if len(profiles) != 1:
+            frappe.throw(
+                "Saytda {0} ta POS Profile bor — qaysi biri ekanini ko'rsating.".format(
+                    len(profiles)
+                )
+            )
+        pos_profile = profiles[0]
+
+    profile = frappe.db.get_value(
+        "POS Profile", pos_profile, ["branch", "warehouse"], as_dict=True
+    )
+    if not profile:
+        frappe.throw("POS Profile topilmadi: {0}".format(pos_profile))
+
+    groups = _menu_item_groups(pos_profile)
+    if not groups:
+        print("⏭️  Faol menyu yoki undagi taomlar topilmadi — nuqta yaratilmadi")
+        return 0
+
+    plan = {
+        KITCHEN_UNIT: [g for g in groups if not _is_drink(g)],
+        BAR_UNIT: [g for g in groups if _is_drink(g)],
+    }
+
+    touched = 0
+    for unit_name, unit_groups in plan.items():
+        if not unit_groups:
+            print(f"⏭️  {unit_name}: mos guruh yo'q")
+            continue
+
+        existing = frappe.db.get_value(
+            "URY Production Unit",
+            {"production": unit_name, "pos_profile": pos_profile},
+            "name",
+        )
+
+        if existing:
+            doc = frappe.get_doc("URY Production Unit", existing)
+            have = {r.item_group for r in doc.item_groups}
+            added = [g for g in unit_groups if g not in have]
+            for g in added:
+                doc.append("item_groups", {"item_group": g})
+            if added:
+                doc.save(ignore_permissions=True)
+                print(f"✅ {unit_name}: {len(added)} ta guruh qo'shildi")
+            else:
+                print(f"⏭️  {unit_name}: allaqachon to'g'ri")
+            touched += 1
+            continue
+
+        doc = frappe.new_doc("URY Production Unit")
+        doc.production = unit_name
+        doc.pos_profile = pos_profile
+        doc.branch = profile.branch
+        doc.warehouse = profile.warehouse
+        for g in unit_groups:
+            doc.append("item_groups", {"item_group": g})
+        doc.insert(ignore_permissions=True)
+        touched += 1
+        print(f"✅ {unit_name} yaratildi ({len(unit_groups)} ta guruh)")
+
+    frappe.db.commit()
+
+    # Printer ALOHIDA masala — u real qurilma nomiga bog'liq va Desk'dan
+    # biriktiriladi. Printersiz KOT yaratiladi (oshxona ekrani ishlaydi),
+    # faqat qog'oz chek chiqmaydi.
+    no_printer = []
+    for name in frappe.get_all(
+        "URY Production Unit", filters={"pos_profile": pos_profile}, pluck="name"
+    ):
+        if not frappe.db.count("URY Printer Settings", {"parent": name}):
+            no_printer.append(name)
+    if no_printer:
+        print(f"ℹ️  Printer biriktirilmagan: {', '.join(no_printer)} (KOT baribir yaratiladi)")
+
+    return touched

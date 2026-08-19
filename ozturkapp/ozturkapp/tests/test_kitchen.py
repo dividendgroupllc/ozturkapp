@@ -315,3 +315,120 @@ class TestKitchenPermissionGate(FrappeTestCase):
 
         frappe.set_user("Administrator")
         require_kitchen()  # xato bermasligi kerak
+
+
+class TestProductionUnitSetup(FrappeTestCase):
+    """`URY Production Unit` bo'lmasa KOT UMUMAN yaratilmaydi.
+
+    URY xatoni `frappe.log_error()` bilan yutib yuboradi
+    (`ury_order.py:950`) — buyurtma yaratilgandek ko'rinadi, lekin
+    oshxonaga tushmaydi. Shuning uchun sozlash alohida tekshiriladi.
+    """
+
+    def test_drink_groups_go_to_bar(self):
+        from ozturkapp.ozturkapp.setup import kitchen_setup as kset
+
+        for group in ("Напитки", "Drinks", "Ichimliklar", "Бар", "bar"):
+            with self.subTest(group=group):
+                self.assertTrue(kset._is_drink(group))
+
+    def test_food_groups_stay_in_kitchen(self):
+        from ozturkapp.ozturkapp.setup import kitchen_setup as kset
+
+        # "Barbecue" ichida "bar" bor — qisqa so'z FAQAT to'liq moslikda
+        # tekshirilishi kerak, aks holda taom barga ketardi.
+        for group in ("Barbecue", "Супы", "Хлеб", "Кебаб и Мясные блюда"):
+            with self.subTest(group=group):
+                self.assertFalse(kset._is_drink(group))
+
+    def test_setup_is_idempotent(self):
+        """Qayta ishga tushirish dublikat nuqta yaratmaydi."""
+        from ozturkapp.ozturkapp.setup import kitchen_setup as kset
+
+        profiles = frappe.get_all("POS Profile", pluck="name")
+        if len(profiles) != 1:
+            self.skipTest("Saytda bitta POS Profile bo'lishi kerak")
+
+        before = frappe.db.count("URY Production Unit", {"pos_profile": profiles[0]})
+        kset.create_production_units(profiles[0])
+        after = frappe.db.count("URY Production Unit", {"pos_profile": profiles[0]})
+        self.assertEqual(before, after)
+
+
+class TestSelfServiceStation(FrappeTestCase):
+    """Bar (o'zi olib boriladi) — soddalashtirilgan ikki bosqichli oqim.
+
+    Ichimlikni oshxona tayyorlamaydi: ofitsant barga borib oladi va
+    mijozga eltadi. "Tayyorlanmoqda -> Tayyor" bosqichlari real hayotda
+    hech qachon bosilmaydi, shuning uchun mahsulot abadiy "Kutilmoqda" da
+    osilib qolardi.
+    """
+
+    def test_two_step_flow(self):
+        from ozturkapp.ozturkapp.utils import kitchen_status as k
+
+        k.assert_transition(k.PENDING, k.SERVED, self_service=True)  # ruxsat
+        with self.assertRaises(k.InvalidTransition):
+            k.assert_transition(k.PENDING, k.PREPARING, self_service=True)
+
+    def test_kitchen_flow_is_unchanged(self):
+        """Oshxona oqimiga TEGILMAGAN — u hamon to'rt bosqichli."""
+        from ozturkapp.ozturkapp.utils import kitchen_status as k
+
+        k.assert_transition(k.PENDING, k.PREPARING)
+        with self.assertRaises(k.InvalidTransition):
+            k.assert_transition(k.PENDING, k.SERVED)
+
+    def test_waiter_cannot_deliver_kitchen_item(self):
+        """Ofitsant oshxona taomini «berildi» deb belgilay olmaydi."""
+        import inspect
+
+        from ozturkapp.ozturkapp.api import waiter
+
+        source = inspect.getsource(waiter.mark_delivered)
+        self.assertIn("self_service_stations", source)
+        self.assertIn("oshxona tayyorlaydi", source)
+
+    def test_self_service_station_hidden_from_kitchen(self):
+        """Bar KOT'lari oshxona ekranida ko'rinmaydi — stansiya tanlanmasa ham."""
+        import inspect
+
+        from ozturkapp.ozturkapp.api import kitchen
+
+        self.assertIn("self_service_stations", inspect.getsource(kitchen.get_kitchen_context))
+        self.assertIn("self_service_stations", inspect.getsource(kitchen.get_active_kots))
+
+    def test_missing_column_is_tolerated(self):
+        """Maydon yaratilmagan saytda ham yiqilmasligi kerak."""
+        from ozturkapp.ozturkapp.utils import kitchen_status as k
+
+        self.assertIsInstance(k.self_service_stations(), set)
+
+
+class TestRealtimeCarriesInvoice(FrappeTestCase):
+    """Mahsulot holati xabari CHEK NOMINI tashishi shart.
+
+    Ofitsant ilovasi ochiq buyurtmani aynan chek nomi bo'yicha yangilaydi.
+    Maydon bo'lmasa xabar yetib boradi, lekin ekran yangilanmaydi —
+    oshpaz holatni o'zgartirsa ham ofitsant eski holatni ko'rib turadi.
+    """
+
+    def test_emit_item_change_has_invoice(self):
+        import inspect
+
+        from ozturkapp.ozturkapp.utils import kitchen_realtime
+
+        sig = inspect.signature(kitchen_realtime.emit_item_change)
+        self.assertIn("invoice", sig.parameters)
+        self.assertIn('"invoice": invoice', inspect.getsource(kitchen_realtime.emit_item_change))
+
+    def test_all_callers_pass_invoice(self):
+        import inspect
+
+        from ozturkapp.ozturkapp.api import kitchen, waiter
+
+        for fn in (kitchen.update_kot_item_status, waiter.mark_delivered):
+            with self.subTest(fn=fn.__name__):
+                source = inspect.getsource(fn)
+                emit = source[source.index("emit_item_change") :]
+                self.assertIn("row.invoice", emit[:200])

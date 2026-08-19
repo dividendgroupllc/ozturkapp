@@ -262,6 +262,25 @@ ozturk.cashier.Screen = class CashierScreen {
 			});
 		});
 
+		// Oshxona taom holatini o'zgartirdi -> chek panelidagi "🍳 ..."
+		// ko'rsatkichi va buyurtmalar ro'yxatidagi teg.
+		//
+		// NEGA ALOHIDA KANAL KERAK
+		// ========================
+		// Oshpaz holatni `URY KOT Items` da o'zgartiradi, POS Invoice'ga
+		// TEGMAYDI. Ya'ni `on_pos_invoice_change` ishga tushmaydi va
+		// `ozturk_cashier_order` CHIQMAYDI. Bu kanalsiz kassa oshxona
+		// holatini qo'lda yangilanmaguncha eski holicha ko'rsatardi.
+		this.listen(events.kitchen_item, (data) => {
+			if (!this.isOurBranch(data)) return;
+			this.scheduleRefresh({
+				// Zal rejasida oshxona holati ko'rsatilmaydi — uni bezovta qilmaymiz.
+				floor: false,
+				orders: true,
+				panel: this.touchesSelection(data),
+			});
+		});
+
 		// URY va Desktop POS ning eski hodisalari qamrovni bildirmaydi —
 		// ular uchun to'liq yangilash qilamiz.
 		CashierScreen.LEGACY_EVENTS.forEach((event) => {

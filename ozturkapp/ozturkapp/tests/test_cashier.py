@@ -1310,3 +1310,39 @@ class TestClosingAtZero(FrappeTestCase):
         page = frappe.get_doc("Page", "restaurant-cashier")
         page.load_assets()
         self.assertIn("0 yozing", page.script)
+
+
+class TestCashierSeesKitchenUpdates(FrappeTestCase):
+    """Kassa oshxona holatini REALTIME ko'radi.
+
+    Oshpaz taom holatini `URY KOT Items` da o'zgartiradi va POS Invoice'ga
+    TEGMAYDI — ya'ni `on_pos_invoice_change` ishga tushmaydi va
+    `ozturk_cashier_order` chiqmaydi. Kassa esa chek panelida
+    "🍳 Tayyorlanmoqda (1/3)" ni ko'rsatadi.
+
+    Shu sababli kassa oshxona kanaliga ALOHIDA obuna bo'lishi shart —
+    aks holda ko'rsatkich qo'lda yangilanmaguncha qotib qoladi.
+    """
+
+    def test_context_exposes_kitchen_channel(self):
+        import inspect
+
+        from ozturkapp.ozturkapp.api import cashier as cashier_api
+
+        source = inspect.getsource(cashier_api.get_cashier_context)
+        self.assertIn('"kitchen_item": EVENT_ITEM', source)
+
+    def test_page_subscribes_to_kitchen_channel(self):
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+        self.assertIn("events.kitchen_item", page.script)
+
+    def test_event_carries_branch_and_invoice(self):
+        """Kassa filtrlari AYNAN shu ikki maydonga tayanadi."""
+        import inspect
+
+        from ozturkapp.ozturkapp.utils import kitchen_realtime
+
+        source = inspect.getsource(kitchen_realtime.emit_item_change)
+        self.assertIn('"branch": branch', source)   # isOurBranch()
+        self.assertIn('"invoice": invoice', source)  # touchesSelection()

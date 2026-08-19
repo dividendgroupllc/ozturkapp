@@ -54,10 +54,20 @@ def emit_kot_change(branch, kot, reason, production=None, invoice=None):
         frappe.publish_realtime(_ury_channel(branch, production), after_commit=True)
 
 
-def emit_item_change(branch, kot, kot_item, status, production=None):
+def emit_item_change(branch, kot, kot_item, status, production=None, invoice=None):
     """Mahsulot holati o'zgardi (TZ §13: KOT_ITEM_STATUS_CHANGED).
 
-    Iste'molchilar: oshxona ekranlari, Kassa, kelajakdagi Ofitsant ilovasi.
+    Iste'molchilar: oshxona ekranlari, Kassa, Ofitsant ilovasi.
+
+    `invoice` NEGA KERAK
+    ====================
+    Ofitsant ilovasi ochiq buyurtma ekranini AYNAN chek nomi bo'yicha
+    yangilaydi (`orderChanges` -> `invoice == _order.invoice`). Bu maydon
+    yuborilmasa xabar yetib boradi, lekin ilova uni qaysi chekka tegishli
+    ekanini bilmaydi va ekran YANGILANMAYDI — oshpaz holatni o'zgartirsa
+    ham ofitsant qo'lda yangilamaguncha eski holatni ko'rib turadi.
+
+    Aynan shu xato bo'lgan edi.
     """
     if not branch:
         return
@@ -70,6 +80,7 @@ def emit_item_change(branch, kot, kot_item, status, production=None):
             "kot_item": kot_item,
             "status": status,
             "station": production,
+            "invoice": invoice,
         },
         after_commit=True,
     )

@@ -62,12 +62,20 @@ def get_kitchen_context():
     require_kitchen()
     branch = cashier_permissions.resolve_branch()
 
-    stations = frappe.get_all(
-        "URY Production Unit",
-        filters={"branch": branch},
-        fields=["name", "production", "branch"],
-        order_by="name asc",
-    )
+    # "O'zi olib boriladi" nuqtalari (bar) oshxona ekranida UMUMAN
+    # ko'rinmaydi — ularni ofitsant mobil ilovadan yopadi. Ro'yxatdan ham
+    # olib tashlanadi, aks holda oshpaz uni tanlab, hech qachon
+    # tayyorlamaydigan ichimliklarni ko'rib turardi.
+    stations = [
+        st
+        for st in frappe.get_all(
+            "URY Production Unit",
+            filters={"branch": branch},
+            fields=["name", "production", "branch"],
+            order_by="name asc",
+        )
+        if st.name not in kitchen_status.self_service_stations()
+    ]
 
     return {
         "branch": branch,
@@ -104,6 +112,13 @@ def get_active_kots(station=None, include_served=0):
     }
     if station:
         filters["production"] = station
+    else:
+        # Stansiya tanlanmagan = "barcha stansiyalar". Bar KOT'lari bu
+        # yerga ham TUSHMASLIGI kerak, aks holda oshpaz standart ko'rinishda
+        # ichimliklarni ko'rardi.
+        hidden = kitchen_status.self_service_stations()
+        if hidden:
+            filters["production"] = ["not in", list(hidden)]
 
     kots = frappe.get_all(
         "URY KOT",
@@ -342,7 +357,10 @@ def update_kot_item_status(kot_item, status):
     target = (status or "").strip()
 
     # ── O'tish qoidasi (TZ §14 shu yerda kuchga kiradi) ───────────────
-    kitchen_status.assert_transition(current, target)
+    # Bar nuqtasida oqim ikki bosqichli (Kutilmoqda -> Berildi).
+    kitchen_status.assert_transition(
+        current, target, self_service=row.production in kitchen_status.self_service_stations()
+    )
 
     values = {
         "custom_kitchen_status": target,
@@ -363,7 +381,7 @@ def update_kot_item_status(kot_item, status):
 
     _sync_kot_order_status(row.parent)
 
-    emit_item_change(branch, row.parent, kot_item, target, row.production)
+    emit_item_change(branch, row.parent, kot_item, target, row.production, row.invoice)
     emit_kot_change(branch, row.parent, "KOT_ITEM_STATUS_CHANGED", row.production, row.invoice)
 
     return {

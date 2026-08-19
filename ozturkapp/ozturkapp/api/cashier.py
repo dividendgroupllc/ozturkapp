@@ -23,6 +23,7 @@ from frappe.utils import cint, flt
 
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
 from ozturkapp.ozturkapp.utils.cashier_realtime import EVENT_FLOOR, EVENT_ORDER
+from ozturkapp.ozturkapp.utils.kitchen_realtime import EVENT_ITEM
 from ozturkapp.ozturkapp.utils.table_status import STATUSES
 
 
@@ -72,7 +73,17 @@ def get_cashier_context():
             "is_supervisor": cashier_permissions.has_supervisor_role(),
         },
         "statuses": list(STATUSES),
-        "events": {"floor": EVENT_FLOOR, "order": EVENT_ORDER},
+        "events": {
+            "floor": EVENT_FLOOR,
+            "order": EVENT_ORDER,
+            # OSHXONA HOLATI
+            # ==============
+            # Oshpaz taom holatini o'zgartirganda POS Invoice'ga TEGILMAYDI,
+            # ya'ni `ozturk_cashier_order` chiqmaydi. Kassa esa chek
+            # panelida "🍳 Tayyorlanmoqda (1/3)" ni ko'rsatadi — bu maydon
+            # shu kanalsiz qo'lda yangilanmaguncha qotib qolardi.
+            "kitchen_item": EVENT_ITEM,
+        },
         "server_time": frappe.utils.now(),
         # Sozlash bo'shliqlarini kassir emas, menejer ko'rishi uchun.
         "warnings": _config_warnings(scope, restaurant, service_charge),

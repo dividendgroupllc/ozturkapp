@@ -236,6 +236,95 @@ def get_menu(room=None):
     }
 
 
+@frappe.whitelist()
+def mark_delivered(kot_item):
+    """Ichimlikni «yetkazib berildi» deb belgilaydi.
+
+    NEGA ALOHIDA ENDPOINT
+    =====================
+    Ichimlikni oshxona tayyorlamaydi: ofitsant barga borib oladi va
+    mijozga eltadi. Unga "Tayyorlanmoqda -> Tayyor" bosqichlari ma'nosiz,
+    shuning uchun oqim ikki bosqichli: Kutilmoqda -> Berildi.
+
+    Oshxona endpointi (`kitchen.update_kot_item_status`) ISHLATILMAYDI —
+    u `URY Kitchen` rolini talab qiladi va ofitsantda u yo'q. Ikkinchi
+    tomondan, ofitsantga oshxona mahsulotini yopishga ruxsat berib
+    bo'lmaydi: u faqat O'ZI olib boradigan nuqtaning mahsulotini yopadi.
+    Shu cheklov quyida serverda tekshiriladi.
+
+    Args:
+        kot_item: `URY KOT Items` qatorining `name` si
+            (`get_order()` javobidagi `kitchen.kot_item`).
+    """
+    require_waiter()
+    scope = cashier_permissions.resolve_scope()
+
+    row = frappe.db.sql(
+        """
+        SELECT ki.name, ki.parent, ki.custom_kitchen_status AS status,
+               k.branch, k.docstatus, k.production, k.invoice
+        FROM `tabURY KOT Items` ki
+        INNER JOIN `tabURY KOT` k ON k.name = ki.parent
+        WHERE ki.name = %s
+        FOR UPDATE
+        """,
+        (kot_item,),
+        as_dict=True,
+    )
+    if not row:
+        frappe.throw(_("Mahsulot topilmadi"), frappe.DoesNotExistError)
+    row = row[0]
+
+    if row.branch != scope.branch:
+        raise frappe.PermissionError(_("Bu mahsulot boshqa filialga tegishli"))
+
+    if cint(row.docstatus) != 1:
+        frappe.throw(_("KOT bekor qilingan yoki tasdiqlanmagan"))
+
+    # ENG MUHIM TEKSHIRUV: ofitsant faqat "o'zi olib boriladi" nuqtasining
+    # mahsulotini yopa oladi. Oshxona taomini u BERILDI deb belgilay
+    # olmasligi kerak — buni oshpaz qiladi.
+    if row.production not in kitchen_status.self_service_stations():
+        frappe.throw(
+            _(
+                "Bu mahsulotni oshxona tayyorlaydi — uni ofitsant «berildi» "
+                "deb belgilay olmaydi."
+            ),
+            title=_("Ruxsat yo'q"),
+        )
+
+    current = kitchen_status.normalize(row.status)
+    kitchen_status.assert_transition(current, kitchen_status.SERVED, self_service=True)
+
+    frappe.db.set_value(
+        "URY KOT Items",
+        kot_item,
+        {
+            "custom_kitchen_status": kitchen_status.SERVED,
+            "custom_served_at": frappe.utils.now_datetime(),
+            "custom_status_changed_by": frappe.session.user,
+        },
+        update_modified=False,
+    )
+
+    from ozturkapp.ozturkapp.utils.kitchen_realtime import emit_item_change, emit_kot_change
+
+    emit_item_change(
+        scope.branch, row.parent, kot_item, kitchen_status.SERVED,
+        row.production, row.invoice,
+    )
+    emit_kot_change(
+        scope.branch, row.parent, "KOT_ITEM_STATUS_CHANGED", row.production, row.invoice
+    )
+    emit_order_change(scope.branch, row.invoice, "ITEM_DELIVERED")
+
+    return {
+        "kot_item": kot_item,
+        "status": kitchen_status.SERVED,
+        "label": kitchen_status.label(kitchen_status.SERVED),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  4. Buyurtmani o'qish (TZ §7.5, §7.7)
 # ═══════════════════════════════════════════════════════════════════
