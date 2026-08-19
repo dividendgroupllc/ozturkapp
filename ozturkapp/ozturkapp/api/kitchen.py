@@ -22,7 +22,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime, time_diff_in_seconds
 
 from ozturkapp.ozturkapp.setup.kitchen_setup import KITCHEN_ROLE, KITCHEN_ROLES
-from ozturkapp.ozturkapp.utils import cashier_permissions, kitchen_status
+from ozturkapp.ozturkapp.utils import cashier_permissions, kitchen_status, notifications
 from ozturkapp.ozturkapp.utils.kitchen_realtime import emit_kot_change, emit_item_change
 
 #: Oshxonaga ovqat tayyorlash uchun keladigan KOT turlari.
@@ -86,7 +86,12 @@ def get_kitchen_context():
             {"key": s, "label": kitchen_status.label(s)}
             for s in kitchen_status.OPEN_STATUSES
         ],
-        "events": {"kot": "ozturk_kitchen_kot", "item": "ozturk_kitchen_item"},
+        "events": {
+            "kot": "ozturk_kitchen_kot",
+            "item": "ozturk_kitchen_item",
+            # Yangi buyurtma tushganda KO'RINADIGAN xabar.
+            "notify": notifications.EVENT_NOTIFY,
+        },
         "server_time": frappe.utils.now(),
     }
 
@@ -383,6 +388,26 @@ def update_kot_item_status(kot_item, status):
 
     emit_item_change(branch, row.parent, kot_item, target, row.production, row.invoice)
     emit_kot_change(branch, row.parent, "KOT_ITEM_STATUS_CHANGED", row.production, row.invoice)
+
+    # TAOM TAYYOR -> OFITSANTGA xabar.
+    # Faqat `Ready` da: "Tayyorlanmoqda" yoki "Berildi" ofitsantdan
+    # HECH NARSA talab qilmaydi, ularga xabar bersak — u shovqinga
+    # aylanadi va haqiqiy xabar ham e'tibordan qoladi.
+    if target == kitchen_status.READY:
+        item_row = frappe.db.get_value(
+            "URY KOT Items", kot_item, ["item", "item_name"], as_dict=True
+        )
+        invoice_row = frappe.db.get_value(
+            "POS Invoice", row.invoice, ["restaurant_table", "waiter"], as_dict=True
+        ) or frappe._dict()
+        notifications.item_ready(
+            branch,
+            row.invoice,
+            (item_row or {}).get("item_name") or (item_row or {}).get("item") or "",
+            invoice_row.get("restaurant_table"),
+            invoice_row.get("waiter"),
+            row.production,
+        )
 
     return {
         "kot_item": kot_item,

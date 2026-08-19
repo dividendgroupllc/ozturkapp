@@ -47,6 +47,7 @@ from ozturkapp.ozturkapp.utils import (
     cashier_billing,
     cashier_permissions,
     kitchen_status,
+    notifications,
     table_status,
 )
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change, emit_order_change
@@ -670,6 +671,12 @@ def request_bill(invoice):
         emit_floor_change(
             scope.branch, [row.restaurant_table], "BILL_REQUESTED", invoice
         )
+
+    # Kassirga KO'RINADIGAN xabar. Yuqoridagi hodisalar ekranni jim
+    # yangilaydi — kassir aynan o'sha stolga qarab turmasa sezmaydi.
+    notifications.bill_requested(
+        scope.branch, invoice, row.restaurant_table, frappe.session.user
+    )
 
     return {"invoice": invoice, "bill_requested": True}
 

@@ -105,6 +105,22 @@ def on_kot_submit(doc, method=None):
         doc.get("production"), doc.get("invoice"),
     )
 
+    # YANGI BUYURTMA -> OSHXONAGA xabar.
+    #
+    # Bildirishnoma AYNAN shu yerda, `waiter.submit_order()` da EMAS:
+    # KOT'ni Desktop POS ham, kassir ham, ofitsant ilovasi ham yaratadi.
+    # Manbaning har biriga alohida xabar yozsak, bittasi unutilardi va
+    # o'sha yo'l bilan kelgan buyurtma jimgina o'tib ketardi.
+    from ozturkapp.ozturkapp.utils import notifications
+
+    notifications.order_placed(
+        doc.get("branch"),
+        doc.get("invoice"),
+        doc.get("restaurant_table"),
+        len(doc.get("kot_items") or []),
+        doc.get("production"),
+    )
+
 
 def on_kot_cancel(doc, method=None):
     """KOT bekor qilinganda ekrandan olib tashlash uchun (TZ §31)."""

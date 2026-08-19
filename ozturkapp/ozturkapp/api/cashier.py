@@ -24,6 +24,7 @@ from frappe.utils import cint, flt
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
 from ozturkapp.ozturkapp.utils.cashier_realtime import EVENT_FLOOR, EVENT_ORDER
 from ozturkapp.ozturkapp.utils.kitchen_realtime import EVENT_ITEM
+from ozturkapp.ozturkapp.utils.notifications import EVENT_NOTIFY
 from ozturkapp.ozturkapp.utils.table_status import STATUSES
 
 
@@ -83,6 +84,8 @@ def get_cashier_context():
             # panelida "🍳 Tayyorlanmoqda (1/3)" ni ko'rsatadi — bu maydon
             # shu kanalsiz qo'lda yangilanmaguncha qotib qolardi.
             "kitchen_item": EVENT_ITEM,
+            # Ofitsant hisob so'raganda KO'RINADIGAN xabar.
+            "notify": EVENT_NOTIFY,
         },
         "server_time": frappe.utils.now(),
         # Sozlash bo'shliqlarini kassir emas, menejer ko'rishi uchun.

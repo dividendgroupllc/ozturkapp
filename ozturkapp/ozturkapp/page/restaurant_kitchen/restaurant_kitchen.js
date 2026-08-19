@@ -181,8 +181,56 @@ ozturk.kitchen.Screen = class KitchenScreen {
 			this.scheduleRefresh({ kot: data.kot });
 		});
 
+		// Yangi buyurtma -> OSHPAZGA ko'rinadigan xabar.
+		this.listen(events.notify, (data) => this.showNotification(data, "kitchen"));
+
 		this.updateLiveIndicator();
 		this.timers.push(setInterval(() => this.updateLiveIndicator(), 5000));
+	}
+
+	/**
+	 * KO'RINADIGAN bildirishnoma — banner + ovoz.
+	 *
+	 * NEGA JIM YANGILASH YETMAYDI
+	 * ===========================
+	 * Qolgan realtime hodisalari ekranni jim yangilaydi. Xodim aynan
+	 * o'sha joyga qarab turmasa o'zgarishni SEZMAYDI — hisob so'rovi ham,
+	 * yangi buyurtma ham e'tibordan chetda qolardi.
+	 *
+	 * Ovoz `try` ichida: brauzer foydalanuvchi sahifaga tegmaguncha
+	 * audio'ni bloklaydi, va bu holda banner baribir ko'rinishi kerak.
+	 */
+	showNotification(data, audience) {
+		if (!this.isOurBranch(data)) return;
+		if (!data || data.audience !== audience) return;
+
+		frappe.show_alert(
+			{
+				message: `<b>${esc(data.title || "")}</b><br>${esc(data.body || "")}`,
+				indicator: data.kind === "BILL_REQUESTED" ? "orange" : "green",
+			},
+			15
+		);
+		this.beep();
+	}
+
+	beep() {
+		try {
+			const Ctx = window.AudioContext || window.webkitAudioContext;
+			if (!Ctx) return;
+			this.audio = this.audio || new Ctx();
+			const osc = this.audio.createOscillator();
+			const gain = this.audio.createGain();
+			osc.connect(gain);
+			gain.connect(this.audio.destination);
+			osc.frequency.value = 880;
+			gain.gain.setValueAtTime(0.15, this.audio.currentTime);
+			gain.gain.exponentialRampToValueAtTime(0.001, this.audio.currentTime + 0.35);
+			osc.start();
+			osc.stop(this.audio.currentTime + 0.35);
+		} catch (e) {
+			// Ovoz ishlamasa ham banner ko'rinadi — to'xtatmaymiz.
+		}
 	}
 
 	listen(event, handler) {

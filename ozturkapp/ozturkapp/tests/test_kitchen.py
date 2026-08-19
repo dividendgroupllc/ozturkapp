@@ -432,3 +432,60 @@ class TestRealtimeCarriesInvoice(FrappeTestCase):
                 source = inspect.getsource(fn)
                 emit = source[source.index("emit_item_change") :]
                 self.assertIn("row.invoice", emit[:200])
+
+
+class TestStaffNotifications(FrappeTestCase):
+    """Uchta bildirishnoma oqimi.
+
+        Ofitsant hisob so'radi      -> KASSIR
+        Oshpaz taomni tayyor qildi  -> OFITSANT
+        Buyurtma oshxonaga tushdi   -> OSHPAZ
+    """
+
+    def test_ready_only_notifies_waiter(self):
+        """Faqat `Ready` xabar beradi.
+
+        `Preparing`/`Served` ofitsantdan hech narsa talab qilmaydi —
+        ularga ham xabar bersak, xabar shovqinga aylanadi.
+        """
+        import inspect
+
+        from ozturkapp.ozturkapp.api import kitchen
+
+        source = inspect.getsource(kitchen.update_kot_item_status)
+        self.assertIn("if target == kitchen_status.READY:", source)
+        self.assertIn("notifications.item_ready", source)
+
+    def test_new_order_notifies_from_kot_not_waiter_api(self):
+        """Xabar KOT yaratilganda chiqadi — buyurtma manbasidan qat'i nazar.
+
+        KOT'ni Desktop POS ham, kassir ham, ofitsant ilovasi ham yaratadi.
+        Har biriga alohida xabar yozilsa bittasi unutilardi.
+        """
+        import inspect
+
+        from ozturkapp.ozturkapp.utils import kitchen_realtime
+
+        self.assertIn(
+            "notifications.order_placed", inspect.getsource(kitchen_realtime.on_kot_submit)
+        )
+
+    def test_bill_request_notifies_cashier(self):
+        import inspect
+
+        from ozturkapp.ozturkapp.api import waiter
+
+        self.assertIn(
+            "notifications.bill_requested", inspect.getsource(waiter.request_bill)
+        )
+
+    def test_payload_carries_no_money(self):
+        """Xabar sayt xonasiga ketadi — summa/mijoz YUBORILMAYDI."""
+        import inspect
+
+        from ozturkapp.ozturkapp.utils import notifications
+
+        source = inspect.getsource(notifications)
+        for leak in ("grand_total", "amount", "customer", "paid_amount"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(f'"{leak}"', source)
