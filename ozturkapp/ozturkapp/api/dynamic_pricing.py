@@ -392,6 +392,19 @@ def _frappe():
     return frappe
 
 
+def _emit_menu_change(branch: str, reason: str = "PRICING_UPDATED"):
+    """Menyu o'zgardi signali — kech import (yuqoridagi sabab bilan).
+
+    Narx `frappe.db.set_value(..., update_modified=False)` bilan yoziladi,
+    ya'ni hech qanday hujjat hodisasi uyg'onmaydi. Ofitsant ilovasi menyuni
+    xotirada saqlagani uchun signal SHU YERDAN yuborilishi shart —
+    aks holda u eski narxni ko'rsatib turaveradi.
+    """
+    from ozturkapp.ozturkapp.utils.menu_realtime import emit_menu_change
+
+    emit_menu_change(branch, reason)
+
+
 def get_branch_settings(branch: str) -> dict:
     """Filial sozlamasi (`Branch.custom_dynamic_pricing`) + standart qiymatlar."""
     frappe = _frappe()
@@ -810,6 +823,10 @@ def run_for_branch(branch: str, mode: str = None, triggered_by: str = None,
             {"branch": branch, "pricing_version": version},
             after_commit=True,
         )
+        # Ofitsant ilovasi menyuni xotirada saqlaydi — narx o'zgargani
+        # haqida ALOHIDA xabar kerak (`pricing_updated` ni Desktop POS
+        # tinglaydi, ilova esa yagona "menyu o'zgardi" kanalini).
+        _emit_menu_change(branch)
 
     return {
         "status": "ok", "run": run.name, "mode": mode, "branch": branch, "menu": menu,
@@ -1006,6 +1023,7 @@ def revert_to_base(branch: str, triggered_by: str = None) -> dict:
     frappe.publish_realtime("pricing_updated",
                             {"branch": branch, "pricing_version": version},
                             after_commit=True)
+    _emit_menu_change(branch)
 
     return {"status": "ok", "run": run.name, "reverted": reverted,
             "pricing_version": version, "branch": branch}

@@ -24,16 +24,67 @@ after_migrate = [
 # =============================================================================
 doc_events = {
 	"POS Invoice": {
-		# To'lov qilinganda (submit) URY Table occupied flagini tozalash —
-		# counter-service modelda stiker raqamlari qayta ishlatilishi uchun
+		# ── Kassa oynasi uchun realtime signallari (TZ §13) ──────────────
+		# URY stol bandligini `frappe.db.set_value` bilan yozadi — u hech
+		# qanday hujjat hodisasini ishga tushirmaydi. Shuning uchun ASOSIY
+		# signal POS Invoice'ning o'zidan olinadi: ofitsant buyurtma
+		# yaratganda `sync_order()` -> `invoice.save()` shu hook'ni uyg'otadi.
+		"after_insert": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+		"on_update": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+		# To'lovdan keyin stol holatini YAKUNIY hal qiladi. `ury` dan keyin
+		# ishlaydi va uning shartsiz bo'shatishini to'g'rilaydi (TZ §23).
 		"on_submit": "ozturkapp.ozturkapp.overrides.pos_invoice.on_submit",
+	},
+	"URY Table": {
+		# Desk orqali qo'lda tahrirlash (layout, o'rindiqlar soni, ...).
+		"on_update": "ozturkapp.ozturkapp.utils.cashier_realtime.on_table_change",
+	},
+	"URY KOT": {
+		# Oshxona ekrani uchun realtime (TZ §12). URY'ning o'z
+		# `kotDisplayRealtime()` metodi faqat Mosaic kanaliga yuboradi —
+		# KOT yaratish/bekor qilish mantig'iga TEGILMAYDI.
+		"on_submit": "ozturkapp.ozturkapp.utils.kitchen_realtime.on_kot_submit",
+		"on_cancel": "ozturkapp.ozturkapp.utils.kitchen_realtime.on_kot_cancel",
+	},
+	# ── Kassa smenasi ──────────────────────────────────────────────
+	# Smenani UCH xil mijoz ochadi/yopadi: kassa sahifasi, Desktop POS va
+	# ERPNext Desk. Signal manbaning O'ZIGA osiladi — shunda qaysi yo'l
+	# bilan o'zgarishidan qat'i nazar ofitsant ilovasi xabardor bo'ladi.
+	"POS Opening Entry": {
+		"on_submit": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_opening_change",
+		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_opening_change",
+	},
+	"POS Closing Entry": {
+		"on_submit": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_closing_change",
+		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_closing_change",
+	},
+	# ── Menyu ──────────────────────────────────────────────────────
+	# Ofitsant ilovasi menyuni xotirada saqlaydi — o'zgarganda xabar
+	# bo'lmasa eski narxni ko'rsatib turaveradi (utils/menu_realtime.py).
+	"URY Menu": {
+		"on_update": "ozturkapp.ozturkapp.utils.menu_realtime.on_menu_change",
+	},
+	"BOM": {
+		# Taom tannarxi (`Item.valuation_rate`) retseptdan olinadi — POS
+		# smenani yopganda stok provodkasi shu maydondan narx oladi.
+		# Batafsil: utils/bom_valuation.py
+		"on_submit": "ozturkapp.ozturkapp.utils.bom_valuation.on_bom_change",
+		"on_update_after_submit": "ozturkapp.ozturkapp.utils.bom_valuation.on_bom_change",
+		"on_cancel": "ozturkapp.ozturkapp.utils.bom_valuation.on_bom_cancel",
 	},
 }
 
 # =============================================================================
-# SCHEDULER — dinamik narxlash
+# SCHEDULER — dinamik narxlash va tannarx
 # =============================================================================
 scheduler_events = {
+	# Xomashyo narxi o'zgarsa BOM tannarxi eskirib qoladi — hujjat hodisasi
+	# ishga tushmaydi, chunki `BOM.update_cost()` `db_update()` bilan yozadi.
+	# Shuning uchun kuniga bir marta majburan qayta hisoblanadi.
+	"daily": [
+		"ozturkapp.ozturkapp.utils.bom_valuation.sync_all",
+	],
 	"cron": {
 		# Har 5 daqiqada tekshiriladi, lekin qaysi filial haqiqatan
 		# hisoblanishi `interval_minutes` va sikl kaliti bilan belgilanadi —

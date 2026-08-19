@@ -1,0 +1,133 @@
+<!--
+	Kassa oynasi - statik karkas.
+
+	=========================================================================
+	DIQQAT: BU FAYLDA XOM APOSTROF (') ISHLATMANG - `&#39;` YOZING
+	=========================================================================
+	Frappe bu HTML ni JS satriga aylantiradi (frappe/build.py:420):
+
+	    frappe.templates["restaurant_cashier"] = ' ...shu fayl mazmuni... ';
+
+	Ya'ni mazmun BITTA TIRNOQ ichiga o'raladi. Frappe v15.100.0 da
+	`scrub_html_template()` apostrofni ekranlashi KERAK edi, lekin u yerdagi
+	kod aslida no-op:
+
+	    return content.replace("'", "'")     # <- eski qiymat = yangi qiymat
+
+	Natijada xom apostrof JS satrini erta yopadi va BUTUN SAHIFA SKRIPTI
+	`SyntaxError` bilan yiqiladi - ekranda hech nima ko'rinmaydi.
+
+	Shuning uchun matnda `&#39;` yoziladi: brauzer uni oddiy apostrof qilib
+	ko'rsatadi, JS satri esa but qoladi.
+
+	Bu qoidani `tests/test_cashier.py::TestPageAssets` tekshiradi.
+	(Bu izohning o'zi ham apostrofsiz yozilgan - izohlar odatda olib
+	tashlanadi, lekin unga tayanmaymiz.)
+	=========================================================================
+
+	Shablon HECH QANDAY ma&#39;lumot o'zgaruvchisini ishlatmaydi: barcha
+	dinamik qismlar `restaurant_cashier.js` da, escape qilingan holda
+	quriladi.
+-->
+<div class="rc-root" data-state="loading">
+
+	<!-- ══ Yuklanmoqda ═══════════════════════════════════════════ -->
+	<div class="rc-boot rc-boot--loading">
+		<div class="rc-spinner" aria-hidden="true"></div>
+		<p>Kassa yuklanmoqda…</p>
+	</div>
+
+	<!-- ══ Xato ══════════════════════════════════════════════════ -->
+	<div class="rc-boot rc-boot--error" role="alert">
+		<div class="rc-boot__icon">⚠</div>
+		<h2 class="rc-boot__title">Kassani ochib bo&#39;lmadi</h2>
+		<p class="rc-boot__message"></p>
+		<button class="rc-btn rc-btn--primary rc-retry" type="button">Qayta urinish</button>
+	</div>
+
+	<!-- ══ Kassa yopiq - bloklovchi ekran ════════════════════════ -->
+	<!--
+		Smena ochilmaguncha kassa oynasi KO'RSATILMAYDI: stol ham, buyurtma
+		ham chiqmaydi. Desktop POS dagi `PosOpeningPage` shu vazifani
+		bajaradi - u ham to'liq ekranli, o'tkazib yuborib bo'lmaydigan qadam.
+	-->
+	<div class="rc-boot rc-gate">
+		<div class="rc-boot__icon">🔒</div>
+		<h2 class="rc-boot__title">Kassa yopiq</h2>
+		<p class="rc-boot__message">
+			Sotuvni boshlash uchun kassadagi naqd pulni sanang va quyida kiriting.
+		</p>
+		<div class="rc-gate__form"></div>
+	</div>
+
+	<!-- ══ Asosiy ekran ══════════════════════════════════════════ -->
+	<div class="rc-app">
+
+		<!-- ── Yuqori panel ─────────────────────────────────────── -->
+		<header class="rc-topbar">
+			<div class="rc-topbar__identity">
+				<div class="rc-restaurant"></div>
+				<div class="rc-branch"></div>
+			</div>
+
+			<nav class="rc-rooms" aria-label="Zallar"></nav>
+
+			<div class="rc-topbar__session">
+				<div class="rc-shift" title="Kassa smenasi"></div>
+				<div class="rc-cashier"></div>
+				<time class="rc-clock"></time>
+				<span class="rc-build" title="Sahifa versiyasi"></span>
+				<span class="rc-live" title="Realtime ulanish">
+					<i class="rc-live__dot"></i><span class="rc-live__text">Jonli</span>
+				</span>
+			</div>
+		</header>
+
+		<!-- ── Sozlash ogohlantirishlari ────────────────────────── -->
+		<div class="rc-warnings" role="status"></div>
+
+		<!-- ── Holat filtri ─────────────────────────────────────── -->
+		<div class="rc-filters" role="group" aria-label="Stol holati filtri"></div>
+
+		<!-- ── Asosiy ish maydoni ───────────────────────────────── -->
+		<div class="rc-main">
+
+			<!-- Zal rejasi -->
+			<section class="rc-floor" aria-label="Zal rejasi">
+				<div class="rc-floor__scroll">
+					<div class="rc-floor__canvas"></div>
+				</div>
+				<div class="rc-empty rc-floor__empty" hidden>
+					<div class="rc-empty__icon">🍽</div>
+					<p class="rc-empty__title">Bu zalda stol yo&#39;q</p>
+					<p class="rc-empty__hint">
+						Stollar <b>URY Table</b> ro&#39;yxatida yaratiladi.
+					</p>
+				</div>
+			</section>
+
+			<!-- Tanlangan stol paneli -->
+			<aside class="rc-panel" aria-label="Tanlangan stol"></aside>
+		</div>
+
+		<!-- ── Ochiq hisoblar ───────────────────────────────────── -->
+		<section class="rc-orders">
+			<div class="rc-orders__head">
+				<h2 class="rc-orders__title">Faol buyurtmalar</h2>
+				<div class="rc-orders__tabs" role="group"></div>
+			</div>
+			<div class="rc-orders__list"></div>
+		</section>
+	</div>
+
+	<!-- ══ Tolov oynasi ══════════════════════════════════════════ -->
+	<div class="rc-overlay" hidden>
+		<div class="rc-modal" role="dialog" aria-modal="true" aria-label="To&#39;lov">
+			<div class="rc-modal__head">
+				<h2 class="rc-modal__title">To&#39;lov</h2>
+				<button class="rc-modal__close" type="button" aria-label="Yopish">×</button>
+			</div>
+			<div class="rc-modal__body"></div>
+		</div>
+	</div>
+</div>

@@ -117,10 +117,16 @@ def _loads(value, default):
 
 
 def _get_branch() -> str:
-    """Joriy foydalanuvchi biriktirilgan filial (upstream `getBranch`)."""
-    from ury.ury_pos import api as _api
+    """Joriy foydalanuvchi biriktirilgan filial.
 
-    return _api.getBranch()
+    Upstream `ury.ury_pos.api.getBranch()` `URY User` yozuvi bo'lmasa
+    darhol `throw` qiladi — Administrator va menejerlar uchun bu ishlamaydi.
+    Shuning uchun bosqichli aniqlash ishlatiladi:
+        URY User -> POS Profile User -> saytdagi yagona filial
+    """
+    from ozturkapp.ozturkapp.utils.cashier_permissions import resolve_branch
+
+    return resolve_branch()
 
 
 def _get_pos_profile_name(branch: str = None) -> str:

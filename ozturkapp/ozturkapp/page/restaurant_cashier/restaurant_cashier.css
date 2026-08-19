@@ -1,0 +1,605 @@
+/*
+ * Kassa oynasi — uslublar (TZ §19, §20).
+ *
+ * PRINSIPLAR
+ *   - Sensorli ekran uchun: bosiladigan element eng kami 44px.
+ *   - Holat FAQAT RANG bilan emas — belgi + matn bilan ham (TZ §20).
+ *   - Desk mavzusi (light/dark) CSS o'zgaruvchilari orqali qo'llab-quvvatlanadi.
+ *   - Barcha selektorlar `.rc-` prefiksi bilan — Desk uslublariga tegmaydi.
+ */
+
+.rc-root {
+	--rc-gap: 12px;
+	--rc-radius: 10px;
+	--rc-radius-lg: 14px;
+
+	--rc-bg: var(--fg-color, #fff);
+	--rc-surface: var(--card-bg, #fff);
+	--rc-sunken: var(--subtle-fg, #f4f5f6);
+	--rc-border: var(--border-color, #e2e4e7);
+	--rc-text: var(--text-color, #1f272e);
+	--rc-muted: var(--text-muted, #6b7785);
+
+	--rc-available: #16a34a;
+	--rc-available-soft: rgba(22, 163, 74, .10);
+	--rc-reserved: #d97706;
+	--rc-reserved-soft: rgba(217, 119, 6, .12);
+	--rc-occupied: #dc2626;
+	--rc-occupied-soft: rgba(220, 38, 38, .10);
+	--rc-accent: var(--primary, #2490ef);
+
+	color: var(--rc-text);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ═══ Boot holatlari ═══════════════════════════════════════════ */
+
+.rc-boot { display: none; padding: 64px 24px; text-align: center; }
+.rc-root[data-state="loading"] .rc-boot--loading,
+.rc-root[data-state="error"]   .rc-boot--error,
+.rc-root[data-state="shift"]   .rc-gate { display: block; }
+.rc-root[data-state="ready"]   .rc-app { display: flex; }
+.rc-app { display: none; flex-direction: column; gap: var(--rc-gap); }
+
+/* Smena ochish formasi — bloklovchi ekran ichida. */
+.rc-gate__form { max-width: 460px; margin: 22px auto 0; text-align: left; }
+
+.rc-spinner {
+	width: 38px; height: 38px; margin: 0 auto 16px;
+	border: 3px solid var(--rc-border);
+	border-top-color: var(--rc-accent);
+	border-radius: 50%;
+	animation: rc-spin .8s linear infinite;
+}
+@keyframes rc-spin { to { transform: rotate(360deg); } }
+
+.rc-boot__icon { font-size: 40px; }
+.rc-boot__title { margin: 12px 0 6px; font-size: 18px; }
+.rc-boot__message { color: var(--rc-muted); margin-bottom: 18px; white-space: pre-wrap; }
+
+/* ═══ Yuqori panel ═════════════════════════════════════════════ */
+
+.rc-topbar {
+	display: flex; align-items: center; gap: var(--rc-gap);
+	flex-wrap: wrap;
+	padding: 12px 16px;
+	background: var(--rc-surface);
+	border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg);
+}
+.rc-topbar__identity { min-width: 160px; }
+.rc-restaurant { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.rc-branch { font-size: 12px; color: var(--rc-muted); }
+
+.rc-rooms { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; }
+
+.rc-room {
+	min-height: 40px; padding: 8px 16px;
+	border: 1px solid var(--rc-border); border-radius: 999px;
+	background: transparent; color: var(--rc-text);
+	font-size: 13px; font-weight: 600; cursor: pointer;
+	transition: background .12s, border-color .12s;
+}
+.rc-room:hover { background: var(--rc-sunken); }
+.rc-room[aria-pressed="true"] {
+	background: var(--rc-accent); border-color: var(--rc-accent); color: #fff;
+}
+.rc-room__count { opacity: .7; margin-left: 6px; font-weight: 500; }
+
+.rc-topbar__session {
+	display: flex; align-items: center; gap: 14px;
+	font-size: 12px; color: var(--rc-muted); text-align: right;
+}
+.rc-cashier { font-weight: 600; color: var(--rc-text); }
+.rc-clock { font-variant-numeric: tabular-nums; }
+
+.rc-shift--open { color: var(--rc-available); }
+.rc-shift--closed { color: var(--rc-occupied); }
+
+.rc-live { display: flex; align-items: center; gap: 5px; }
+.rc-live__dot {
+	width: 8px; height: 8px; border-radius: 50%;
+	background: var(--rc-available); display: inline-block;
+}
+.rc-live--down .rc-live__dot { background: var(--rc-muted); }
+.rc-live--down .rc-live__text { text-decoration: line-through; }
+
+/* ═══ Ogohlantirishlar ═════════════════════════════════════════ */
+
+.rc-warnings:empty { display: none; }
+.rc-warning {
+	display: flex; gap: 10px; align-items: flex-start;
+	padding: 10px 14px; margin-bottom: 6px;
+	background: var(--rc-reserved-soft);
+	border: 1px solid var(--rc-reserved);
+	border-radius: var(--rc-radius);
+	font-size: 12.5px;
+}
+
+/* ═══ Holat filtri ═════════════════════════════════════════════ */
+
+.rc-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.rc-filter {
+	display: flex; align-items: center; gap: 8px;
+	min-height: 44px; padding: 8px 18px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.rc-filter[aria-pressed="true"] { border-width: 2px; padding: 7px 17px; }
+.rc-filter__mark { font-size: 11px; }
+.rc-filter__count {
+	min-width: 24px; padding: 1px 7px;
+	background: var(--rc-sunken); border-radius: 999px;
+	font-size: 12px; font-weight: 700;
+}
+.rc-filter--AVAILABLE[aria-pressed="true"] { border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-filter--RESERVED[aria-pressed="true"]  { border-color: var(--rc-reserved);  background: var(--rc-reserved-soft); }
+.rc-filter--OCCUPIED[aria-pressed="true"]  { border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+.rc-filter--ALL[aria-pressed="true"]       { border-color: var(--rc-accent); }
+
+/* ═══ Asosiy maydon ════════════════════════════════════════════ */
+
+.rc-main {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 360px;
+	gap: var(--rc-gap);
+	align-items: start;
+}
+
+/* ═══ Zal rejasi ═══════════════════════════════════════════════ */
+
+.rc-floor {
+	position: relative;
+	background: var(--rc-surface);
+	border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg);
+	min-height: 420px;
+	overflow: hidden;
+}
+.rc-floor__scroll { overflow: auto; padding: 20px; height: 100%; }
+.rc-floor__canvas { position: relative; transform-origin: 0 0; }
+
+/* Zal bloki — faqat "Barcha zallar" ko'rinishida (TZ §4).
+ *
+ * Sarlavha `.rc-band__header` ichida, server ajratgan bo'shliqda turadi.
+ * Stollar shu balandlikka pastga surilgan, shuning uchun nom stol ustiga
+ * CHIQMAYDI. Blokning o'zi hodisalarni ushlamaydi (`pointer-events: none`),
+ * aks holda ostidagi stollar bosilmay qolardi.
+ */
+.rc-band {
+	position: absolute;
+	left: 0;
+	pointer-events: none;
+}
+.rc-band__header {
+	display: flex;
+	align-items: center;
+	border-bottom: 1px dashed var(--rc-border);
+}
+.rc-band__label {
+	display: inline-flex; align-items: center; gap: 7px;
+	padding: 3px 14px;
+	background: var(--rc-sunken); border-radius: 999px;
+	font-size: 11px; font-weight: 700;
+	text-transform: uppercase; letter-spacing: .05em;
+	color: var(--rc-muted);
+	white-space: nowrap;
+}
+.rc-band__count {
+	padding: 0 6px; border-radius: 999px;
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 10px;
+}
+
+.rc-table {
+	position: absolute;
+	display: flex; flex-direction: column;
+	align-items: center; justify-content: center; gap: 2px;
+	padding: 6px;
+	border: 2px solid var(--rc-border);
+	background: var(--rc-surface);
+	color: var(--rc-text);
+	cursor: pointer;
+	text-align: center;
+	overflow: hidden;
+	transition: transform .1s ease, box-shadow .1s ease;
+}
+.rc-table:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,.10); }
+.rc-table:focus-visible { outline: 3px solid var(--rc-accent); outline-offset: 2px; }
+.rc-table[aria-pressed="true"] {
+	box-shadow: 0 0 0 3px var(--rc-accent);
+	transform: translateY(-2px);
+}
+
+.rc-table--Square    { border-radius: 8px; }
+.rc-table--Rectangle { border-radius: 8px; }
+.rc-table--Circle    { border-radius: 50%; }
+
+.rc-table--AVAILABLE { border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-table--RESERVED  { border-color: var(--rc-reserved);  background: var(--rc-reserved-soft); }
+.rc-table--OCCUPIED  { border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+
+.rc-table__name { font-size: 15px; font-weight: 700; line-height: 1.1; }
+
+/* Holat FAQAT rang bilan emas — belgi + qisqa matn bilan (TZ §20). */
+.rc-table__status {
+	display: flex; align-items: center; gap: 3px;
+	font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+	text-transform: uppercase;
+}
+.rc-table--AVAILABLE .rc-table__status { color: var(--rc-available); }
+.rc-table--RESERVED  .rc-table__status { color: var(--rc-reserved); }
+.rc-table--OCCUPIED  .rc-table__status { color: var(--rc-occupied); }
+
+.rc-table__meta   { font-size: 10px; color: var(--rc-muted); line-height: 1.25; }
+.rc-table__amount { font-size: 11.5px; font-weight: 700; }
+.rc-table__badge {
+	position: absolute; top: 3px; right: 5px;
+	font-size: 9px; font-weight: 700;
+	color: var(--rc-muted);
+}
+.rc-table--dim { opacity: .22; pointer-events: none; }
+
+/* ═══ O'ng panel ═══════════════════════════════════════════════ */
+
+.rc-panel {
+	background: var(--rc-surface);
+	border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg);
+	padding: 16px;
+	min-height: 420px;
+	position: sticky; top: 12px;
+}
+.rc-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.rc-panel__table { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.rc-panel__sub { font-size: 12px; color: var(--rc-muted); margin-top: 2px; }
+
+.rc-chip {
+	display: inline-flex; align-items: center; gap: 5px;
+	padding: 4px 11px; border-radius: 999px;
+	font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+	border: 1.5px solid;
+	white-space: nowrap;
+}
+.rc-chip--AVAILABLE { color: var(--rc-available); border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-chip--RESERVED  { color: var(--rc-reserved);  border-color: var(--rc-reserved);  background: var(--rc-reserved-soft); }
+.rc-chip--OCCUPIED  { color: var(--rc-occupied);  border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+
+.rc-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0; }
+.rc-fact { background: var(--rc-sunken); border-radius: var(--rc-radius); padding: 8px 10px; }
+.rc-fact__label { font-size: 10px; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .04em; }
+.rc-fact__value { font-size: 13.5px; font-weight: 600; margin-top: 1px; word-break: break-word; }
+
+.rc-items { border-top: 1px solid var(--rc-border); margin-top: 8px; }
+.rc-item {
+	display: grid; grid-template-columns: 1fr auto;
+	gap: 2px 10px; padding: 8px 0;
+	border-bottom: 1px solid var(--rc-border);
+	font-size: 13px;
+}
+.rc-item__name { font-weight: 600; }
+.rc-item__qty  { font-size: 11.5px; color: var(--rc-muted); }
+.rc-item__amount { font-weight: 600; text-align: right; }
+.rc-item__note { grid-column: 1 / -1; font-size: 11px; color: var(--rc-muted); font-style: italic; }
+
+.rc-totals { margin-top: 12px; font-size: 13px; }
+.rc-total { display: flex; justify-content: space-between; padding: 4px 0; }
+.rc-total--service { color: var(--rc-reserved); font-weight: 600; }
+.rc-total--grand {
+	margin-top: 6px; padding-top: 10px;
+	border-top: 2px solid var(--rc-border);
+	font-size: 18px; font-weight: 700;
+}
+
+.rc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+
+.rc-btn {
+	display: flex; align-items: center; justify-content: center; gap: 8px;
+	min-height: 46px; padding: 10px 18px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 14px; font-weight: 600; cursor: pointer;
+	transition: filter .12s;
+}
+.rc-btn:hover:not(:disabled) { filter: brightness(.96); }
+.rc-btn:disabled { opacity: .45; cursor: not-allowed; }
+.rc-btn--primary { background: var(--rc-accent); border-color: var(--rc-accent); color: #fff; }
+.rc-btn--pay     { background: var(--rc-available); border-color: var(--rc-available); color: #fff; font-size: 16px; min-height: 54px; }
+.rc-btn--danger  { color: var(--rc-occupied); border-color: var(--rc-occupied); }
+.rc-btn--busy    { pointer-events: none; opacity: .6; }
+
+.rc-hint { font-size: 11.5px; color: var(--rc-muted); margin-top: 8px; line-height: 1.4; }
+
+/* Ma'lumot nomuvofiqligi — jim bo'sh hisob o'rniga aniq xabar (TZ §8). */
+.rc-issue {
+	margin-top: 14px; padding: 18px 16px;
+	border: 1px solid var(--rc-occupied);
+	background: var(--rc-occupied-soft);
+	border-radius: var(--rc-radius);
+	text-align: center;
+}
+.rc-issue__icon  { font-size: 26px; }
+.rc-issue__title { font-size: 14px; font-weight: 700; margin: 8px 0 6px; }
+.rc-issue__text  { font-size: 12.5px; line-height: 1.45; }
+.rc-issue__code  {
+	margin-top: 10px; font-size: 10px; letter-spacing: .06em;
+	color: var(--rc-muted); font-family: monospace;
+}
+.rc-kitchen {
+	display: inline-flex; align-items: center; gap: 6px;
+	margin-top: 10px; padding: 5px 11px;
+	background: var(--rc-sunken); border-radius: 999px;
+	font-size: 11.5px; font-weight: 600;
+}
+
+/* ═══ Bo'sh holatlar ═══════════════════════════════════════════ */
+
+.rc-empty { padding: 48px 20px; text-align: center; color: var(--rc-muted); }
+.rc-empty__icon { font-size: 34px; opacity: .55; }
+.rc-empty__title { font-size: 14px; font-weight: 600; margin: 10px 0 4px; color: var(--rc-text); }
+.rc-empty__hint { font-size: 12px; }
+.rc-floor__empty { position: absolute; inset: 0; display: flex; flex-direction: column;
+	align-items: center; justify-content: center; }
+
+/* ═══ Faol buyurtmalar ═════════════════════════════════════════ */
+
+.rc-orders {
+	background: var(--rc-surface);
+	border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg);
+	padding: 14px 16px;
+}
+.rc-orders__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rc-orders__title { font-size: 14px; font-weight: 700; margin: 0; }
+.rc-orders__tabs { display: flex; gap: 6px; }
+.rc-tab {
+	min-height: 36px; padding: 6px 14px;
+	border: 1px solid var(--rc-border); border-radius: 999px;
+	background: transparent; color: var(--rc-text);
+	font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.rc-tab[aria-pressed="true"] { background: var(--rc-accent); border-color: var(--rc-accent); color: #fff; }
+
+.rc-orders__list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	gap: 10px; margin-top: 12px;
+}
+.rc-order {
+	border: 1px solid var(--rc-border); border-left: 4px solid var(--rc-border);
+	border-radius: var(--rc-radius);
+	padding: 10px 12px; cursor: pointer; text-align: left;
+	background: var(--rc-surface); color: var(--rc-text);
+}
+.rc-order:hover { background: var(--rc-sunken); }
+.rc-order--billed { border-left-color: var(--rc-reserved); }
+.rc-order--open   { border-left-color: var(--rc-accent); }
+.rc-order__top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rc-order__table { font-size: 14px; font-weight: 700; }
+.rc-order__amount { font-size: 14px; font-weight: 700; }
+.rc-order__meta { font-size: 11.5px; color: var(--rc-muted); margin-top: 3px; line-height: 1.4; }
+.rc-order__tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+.rc-tag {
+	font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+	padding: 2px 7px; border-radius: 4px; background: var(--rc-sunken); color: var(--rc-muted);
+}
+.rc-tag--billed { background: var(--rc-reserved-soft); color: var(--rc-reserved); }
+
+/* ═══ To'lov oynasi ════════════════════════════════════════════ */
+
+.rc-overlay {
+	position: fixed; inset: 0; z-index: 1050;
+	display: flex; align-items: center; justify-content: center;
+	background: rgba(0, 0, 0, .45); padding: 20px;
+}
+.rc-overlay[hidden] { display: none; }
+.rc-modal {
+	background: var(--rc-surface);
+	border-radius: var(--rc-radius-lg);
+	width: 100%; max-width: 460px;
+	max-height: 90vh; overflow: auto;
+	box-shadow: 0 20px 50px rgba(0,0,0,.28);
+}
+.rc-modal__head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 16px 18px; border-bottom: 1px solid var(--rc-border);
+	position: sticky; top: 0; background: var(--rc-surface);
+}
+.rc-modal__title { font-size: 16px; font-weight: 700; margin: 0; }
+.rc-modal__close {
+	width: 36px; height: 36px; border: 0; border-radius: 8px;
+	background: transparent; font-size: 24px; line-height: 1; cursor: pointer;
+	color: var(--rc-muted);
+}
+.rc-modal__close:hover { background: var(--rc-sunken); }
+.rc-modal__body { padding: 18px; }
+
+.rc-pay__due { text-align: center; margin-bottom: 16px; }
+.rc-pay__due-label { font-size: 11px; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .05em; }
+.rc-pay__due-value { font-size: 30px; font-weight: 700; line-height: 1.15; }
+.rc-pay__breakdown { font-size: 11.5px; color: var(--rc-muted); margin-top: 4px; }
+
+.rc-pay__label { font-size: 11px; font-weight: 700; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--rc-muted); margin: 14px 0 7px; }
+.rc-pay__modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.rc-mode {
+	min-height: 50px; padding: 10px;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.rc-mode[aria-pressed="true"] { border-color: var(--rc-accent); background: rgba(36,144,239,.10); }
+
+.rc-pay__input {
+	width: 100%; min-height: 52px; padding: 10px 14px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text);
+	font-size: 22px; font-weight: 700; text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.rc-pay__quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.rc-quick {
+	flex: 1 1 auto; min-height: 40px; padding: 6px 12px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.rc-pay__change { display: flex; justify-content: space-between; margin-top: 12px;
+	font-size: 15px; font-weight: 700; }
+.rc-pay__change--short { color: var(--rc-occupied); }
+.rc-pay__error {
+	margin-top: 12px; padding: 10px 12px;
+	border: 1px solid var(--rc-occupied); border-radius: var(--rc-radius);
+	background: var(--rc-occupied-soft); color: var(--rc-occupied);
+	font-size: 12.5px; white-space: pre-wrap;
+}
+.rc-pay__error:empty { display: none; }
+
+/* ═══ Moslashuvchanlik ═════════════════════════════════════════ */
+
+@media (max-width: 1100px) {
+	.rc-main { grid-template-columns: minmax(0, 1fr); }
+	.rc-panel { position: static; min-height: 0; }
+}
+@media (max-width: 640px) {
+	.rc-topbar { flex-direction: column; align-items: stretch; }
+	.rc-topbar__session { justify-content: space-between; text-align: left; }
+	.rc-facts { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rc-table, .rc-btn { transition: none; }
+	.rc-spinner { animation-duration: 2s; }
+}
+
+/* ═══ Kassa smenasi (ochish / yopish) ══════════════════════════ */
+
+.rc-shift { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+/* Sahifa yuqorisidagi «Kassani ochish/yopish» tugmasi.
+ *
+ * NEGA RANG SHU YERDA BERILADI
+ * ============================
+ * 1. Bu tugma sahifa SARLAVHASIDA, ya'ni `.rc-root` DAN TASHQARIDA.
+ *    Shuning uchun `--rc-*` o'zgaruvchilar bu yerda aniqlanmagan —
+ *    ularni ishlatish `background` ni butunlay o'chirib yuboradi.
+ *
+ * 2. Frappe'da `.btn.btn-danger` qoidasi `buttons.scss` da bor, LEKIN u
+ *    Desk to'plamiga (`desk.bundle.css`) KIRMAGAN — faqat `--danger`
+ *    o'zgaruvchisi mavjud. Ya'ni `btn-danger` klassi o'zi rang bermaydi.
+ *
+ * Shuning uchun rang shu yerda, global `--danger` (zaxira qiymati bilan)
+ * orqali beriladi. `!important` — Frappe'ning `.btn` asosiy uslublari
+ * ustidan o'tishi uchun.
+ */
+.rc-shift-action { font-weight: 600; }
+
+.rc-shift-action.btn-danger,
+.rc-shift-action.btn-danger:focus {
+	background-color: var(--danger, #e03636) !important;
+	border-color: var(--danger, #e03636) !important;
+	color: #fff !important;
+}
+.rc-shift-action.btn-danger:hover {
+	background-color: var(--danger, #e03636) !important;
+	filter: brightness(.92);
+}
+
+.rc-shift-table {
+	width: 100%; border-collapse: collapse; margin-top: 6px;
+	font-size: 13px;
+}
+.rc-shift-table th {
+	padding: 6px 8px; border-bottom: 1px solid var(--rc-border);
+	font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+	color: var(--rc-muted); text-align: left;
+}
+.rc-shift-table td { padding: 6px 8px; border-bottom: 1px solid var(--rc-border); }
+.rc-shift-table .rc-num { text-align: right; white-space: nowrap; }
+
+.rc-shift-input {
+	width: 100%; min-height: 42px; padding: 6px 10px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text);
+	font-size: 15px; font-weight: 700; text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.rc-shift-input:focus { outline: 2px solid var(--rc-accent); outline-offset: -1px; }
+
+/* Farq nolga teng bo'lmasa — diqqatni tortadi. */
+.rc-diff { font-weight: 700; color: var(--rc-muted); }
+.rc-diff--bad { color: var(--rc-occupied); }
+
+/* ═══ Kassa yopish — ko'r sanoq ════════════════════════════════ */
+
+.rc-count__head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 12px 14px; margin-bottom: 14px;
+	background: var(--rc-sunken); border-radius: var(--rc-radius);
+}
+.rc-count__label {
+	font-size: 11px; font-weight: 700; letter-spacing: .05em;
+	text-transform: uppercase; color: var(--rc-muted);
+}
+.rc-count__value { font-size: 26px; font-weight: 800; line-height: 1; }
+
+.rc-count__row {
+	display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+}
+.rc-count__row > span {
+	flex: 0 0 34%; font-size: 14px; font-weight: 600;
+}
+.rc-count__row .rc-count-input { flex: 1 1 auto; }
+
+/* Teskari sanoq — kassir pulni qayta sanaydigan vaqt. */
+.rc-countdown {
+	display: flex; align-items: center; gap: 14px;
+	margin-top: 16px; padding: 12px 14px;
+	background: var(--rc-reserved-soft);
+	border: 1px solid var(--rc-reserved);
+	border-radius: var(--rc-radius);
+}
+.rc-countdown__ring {
+	flex: 0 0 auto;
+	width: 52px; height: 52px; border-radius: 50%;
+	display: flex; align-items: center; justify-content: center;
+	border: 3px solid var(--rc-reserved);
+	color: var(--rc-reserved);
+}
+.rc-countdown__num {
+	font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.rc-countdown__text { font-size: 12.5px; line-height: 1.4; }
+
+.rc-countdown--done {
+	background: var(--rc-available-soft);
+	border-color: var(--rc-available);
+}
+.rc-countdown--done .rc-countdown__ring {
+	border-color: var(--rc-available); color: var(--rc-available);
+}
+
+/* Ikki bosqichli sanoq ko'rsatkichi. */
+.rc-steps { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.rc-step {
+	width: 26px; height: 26px; border-radius: 50%;
+	display: inline-flex; align-items: center; justify-content: center;
+	border: 2px solid var(--rc-border); color: var(--rc-muted);
+	font-size: 12px; font-weight: 800;
+}
+.rc-step--active { border-color: var(--rc-accent); color: var(--rc-accent); }
+.rc-step--done {
+	border-color: var(--rc-available); background: var(--rc-available); color: #fff;
+}
+.rc-steps__line { flex: 0 0 26px; height: 2px; background: var(--rc-border); }
+.rc-steps__text {
+	margin-left: 4px; font-size: 11.5px; font-weight: 700;
+	text-transform: uppercase; letter-spacing: .04em; color: var(--rc-muted);
+}
+
+/* Qurilma belgisi — brauzer eski kodni ishlatayotganini aniqlash uchun. */
+.rc-build {
+	font-size: 10px; opacity: .5; font-family: monospace;
+	letter-spacing: .02em;
+}

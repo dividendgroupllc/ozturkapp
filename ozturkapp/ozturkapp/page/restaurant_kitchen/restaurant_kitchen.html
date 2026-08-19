@@ -1,0 +1,58 @@
+<!--
+	Oshxona KDS - statik karkas.
+
+	=========================================================================
+	DIQQAT: BU FAYLDA XOM APOSTROF (') ISHLATMANG - `&#39;` YOZING
+	=========================================================================
+	Frappe bu HTML ni JS satriga aylantiradi (frappe/build.py:420) va mazmunni
+	BITTA TIRNOQ ichiga o&#39;raydi. v15.100.0 dagi `scrub_html_template()`
+	apostrofni ekranlamaydi (kod no-op), shuning uchun xom apostrof butun
+	sahifa skriptini `SyntaxError` bilan yiqitadi.
+
+	Buni `tests/test_kitchen.py::TestKitchenPageAssets` tekshiradi.
+	=========================================================================
+-->
+<div class="kds-root" data-state="loading">
+
+	<div class="kds-boot kds-boot--loading">
+		<div class="kds-spinner" aria-hidden="true"></div>
+		<p>Oshxona ekrani yuklanmoqda…</p>
+	</div>
+
+	<div class="kds-boot kds-boot--error" role="alert">
+		<div class="kds-boot__icon">⚠</div>
+		<h2 class="kds-boot__title">Oshxona ekranini ochib bo&#39;lmadi</h2>
+		<p class="kds-boot__message"></p>
+		<button class="kds-btn kds-btn--primary kds-retry" type="button">Qayta urinish</button>
+	</div>
+
+	<div class="kds-app">
+
+		<header class="kds-topbar">
+			<div class="kds-topbar__identity">
+				<div class="kds-title">Oshxona</div>
+				<div class="kds-branch"></div>
+			</div>
+
+			<nav class="kds-stations" aria-label="Stansiyalar"></nav>
+
+			<div class="kds-topbar__session">
+				<div class="kds-user"></div>
+				<time class="kds-clock"></time>
+				<span class="kds-live" title="Realtime ulanish">
+					<i class="kds-live__dot"></i><span class="kds-live__text">Jonli</span>
+				</span>
+			</div>
+		</header>
+
+		<div class="kds-filters" role="group" aria-label="Holat filtri"></div>
+
+		<div class="kds-board"></div>
+
+		<div class="kds-empty" hidden>
+			<div class="kds-empty__icon">🍳</div>
+			<p class="kds-empty__title">Tayyorlanadigan buyurtma yo&#39;q</p>
+			<p class="kds-empty__hint">Yangi buyurtma kelishi bilan shu yerda paydo bo&#39;ladi.</p>
+		</div>
+	</div>
+</div>

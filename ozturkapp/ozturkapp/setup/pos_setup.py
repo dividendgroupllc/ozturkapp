@@ -655,6 +655,14 @@ def create_restaurant(company, menu):
 # 12. URY TABLE
 # =============================================================================
 
+#: Zal rejasi to'ri — kassa oynasi shu koordinatalar bo'yicha chizadi.
+#: `URY Table.layout_*` bo'sh qolsa kassa avtomatik to'r qo'llaydi, lekin
+#: haqiqiy koordinata bo'lgani ma'qul: menejer keyin ularni surib chiqadi.
+TABLE_GRID_COLUMNS = 5
+TABLE_SIZE = 120
+TABLE_GAP = 32
+
+
 def create_tables():
     if not TABLE_COUNT:
         _log("⏭️  TABLE_COUNT=0 — stollar yaratilmadi (Stiker rejimi)")
@@ -673,9 +681,61 @@ def create_tables():
         doc.minimum_seating = 1
         doc.is_take_away = 0
         doc.table_shape = "Square"
+        doc.update(_grid_layout(i - 1))
         doc.insert(ignore_permissions=True)
         created += 1
     _log(f"✅ URY Table: {created} ta yangi (jami {TABLE_COUNT})")
+
+
+def _grid_layout(index: int) -> dict:
+    """Indeks bo'yicha barqaror to'r koordinatasi."""
+    column = index % TABLE_GRID_COLUMNS
+    row = index // TABLE_GRID_COLUMNS
+    return {
+        "layout_x": column * (TABLE_SIZE + TABLE_GAP),
+        "layout_y": row * (TABLE_SIZE + TABLE_GAP),
+        "layout_width": TABLE_SIZE,
+        "layout_height": TABLE_SIZE,
+    }
+
+
+def backfill_table_layout(room=None):
+    """Koordinatasi bo'lmagan mavjud stollarga to'r koordinatasini yozadi.
+
+    `create_tables()` ilgari `layout_*` maydonlarini to'ldirmagan, shuning
+    uchun eski saytlarda barcha stollar (0,0) da turadi. Kassa oynasi bu
+    holatni avtomatik to'r bilan qoplaydi, lekin haqiqiy qiymat yozilsa
+    menejer ularni Desk'dan surib joylashtira oladi::
+
+        bench --site ozturk.local execute \
+            ozturkapp.ozturkapp.setup.pos_setup.backfill_table_layout
+
+    Allaqachon joylashtirilgan stollarga TEGILMAYDI.
+    """
+    filters = {"restaurant_room": room} if room else {}
+    tables = frappe.get_all(
+        "URY Table",
+        filters=filters,
+        fields=["name", "layout_x", "layout_y", "restaurant_room"],
+        order_by="restaurant_room asc, creation asc",
+    )
+
+    per_room, updated = {}, 0
+    for table in tables:
+        if flt(table.layout_x) or flt(table.layout_y):
+            continue  # qo'lda joylashtirilgan — tegmaymiz
+
+        index = per_room.get(table.restaurant_room, 0)
+        per_room[table.restaurant_room] = index + 1
+
+        frappe.db.set_value(
+            "URY Table", table.name, _grid_layout(index), update_modified=False
+        )
+        updated += 1
+
+    frappe.db.commit()
+    _log(f"✅ Layout yozildi: {updated} ta stol")
+    return updated
 
 
 # =============================================================================

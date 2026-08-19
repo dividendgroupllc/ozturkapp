@@ -1,0 +1,259 @@
+/*
+ * Oshxona KDS — uslublar (TZ §19, §30).
+ *
+ * PRINSIPLAR
+ *   - Sensorli ekran: tugmalar KATTA (eng kami 56px balandlik).
+ *   - Holat FAQAT rang bilan emas — belgi + matn bilan ham (TZ §19).
+ *   - Uzoqdan o'qiladigan shrift o'lchamlari (oshpaz ekrandan uzoqda turadi).
+ *   - Barcha selektorlar `.kds-` prefiksi bilan — Desk uslublariga tegmaydi.
+ */
+
+.kds-root {
+	--kds-gap: 12px;
+	--kds-radius: 12px;
+
+	--kds-surface: var(--card-bg, #fff);
+	--kds-sunken: var(--subtle-fg, #f4f5f6);
+	--kds-border: var(--border-color, #e2e4e7);
+	--kds-text: var(--text-color, #1f272e);
+	--kds-muted: var(--text-muted, #6b7785);
+
+	--kds-pending: #2563eb;
+	--kds-pending-soft: rgba(37, 99, 235, .10);
+	--kds-preparing: #d97706;
+	--kds-preparing-soft: rgba(217, 119, 6, .12);
+	--kds-ready: #16a34a;
+	--kds-ready-soft: rgba(22, 163, 74, .12);
+	--kds-served: #6b7785;
+	--kds-cancelled: #dc2626;
+	--kds-cancelled-soft: rgba(220, 38, 38, .10);
+	--kds-accent: var(--primary, #2490ef);
+
+	color: var(--kds-text);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ═══ Boot ═════════════════════════════════════════════════════ */
+
+.kds-boot { display: none; padding: 64px 24px; text-align: center; }
+.kds-root[data-state="loading"] .kds-boot--loading,
+.kds-root[data-state="error"]   .kds-boot--error { display: block; }
+.kds-root[data-state="ready"]   .kds-app { display: flex; }
+.kds-app { display: none; flex-direction: column; gap: var(--kds-gap); }
+
+.kds-spinner {
+	width: 38px; height: 38px; margin: 0 auto 16px;
+	border: 3px solid var(--kds-border); border-top-color: var(--kds-accent);
+	border-radius: 50%; animation: kds-spin .8s linear infinite;
+}
+@keyframes kds-spin { to { transform: rotate(360deg); } }
+.kds-boot__icon { font-size: 40px; }
+.kds-boot__title { margin: 12px 0 6px; font-size: 18px; }
+.kds-boot__message { color: var(--kds-muted); margin-bottom: 18px; white-space: pre-wrap; }
+
+/* ═══ Yuqori panel ═════════════════════════════════════════════ */
+
+.kds-topbar {
+	display: flex; align-items: center; gap: var(--kds-gap); flex-wrap: wrap;
+	padding: 12px 16px;
+	background: var(--kds-surface);
+	border: 1px solid var(--kds-border); border-radius: var(--kds-radius);
+}
+.kds-title { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.kds-branch { font-size: 12px; color: var(--kds-muted); }
+.kds-topbar__identity { min-width: 140px; }
+
+.kds-stations { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; }
+.kds-station {
+	min-height: 44px; padding: 9px 18px;
+	border: 1px solid var(--kds-border); border-radius: 999px;
+	background: transparent; color: var(--kds-text);
+	font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.kds-station:hover { background: var(--kds-sunken); }
+.kds-station[aria-pressed="true"] {
+	background: var(--kds-accent); border-color: var(--kds-accent); color: #fff;
+}
+
+.kds-topbar__session {
+	display: flex; align-items: center; gap: 14px;
+	font-size: 12px; color: var(--kds-muted);
+}
+.kds-user { font-weight: 600; color: var(--kds-text); }
+.kds-live { display: flex; align-items: center; gap: 5px; }
+.kds-live__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--kds-ready); }
+.kds-live--down .kds-live__dot { background: var(--kds-muted); }
+.kds-live--down .kds-live__text { text-decoration: line-through; }
+
+/* ═══ Filtr ════════════════════════════════════════════════════ */
+
+.kds-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.kds-filter {
+	display: flex; align-items: center; gap: 9px;
+	min-height: 48px; padding: 9px 20px;
+	border: 1px solid var(--kds-border); border-radius: var(--kds-radius);
+	background: var(--kds-surface); color: var(--kds-text);
+	font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.kds-filter[aria-pressed="true"] { border-width: 2px; padding: 8px 19px; }
+.kds-filter--Pending[aria-pressed="true"]   { border-color: var(--kds-pending); background: var(--kds-pending-soft); }
+.kds-filter--Preparing[aria-pressed="true"] { border-color: var(--kds-preparing); background: var(--kds-preparing-soft); }
+.kds-filter--Ready[aria-pressed="true"]     { border-color: var(--kds-ready); background: var(--kds-ready-soft); }
+.kds-filter--ALL[aria-pressed="true"]       { border-color: var(--kds-accent); }
+.kds-filter__count {
+	min-width: 26px; padding: 2px 8px;
+	background: var(--kds-sunken); border-radius: 999px;
+	font-size: 13px; font-weight: 700;
+}
+
+/* ═══ Doska ════════════════════════════════════════════════════ */
+
+.kds-board {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+	gap: var(--kds-gap);
+	align-items: start;
+}
+
+/* ═══ Chipta (KOT) ═════════════════════════════════════════════ */
+
+.kds-ticket {
+	background: var(--kds-surface);
+	border: 1px solid var(--kds-border);
+	border-top: 5px solid var(--kds-border);
+	border-radius: var(--kds-radius);
+	overflow: hidden;
+	display: flex; flex-direction: column;
+}
+.kds-ticket--Pending   { border-top-color: var(--kds-pending); }
+.kds-ticket--Preparing { border-top-color: var(--kds-preparing); }
+.kds-ticket--Ready     { border-top-color: var(--kds-ready); }
+.kds-ticket--Served    { border-top-color: var(--kds-served); opacity: .7; }
+.kds-ticket--Cancelled { border-top-color: var(--kds-cancelled); background: var(--kds-cancelled-soft); }
+
+/* Kechikkan buyurtma — diqqatni tortadi (TZ §20). */
+.kds-ticket--late { box-shadow: 0 0 0 2px var(--kds-cancelled); }
+
+.kds-ticket__head { padding: 12px 14px; border-bottom: 1px solid var(--kds-border); }
+.kds-ticket__top {
+	display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
+.kds-ticket__table { font-size: 22px; font-weight: 800; line-height: 1.1; }
+.kds-ticket__kot { font-size: 12px; color: var(--kds-muted); font-family: monospace; }
+.kds-ticket__meta {
+	display: flex; flex-wrap: wrap; gap: 4px 12px;
+	margin-top: 6px; font-size: 12.5px; color: var(--kds-muted);
+}
+.kds-elapsed { font-weight: 700; }
+.kds-elapsed--late { color: var(--kds-cancelled); }
+
+.kds-ticket__note {
+	margin: 8px 14px 0; padding: 8px 10px;
+	background: var(--kds-preparing-soft);
+	border-left: 3px solid var(--kds-preparing);
+	border-radius: 6px;
+	font-size: 13px;
+}
+
+/* Bekor qilish KOT'i — bu OVQAT EMAS (TZ §9). */
+.kds-cancel-banner {
+	margin: 10px 14px; padding: 10px 12px;
+	background: var(--kds-cancelled); color: #fff;
+	border-radius: 8px; text-align: center;
+	font-size: 13px; font-weight: 700;
+	text-transform: uppercase; letter-spacing: .04em;
+}
+
+/* ═══ Mahsulot ═════════════════════════════════════════════════ */
+
+.kds-items { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+
+.kds-item { padding: 12px 0; border-bottom: 1px solid var(--kds-border); }
+.kds-item:last-child { border-bottom: 0; }
+
+.kds-item__top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.kds-item__name { font-size: 17px; font-weight: 700; line-height: 1.25; }
+.kds-item__qty {
+	flex: 0 0 auto;
+	min-width: 42px; padding: 3px 11px;
+	background: var(--kds-sunken); border-radius: 8px;
+	font-size: 17px; font-weight: 800; text-align: center;
+}
+.kds-item__course { font-size: 11px; color: var(--kds-muted); margin-top: 2px; }
+
+/* Oshxonaga muhim izoh — YASHIRILMAYDI (TZ §8). */
+.kds-item__comment {
+	margin-top: 7px; padding: 8px 11px;
+	background: var(--kds-preparing-soft);
+	border-left: 3px solid var(--kds-preparing);
+	border-radius: 6px;
+	font-size: 14px; font-weight: 600; line-height: 1.35;
+}
+
+.kds-item__foot {
+	display: flex; align-items: center; justify-content: space-between;
+	gap: 10px; margin-top: 9px; flex-wrap: wrap;
+}
+
+.kds-badge {
+	display: inline-flex; align-items: center; gap: 6px;
+	padding: 4px 12px; border-radius: 999px;
+	border: 1.5px solid; white-space: nowrap;
+	font-size: 12px; font-weight: 700;
+	text-transform: uppercase; letter-spacing: .04em;
+}
+.kds-badge--Pending   { color: var(--kds-pending);   border-color: var(--kds-pending);   background: var(--kds-pending-soft); }
+.kds-badge--Preparing { color: var(--kds-preparing); border-color: var(--kds-preparing); background: var(--kds-preparing-soft); }
+.kds-badge--Ready     { color: var(--kds-ready);     border-color: var(--kds-ready);     background: var(--kds-ready-soft); }
+.kds-badge--Served    { color: var(--kds-served);    border-color: var(--kds-served); }
+.kds-badge--Cancelled { color: var(--kds-cancelled); border-color: var(--kds-cancelled); background: var(--kds-cancelled-soft); }
+
+.kds-item__timer { font-size: 12px; color: var(--kds-muted); font-weight: 600; }
+
+/* ═══ Tugmalar — sensorli ekran uchun KATTA (TZ §30) ═══════════ */
+
+.kds-btn {
+	display: flex; align-items: center; justify-content: center; gap: 8px;
+	width: 100%; min-height: 56px; padding: 12px 18px;
+	border: 1px solid var(--kds-border); border-radius: var(--kds-radius);
+	background: var(--kds-surface); color: var(--kds-text);
+	font-size: 16px; font-weight: 700; cursor: pointer;
+	transition: filter .12s;
+	-webkit-tap-highlight-color: transparent;
+}
+.kds-btn:hover:not(:disabled) { filter: brightness(.95); }
+.kds-btn:active:not(:disabled) { transform: scale(.985); }
+.kds-btn:disabled { opacity: .45; cursor: not-allowed; }
+.kds-btn--primary { background: var(--kds-accent); border-color: var(--kds-accent); color: #fff; }
+.kds-btn--start   { background: var(--kds-preparing); border-color: var(--kds-preparing); color: #fff; }
+.kds-btn--ready   { background: var(--kds-ready); border-color: var(--kds-ready); color: #fff; }
+.kds-btn--serve   { background: var(--kds-served); border-color: var(--kds-served); color: #fff; }
+.kds-btn--busy    { pointer-events: none; opacity: .6; }
+.kds-item__action { margin-top: 9px; }
+
+/* ═══ Bo'sh holat / xato ═══════════════════════════════════════ */
+
+.kds-empty { padding: 64px 20px; text-align: center; color: var(--kds-muted); }
+.kds-empty__icon { font-size: 42px; opacity: .55; }
+.kds-empty__title { font-size: 16px; font-weight: 600; margin: 12px 0 4px; color: var(--kds-text); }
+.kds-empty__hint { font-size: 13px; }
+
+.kds-item__error {
+	margin-top: 8px; padding: 9px 11px;
+	border: 1px solid var(--kds-cancelled); border-radius: 8px;
+	background: var(--kds-cancelled-soft); color: var(--kds-cancelled);
+	font-size: 13px; line-height: 1.35;
+}
+
+/* ═══ Moslashuvchanlik ═════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+	.kds-topbar { flex-direction: column; align-items: stretch; }
+	.kds-board { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.kds-btn { transition: none; }
+	.kds-btn:active:not(:disabled) { transform: none; }
+	.kds-spinner { animation-duration: 2s; }
+}

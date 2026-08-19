@@ -17,9 +17,13 @@ def run():
 	from ozturkapp.ozturkapp.setup.custom_fields import create_fields, create_property_setters
 	from ozturkapp.ozturkapp.setup.kassa_setup import create_party_types
 	from ozturkapp.ozturkapp.setup.print_format_setup import create_sales_order_print_format
+	from ozturkapp.ozturkapp.setup.receipt_format import setup as setup_receipt_format
 	from ozturkapp.ozturkapp.setup.ury_custom_fields import (
 		create_fields as create_ury_pos_fields,
 	)
+	from ozturkapp.ozturkapp.setup.kitchen_setup import setup as setup_kitchen
+	from ozturkapp.ozturkapp.setup.service_charge import setup as setup_service_charge
+	from ozturkapp.ozturkapp.setup.waiter_setup import setup as setup_waiter
 	from ozturkapp.ozturkapp.setup.ury_permissions import create_permissions
 
 	tasks = [
@@ -29,6 +33,15 @@ def run():
 		create_permissions,
 		create_party_types,
 		create_sales_order_print_format,
+		# Xizmat haqi (12%) — ERPNext soliq shabloni orqali (TZ §8).
+		# Idempotent: mavjud shablon va foizga tegmaydi.
+		setup_service_charge,
+		# Oshxona KDS — URY KOT Items custom fieldlari, rol, ruxsatlar (TZ §21).
+		setup_kitchen,
+		# Ofitsant mobil ilovasi — hisob so'rash maydonlari va ruxsatlar.
+		setup_waiter,
+		# Mijoz cheki — o'zbekcha format.
+		setup_receipt_format,
 	]
 	for fn in tasks:
 		try:
