@@ -11,13 +11,26 @@ bu yerda faqat MAVJUD ma'lumot o'qiladi (TZ §14).
 Buyurtma = `docstatus = 0` holatidagi `POS Invoice`. URY'da "URY Order"
 DocType'i Single (bitta yozuvli forma) bo'lgani uchun buyurtmalar aynan
 POS Invoice qoralamalarida saqlanadi.
+
+YAGONA YOZUV AMALI — BEKOR QILISH
+=================================
+Kassa buyurtma YARATMAYDI va TAHRIRLAMAYDI (TZ §14). Bitta istisno bor:
+ofitsant xato zakaz olib qo'ysa, kassir uni bekor qiladi. Qoida
+(`utils/order_cancel.py`) — oshxona ishga kirishmagan bo'lsa har qanday
+kassir, kirishgan bo'lsa faqat menejer.
 """
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, time_diff_in_seconds
 
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
+from ozturkapp.ozturkapp.utils import (
+    cashier_billing,
+    cashier_permissions,
+    kitchen_status,
+    order_cancel,
+    table_status,
+)
 
 
 @frappe.whitelist()
@@ -153,6 +166,41 @@ def get_order_bill_preview(order):
     return bill
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  Bekor qilish — kassaning yagona yozuv amali
+# ═══════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def cancel_order(order, reason):
+    """Ofitsant xato olgan buyurtmani bekor qilish.
+
+    KIM QILA OLADI
+    ==============
+        Oshxona hali BOSHLAMAGAN  ->  har qanday kassir
+        Oshxona BOSHLAB YUBORGAN  ->  faqat menejer
+
+    Qoidaning o'zi `utils/order_cancel.py` da — kassa oynasi ham,
+    kelajakdagi boshqa mijoz ham AYNAN o'sha funksiyaga murojaat qiladi,
+    o'z tekshiruvini yozmaydi.
+
+    Chek O'CHIRILMAYDI: `custom_cancelled = 1` qo'yiladi, sabab va kim
+    bekor qilgani yoziladi. Shu bilan birga oshxona chiptasi yopiladi va
+    boshqa ochiq cheki qolmagan stol bo'shatiladi.
+
+    Args:
+        order: `POS Invoice` nomi (`docstatus = 0` bo'lishi shart).
+        reason: bekor qilish sababi — majburiy, hisobotga tushadi.
+
+    Returns:
+        dict: invoice, cancelled_items, freed_tables, kitchen_started
+    """
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+    row = cashier_permissions.assert_invoice_in_scope(order, scope, docstatus=0)
+
+    return order_cancel.cancel_invoice(row, reason, scope)
+
+
 def _kitchen_states(invoices: list) -> dict:
     """Bir nechta chek uchun KOT holatini BITTA so'rovda yig'ish (TZ §25).
 
@@ -165,17 +213,19 @@ def _kitchen_states(invoices: list) -> dict:
     rows = frappe.get_all(
         "URY KOT",
         filters={"invoice": ["in", invoices], "docstatus": ["<", 2]},
-        fields=["invoice", "order_status", "start_time_prep"],
+        fields=["invoice", "order_status"],
     )
 
     grouped = {}
     for row in rows:
         grouped.setdefault(row.invoice, []).append(row)
 
+    started_invoices = _started_invoices(list(grouped))
+
     result = {}
     for invoice, kots in grouped.items():
         served = sum(1 for k in kots if (k.order_status or "") == "Served")
-        started = any(k.start_time_prep or (k.order_status or "") == "Served" for k in kots)
+        started = invoice in started_invoices
 
         if served == len(kots):
             label = _("Berildi")
@@ -192,3 +242,39 @@ def _kitchen_states(invoices: list) -> dict:
             "label": label,
         }
     return result
+
+
+def _started_invoices(invoices: list) -> set:
+    """Oshxona ISHNI BOSHLAGAN cheklar to'plami — bitta so'rovda.
+
+    `kitchen_status.get_order_progress()` bilan bir xil qoida, faqat
+    ro'yxat uchun: har bir chek uchun alohida chaqirish N+1 so'rovga
+    aylanardi.
+
+    `URY KOT.start_time_prep` ATAYLAB ishlatilmaydi — u `default = "Now"`
+    bilan e'lon qilingan va KOT yaratilganda to'ladi, ya'ni har doim
+    to'lgan bo'ladi. Ish boshlanganini faqat mahsulot darajasidagi
+    `custom_kitchen_status` bildiradi.
+    """
+    if not invoices:
+        return set()
+
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT k.invoice
+        FROM `tabURY KOT Items` ki
+        INNER JOIN `tabURY KOT` k ON k.name = ki.parent
+        WHERE k.invoice IN %(invoices)s AND k.docstatus = 1
+          AND k.type IN %(types)s
+          AND IFNULL(ki.custom_kitchen_status, %(pending)s)
+              NOT IN (%(pending)s, %(cancelled)s)
+        """,
+        {
+            "invoices": tuple(invoices),
+            "types": kitchen_status.COOKING_KOT_TYPES,
+            "pending": kitchen_status.PENDING,
+            "cancelled": kitchen_status.CANCELLED,
+        },
+        as_dict=True,
+    )
+    return {row.invoice for row in rows}

@@ -249,6 +249,80 @@ def _status_label(docstatus: int) -> str:
     )
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  Kassani kim ocha/yopa oladi (POS Profile'ga biriktirilgan kassir)
+# ═══════════════════════════════════════════════════════════════════
+#
+# NEGA BU KERAK
+# =============
+# ERPNext smena hisobotini `POS Invoice.owner` bo'yicha yig'adi:
+#
+#     pos_closing_entry.get_pos_invoices():
+#         where owner = <POS Opening Entry.user>
+#
+# Ya'ni smenani KIM OCHGANI chekni hisobotga kiritadi yoki chiqarib
+# tashlaydi. Smenani Administrator ochib, cheklar kassir nomiga yozilsa,
+# o'sha cheklar Z-hisobotga UMUMAN tushmaydi: kutilayotgan summa kam
+# ko'rinadi, cheklar esa `consolidated_invoice` siz osilib qoladi va
+# buxgalteriyaga (GL) hech qachon yetib bormaydi. Keyingi yopilish ham
+# ularni olmaydi — uning oynasi yangi smena ochilgan vaqtdan boshlanadi.
+#
+# ERPNext buni O'ZI tekshirmaydi (`POSOpeningEntry.validate_pos_profile_and_cashier`
+# faqat kompaniya va user `enabled` ligini ko'radi), shuning uchun
+# cheklovni shu yerda qo'yamiz.
+#
+# Ruxsatlar ro'yxati KODDA emas — `POS Profile.applicable_for_users` da.
+# Filial qo'shilsa yoki kassir almashsa kod tegishi shart emas.
+
+
+def pos_profile_users(pos_profile: str) -> list:
+    """POS Profile'ga biriktirilgan kassirlar (`applicable_for_users`)."""
+    if not pos_profile:
+        return []
+
+    return frappe.get_all(
+        "POS Profile User",
+        filters={"parent": pos_profile, "parenttype": "POS Profile"},
+        pluck="user",
+        order_by="idx asc",
+    )
+
+
+def can_operate_shift(pos_profile: str, user: str = None) -> bool:
+    """Smenani ochish/yopish huquqi bormi?
+
+    Ro'yxat BO'SH bo'lsa cheklov qo'llanmaydi — `assert_can_bill()` bilan
+    bir xil kelishuv: sozlanmagan profil butun kassani to'xtatib
+    qo'ymasligi kerak.
+    """
+    allowed = pos_profile_users(pos_profile)
+    if not allowed:
+        return True
+
+    return (user or frappe.session.user) in allowed
+
+
+def assert_shift_operator(pos_profile: str, action: str):
+    """Smena amalini faqat biriktirilgan kassir bajarishini majburlaydi."""
+    if can_operate_shift(pos_profile):
+        return
+
+    raise CashierPermissionError(
+        _("Kassani {0} faqat unga biriktirilgan kassir bajaradi: {1}").format(
+            action, shift_operator_names(pos_profile) or _("(ro'yxat bo'sh)")
+        )
+    )
+
+
+def shift_operator_names(pos_profile: str) -> str:
+    """«Kassa, Aziz» — xatoda va ekranda ko'rsatish uchun."""
+    return ", ".join(_user_label(user) for user in pos_profile_users(pos_profile))
+
+
+def _user_label(user: str) -> str:
+    return frappe.db.get_value("User", user, "full_name") or user
+
+
 def assert_can_bill(pos_profile: str):
     """POS Profile'dagi `role_allowed_for_billing` cheklovini qo'llaydi.
 

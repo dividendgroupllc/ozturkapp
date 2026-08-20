@@ -52,6 +52,11 @@ doc_events = {
 	# ERPNext Desk. Signal manbaning O'ZIGA osiladi — shunda qaysi yo'l
 	# bilan o'zgarishidan qat'i nazar ofitsant ilovasi xabardor bo'ladi.
 	"POS Opening Entry": {
+		# Smena EGASI POS Profile'ga biriktirilgan kassir bo'lishi shart.
+		# ERPNext Z-hisobotni `where owner = <opening.user>` bilan yig'adi,
+		# ya'ni noto'g'ri egali smena cheklarni hisobotdan tushirib
+		# qoldiradi. Batafsil: overrides/pos_opening_entry.py
+		"validate": "ozturkapp.ozturkapp.overrides.pos_opening_entry.validate",
 		"on_submit": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_opening_change",
 		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_opening_change",
 	},

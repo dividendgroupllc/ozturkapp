@@ -271,6 +271,13 @@ def createPosOpening(pos_profile, company, balance_details):
     Returns:
         dict: `{"name": str, "status": "open"}`
     """
+    # Kassani faqat POS Profile'ga biriktirilgan kassir ochadi. Tekshiruv
+    # SHU YERDA — bu funksiyaga kassa sahifasi ham, Desktop POS mijozi ham
+    # (hooks.py: DESKTOP_POS_METHODS) aynan shu yo'ldan keladi.
+    from ozturkapp.ozturkapp.utils import cashier_permissions
+
+    cashier_permissions.assert_shift_operator(pos_profile, _("ochishni"))
+
     branch = _get_branch()
     room = _get_user_room(branch)
     details = _loads(balance_details, [])
@@ -482,9 +489,15 @@ def createPosClosing(pos_opening_entry, payment_reconciliation):
         make_closing_entry_from_opening,
     )
 
+    from ozturkapp.ozturkapp.utils import cashier_permissions
+
     rows = _loads(payment_reconciliation, [])
     opening = frappe.get_doc("POS Opening Entry", pos_opening_entry)
     _assert_not_finalized(opening)
+
+    # Yopishda kassir qo'lidagi NAQD PULNI sanaydi — bu ham kassirning
+    # ishi, shuning uchun ochish bilan bir xil qoida qo'llanadi.
+    cashier_permissions.assert_shift_operator(opening.pos_profile, _("yopishni"))
 
     # Kassir kiritgan haqiqiy summalar (mode_of_payment → closing_amount).
     entered = {

@@ -206,6 +206,9 @@ ozturk.cashier.Screen = class CashierScreen {
 		// `loadFloor` tanlovni bekor qilib ulguradi.
 		if (panel && this.selectedTable) {
 			await this.loadTableDetail(this.selectedTable);
+		} else if (panel && this.selectedInvoice) {
+			// Stolsiz buyurtma tanlangan — uni stol orqali topib bo'lmaydi.
+			await this.loadOrderDetail(this.selectedInvoice);
 		}
 	}
 
@@ -364,13 +367,20 @@ ozturk.cashier.Screen = class CashierScreen {
 
 	/** Hodisa AYNAN tanlangan stol yoki uning chekiga tegishlimi? */
 	touchesSelection(data) {
-		if (!this.selectedTable || !data) return false;
+		if (!data) return false;
 
-		if (data.table === this.selectedTable) return true;
-		if (Array.isArray(data.tables) && data.tables.includes(this.selectedTable)) {
-			return true;
-		}
+		// Stolsiz buyurtmada (olib ketish, Desktop POS) `selectedTable`
+		// bo'sh bo'ladi — tanlov faqat chek nomida yashaydi.
+		if (!this.selectedTable && !this.selectedInvoice) return false;
+
 		if (data.invoice && data.invoice === this.selectedInvoice) return true;
+
+		if (this.selectedTable) {
+			if (data.table === this.selectedTable) return true;
+			if (Array.isArray(data.tables) && data.tables.includes(this.selectedTable)) {
+				return true;
+			}
+		}
 
 		// Qamrov ko'rsatilmagan bo'lsa — panelni ham yangilaymiz.
 		return !data.table && !data.invoice && !(data.tables || []).length;
@@ -473,7 +483,12 @@ ozturk.cashier.Screen = class CashierScreen {
 			});
 		}
 
-		this.$shiftBtn.text(__("Kassani yopish")).toggle(isOpen);
+		// Yopish ham faqat biriktirilgan kassirning ishi — u kassadagi
+		// naqd pulni sanaydi. Boshqa foydalanuvchida tugma chiqmaydi
+		// (server ham rad etadi: `assert_shift_operator`).
+		const canOperate = !!(this.ctx.permissions || {}).can_operate_shift;
+
+		this.$shiftBtn.text(__("Kassani yopish")).toggle(isOpen && canOperate);
 	}
 
 	/**
@@ -496,6 +511,27 @@ ozturk.cashier.Screen = class CashierScreen {
 		// ham shuni majburlaydi (`_opening_balance_details`).
 		const modes = this.ctx.cash_modes || [];
 		const $form = $(this.el.gate).off();
+		const $message = this.$root.find(".rc-gate .rc-boot__message");
+
+		// ── Kassani ochish huquqi bormi? ──────────────────────────────
+		// Yo'q bo'lsa (Administrator, menejer, boshqa filial kassiri) —
+		// sahifa ochiladi va HOLAT ko'rinadi, lekin ochish formasi UMUMAN
+		// chizilmaydi. Sabab `utils/cashier_permissions.py` da: smenani
+		// kim ochgani `POS Invoice.owner` ni belgilaydi va noto'g'ri egali
+		// smena cheklarni Z-hisobotdan tushirib qoldiradi.
+		if (!(this.ctx.permissions || {}).can_operate_shift) {
+			$message.text(
+				this.ctx.shift_operators
+					? __("Kassani faqat {0} ochadi.", [this.ctx.shift_operators])
+					: __("Kassani ochishga sizda ruxsat yo'q.")
+			);
+			$form.empty();
+			return;
+		}
+
+		$message.text(
+			__("Sotuvni boshlash uchun kassadagi naqd pulni sanang va quyida kiriting.")
+		);
 
 		if (!modes.length) {
 			$form.html(
@@ -800,6 +836,52 @@ ozturk.cashier.Screen = class CashierScreen {
 		}
 	}
 
+	/**
+	 * Stolsiz buyurtmani tanlash (olib ketish, yetkazib berish, Desktop POS).
+	 *
+	 * Zal rejasida bunday buyurtmaning stoli yo'q, ya'ni uni faqat
+	 * buyurtmalar ro'yxatidan ochish mumkin. Panel esa o'sha-o'sha —
+	 * `renderPanel()` `detail.table` bo'sh bo'lsa sarlavhani buyurtma
+	 * turidan oladi.
+	 */
+	async selectOrder(invoice) {
+		this.selectedTable = null;
+		$(this.el.canvas)
+			.find(".rc-table")
+			.each((_, node) => node.setAttribute("aria-pressed", "false"));
+
+		await this.loadOrderDetail(invoice);
+	}
+
+	async loadOrderDetail(invoice) {
+		this.selectedInvoice = invoice;
+
+		try {
+			const bill = await this.call(
+				"ozturkapp.ozturkapp.api.order.get_order_bill_preview",
+				{ order: invoice }
+			);
+			if (this.selectedInvoice !== invoice) return; // kassir boshqasini tanladi
+
+			this.renderPanel({
+				table: "",
+				status: "OCCUPIED",
+				room: bill.room || "",
+				seats: 0,
+				is_merged: false,
+				bill,
+				other_orders: [],
+				issue: null,
+			});
+		} catch (error) {
+			this.el.panel.innerHTML = `<div class="rc-empty">
+				<div class="rc-empty__icon">⚠</div>
+				<p class="rc-empty__title">${esc(__("Ma'lumot yuklanmadi"))}</p>
+				<p class="rc-empty__hint">${esc(this.errorText(error))}</p>
+			</div>`;
+		}
+	}
+
 	renderPanel(detail) {
 		const labels = {
 			AVAILABLE: __("Bo'sh"),
@@ -822,14 +904,21 @@ ozturk.cashier.Screen = class CashierScreen {
 			body = this.availableHtml(detail);
 		}
 
+		// Stolsiz buyurtmada (olib ketish / Desktop POS) sarlavha stol nomi
+		// emas, buyurtma turi bo'ladi — «o'rin» soni ham ma'nosiz.
+		const bill = detail.bill || {};
+		const title = detail.table || bill.order_type || __("Stolsiz buyurtma");
+		const subtitle = detail.table
+			? `${esc(detail.room || "")} · ${cint(detail.seats)} ${esc(__("o'rin"))}${
+					detail.is_merged ? ` · ${esc(__("birlashtirilgan"))}` : ""
+			  }`
+			: esc(bill.invoice || "");
+
 		this.el.panel.innerHTML = `
 			<div class="rc-panel__head">
 				<div>
-					<div class="rc-panel__table">${esc(detail.table)}</div>
-					<div class="rc-panel__sub">
-						${esc(detail.room || "")} · ${cint(detail.seats)} ${esc(__("o'rin"))}
-						${detail.is_merged ? ` · ${esc(__("birlashtirilgan"))}` : ""}
-					</div>
+					<div class="rc-panel__table">${esc(title)}</div>
+					<div class="rc-panel__sub">${subtitle}</div>
 				</div>
 				<span class="rc-chip rc-chip--${esc(detail.status)}">${esc(
 			labels[detail.status]
@@ -966,6 +1055,11 @@ ozturk.cashier.Screen = class CashierScreen {
 		const canPay = bill.item_count > 0;
 		const needsBill = canPay && !bill.billed;
 
+		// Bekor qilish qoidasi SERVERDA hisoblanadi (`utils/order_cancel.py`).
+		// Bu yerda faqat chiziladi — tugmani DevTools'dan yoqib qo'yish ham
+		// hech narsa bermaydi, server o'sha qoidani qayta qo'llaydi.
+		const cancellation = bill.cancellation || {};
+
 		return `
 			<div class="rc-facts">
 				<div class="rc-fact"><div class="rc-fact__label">${esc(
@@ -1024,6 +1118,7 @@ ozturk.cashier.Screen = class CashierScreen {
 				<button class="rc-btn rc-btn--pay" data-action="pay" ${
 					canPay && bill.billed ? "" : "disabled"
 				}>${esc(__("To'lov"))} · ${esc(this.money(bill.rounded_total))}</button>
+				${this.cancelButtonHtml(cancellation)}
 			</div>
 
 			${
@@ -1036,6 +1131,16 @@ ozturk.cashier.Screen = class CashierScreen {
 					  )}</p>`
 			}
 			${
+				cancellation.kitchen_started && cancellation.blocked_reason
+					? `<p class="rc-hint">🔒 ${esc(cancellation.blocked_reason)}</p>`
+					: ""
+			}
+			${
+				cancellation.kitchen_started && cancellation.warning
+					? `<p class="rc-hint">⚠ ${esc(cancellation.warning)}</p>`
+					: ""
+			}
+			${
 				detail.other_orders && detail.other_orders.length
 					? `<p class="rc-hint">⚠ ${esc(
 							__("Bu stolda yana {0} ta to'lanmagan hisob bor.").replace(
@@ -1045,6 +1150,39 @@ ozturk.cashier.Screen = class CashierScreen {
 					  )}</p>`
 					: ""
 			}`;
+	}
+
+	/**
+	 * «Buyurtmani bekor qilish» tugmasi.
+	 *
+	 * Uch xil ko'rinishi bor va uchalasi ham SERVER aytgan holatga tayanadi
+	 * (`bill.cancellation`):
+	 *
+	 *   oshxona boshlamagan          -> oddiy bekor qilish (har qanday kassir)
+	 *   boshlagan + menejer          -> «Majburan bekor qilish»
+	 *   boshlagan + oddiy kassir     -> o'chirilgan tugma + sabab
+	 *
+	 * Tugma butunlay yashirilmaydi: kassir NEGA bekor qilolmayotganini
+	 * ko'rishi kerak, aks holda u menejerni chaqirish o'rniga sahifani
+	 * qayta yuklab vaqt yo'qotadi.
+	 */
+	cancelButtonHtml(cancellation) {
+		if (!cancellation || (!cancellation.allowed && !cancellation.kitchen_started)) {
+			// To'langan yoki allaqachon bekor qilingan chek — tugma keraksiz.
+			return "";
+		}
+
+		if (!cancellation.allowed) {
+			return `<button class="rc-btn rc-btn--danger" disabled title="${esc(
+				cancellation.blocked_reason || ""
+			)}">${esc(__("Bekor qilish"))}</button>`;
+		}
+
+		return `<button class="rc-btn rc-btn--danger" data-action="cancel-order">${esc(
+			cancellation.requires_supervisor
+				? __("Majburan bekor qilish")
+				: __("Buyurtmani bekor qilish")
+		)}</button>`;
 	}
 
 	bindPanel(detail) {
@@ -1059,6 +1197,7 @@ ozturk.cashier.Screen = class CashierScreen {
 				else if (action === "give-bill") this.giveBill(detail, button);
 				else if (action === "reprint") this.printReceipt(detail);
 				else if (action === "pay") this.openPaymentModal(detail);
+				else if (action === "cancel-order") this.cancelOrder(detail, button);
 				else if (action === "reload") this.refreshAll();
 				else if (action === "release") this.releaseTable(detail);
 				else if (action === "print") this.printReceipt(detail);
@@ -1176,6 +1315,87 @@ ozturk.cashier.Screen = class CashierScreen {
 		} finally {
 			this.busy(button, false);
 		}
+	}
+
+	/**
+	 * Buyurtmani bekor qilish — ofitsant xato zakaz olib qo'yganda.
+	 *
+	 * QOIDA (serverda majburlanadi, `utils/order_cancel.py`)
+	 * ======================================================
+	 *     Oshxona hali BOSHLAMAGAN  ->  har qanday kassir
+	 *     Oshxona BOSHLAB YUBORGAN  ->  faqat menejer
+	 *
+	 * "Boshlangan" = kamida bitta taom `URY KOT Items.custom_kitchen_status`
+	 * da «Kutilmoqda» dan chiqib ketgan. `URY KOT.start_time_prep` ga
+	 * QARALMAYDI — u KOT yaratilganda to'ladigan maydon.
+	 *
+	 * Chek O'CHIRILMAYDI: `custom_cancelled = 1` bo'lib bazada qoladi,
+	 * sabab esa hisobotga tushadi. Shuning uchun sabab majburiy.
+	 */
+	cancelOrder(detail, button) {
+		const bill = detail.bill || {};
+		const cancellation = bill.cancellation || {};
+		const fields = [];
+
+		// Menejer majburan bekor qilayotgan bo'lsa — taom allaqachon
+		// pishayotganini AYTIB turamiz, u chiqindiga ketadi.
+		if (cancellation.warning) {
+			fields.push({
+				fieldname: "warning",
+				fieldtype: "HTML",
+				options: `<div class="rc-hint" style="margin:0 0 10px">⚠ ${esc(
+					cancellation.warning
+				)}</div>`,
+			});
+		}
+
+		fields.push({
+			fieldname: "reason",
+			fieldtype: "Small Text",
+			label: __("Bekor qilish sababi"),
+			description: __("Sabab chekda saqlanadi va hisobotga tushadi."),
+			reqd: 1,
+		});
+
+		frappe.prompt(
+			fields,
+			async (values) => {
+				try {
+					this.busy(button, true);
+					const result = await this.call(
+						"ozturkapp.ozturkapp.api.order.cancel_order",
+						{ order: bill.invoice, reason: values.reason }
+					);
+
+					frappe.show_alert({
+						message: __("{0} bekor qilindi", [bill.invoice]),
+						indicator: "orange",
+					});
+
+					// Oshxonaga chipta ketgan bo'lsa — kassir buni bilishi
+					// kerak: oshpaz ekranida ham chipta yopildi.
+					if (result && cint(result.cancelled_items)) {
+						frappe.show_alert({
+							message: __("Oshxonaga xabar berildi ({0} taom)", [
+								cint(result.cancelled_items),
+							]),
+							indicator: "blue",
+						});
+					}
+
+					this.clearSelection();
+					await this.refreshAll();
+				} catch (error) {
+					this.alertError(error);
+				} finally {
+					this.busy(button, false);
+				}
+			},
+			cancellation.requires_supervisor
+				? __("Majburan bekor qilish")
+				: __("Buyurtmani bekor qilish"),
+			__("Bekor qilish")
+		);
 	}
 
 	/**
@@ -1712,7 +1932,9 @@ ozturk.cashier.Screen = class CashierScreen {
 			.map(
 				(order) => `<button type="button" class="rc-order rc-order--${esc(
 					order.status
-				)}" data-table="${esc(order.table || "")}">
+				)}" data-table="${esc(order.table || "")}" data-invoice="${esc(
+					order.invoice
+				)}">
 					<div class="rc-order__top">
 						<span class="rc-order__table">${esc(order.table || order.order_type || "—")}</span>
 						<span class="rc-order__amount">${esc(this.money(order.amount))}</span>
@@ -1739,8 +1961,14 @@ ozturk.cashier.Screen = class CashierScreen {
 		$(this.el.orderList)
 			.off("click")
 			.on("click", ".rc-order", (e) => {
-				const table = e.currentTarget.dataset.table;
+				const { table, invoice } = e.currentTarget.dataset;
+
+				// Olib ketish, yetkazib berish va Desktop POS'dan kelgan
+				// buyurtmalarda stol BO'LMAYDI. Ilgari bunday qatorni
+				// bosganda hech narsa ochilmasdi — ya'ni kassir uni ko'rib
+				// tursa ham hisobini ocholmasdi va bekor ham qilolmasdi.
 				if (table) this.selectTable(table);
+				else if (invoice) this.selectOrder(invoice);
 			});
 	}
 

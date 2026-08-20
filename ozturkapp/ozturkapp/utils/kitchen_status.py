@@ -204,6 +204,83 @@ def derive_kot_status(item_statuses) -> str:
 #  Buyurtma bo'yicha holat — Kassa va kelajakdagi Ofitsant uchun (TZ §26)
 # ═══════════════════════════════════════════════════════════════════
 
+#: Oshxonaga OVQAT tayyorlash uchun boradigan KOT turlari.
+#:
+#: `"Cancelled"` / `"Partially cancelled"` — bular ko'rsatma KOT'lari,
+#: ovqat buyurtmasi EMAS (TZ §9). Ular oshxona ishi boshlanganini
+#: bildirmaydi va shu sababli quyidagi hisobga kirmaydi.
+COOKING_KOT_TYPES = ("New Order", "Order Modified", "Duplicate")
+
+
+def get_order_progress(invoice: str) -> dict:
+    """Chek bo'yicha oshxona ishi BOSHLANGANMI?
+
+    "Boshlangan" = kamida bitta taom `Kutilmoqda` dan chiqib ketgan, ya'ni
+    oshpaz uni `Tayyorlanmoqda` / `Tayyor` / `Berildi` ga o'tkazgan.
+
+    NEGA `URY KOT.start_time_prep` ISHLATILMAYDI
+    ============================================
+    U DocType'da `default = "Now"` bilan e'lon qilingan, ya'ni KOT
+    YARATILGANDA to'ladi — oshpaz ishni boshlaganda emas. Bazadagi har bir
+    KOT'da uning qiymati `creation` ga teng. Shunga tayangan har qanday
+    tekshiruv "ish HAR DOIM boshlangan" deb javob beradi va bekor qilish
+    qoidasini butunlay ishlamas qilib qo'yadi.
+
+    Yagona ishonchli manba — mahsulot darajasidagi
+    `URY KOT Items.custom_kitchen_status`: uni faqat oshxona ekrani
+    (`api/kitchen.update_kot_item_status`) yozadi.
+
+    Returns:
+        dict:
+            has_kot        — chekka umuman KOT yaratilganmi
+            started        — kamida bitta taom ustida ish boshlanganmi
+            started_items  — `[{item, status, label}]` — boshlangan taomlar
+            pending_count  — hali `Kutilmoqda` dagi taomlar soni
+    """
+    empty = {
+        "has_kot": False,
+        "started": False,
+        "started_items": [],
+        "pending_count": 0,
+    }
+
+    if not invoice or not frappe.db.exists("DocType", "URY KOT"):
+        return empty
+
+    rows = frappe.db.sql(
+        """
+        SELECT ki.item, ki.custom_kitchen_status AS status
+        FROM `tabURY KOT Items` ki
+        INNER JOIN `tabURY KOT` k ON k.name = ki.parent
+        WHERE k.invoice = %(invoice)s AND k.docstatus = 1
+          AND k.type IN %(types)s
+        """,
+        {"invoice": invoice, "types": COOKING_KOT_TYPES},
+        as_dict=True,
+    )
+    if not rows:
+        return empty
+
+    started_items, pending = [], 0
+    for row in rows:
+        status = normalize(row.status)
+
+        if status == PENDING:
+            pending += 1
+        elif status != CANCELLED:
+            # Allaqachon bekor qilingan taom ish boshlanganini BILDIRMAYDI.
+            started_items.append(
+                {"item": row.item, "status": status, "label": label(status)}
+            )
+
+    return {
+        "has_kot": True,
+        "started": bool(started_items),
+        "started_items": started_items,
+        "pending_count": pending,
+    }
+
+
 def get_item_statuses_for_invoice(invoice: str) -> dict:
     """{item_code: {status, qty, can_cancel}} — chek bo'yicha.
 

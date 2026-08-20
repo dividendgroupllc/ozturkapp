@@ -21,7 +21,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
+from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import EVENT_FLOOR, EVENT_ORDER
 from ozturkapp.ozturkapp.utils.kitchen_realtime import EVENT_ITEM
 from ozturkapp.ozturkapp.utils.notifications import EVENT_NOTIFY
@@ -72,7 +72,14 @@ def get_cashier_context():
         "permissions": {
             "can_bill": _can_bill(scope.pos_profile),
             "is_supervisor": cashier_permissions.has_supervisor_role(),
+            # Kassani ochish/yopish — faqat POS Profile'ga biriktirilgan
+            # kassir. Boshqa foydalanuvchiga (Administrator, menejer)
+            # sahifa ochiladi va holat ko'rinadi, lekin ochish formasi
+            # UMUMAN chizilmaydi.
+            "can_operate_shift": cashier_permissions.can_operate_shift(scope.pos_profile),
         },
+        # Ekranda "Kassani faqat {0} ochadi" deb aytish uchun.
+        "shift_operators": cashier_permissions.shift_operator_names(scope.pos_profile),
         "statuses": list(STATUSES),
         "events": {
             "floor": EVENT_FLOOR,
@@ -266,6 +273,7 @@ def open_shift(balance_details):
     """
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
+    cashier_permissions.assert_shift_operator(scope.pos_profile, _("ochishni"))
 
     from ozturkapp.ozturkapp.api.desktop_pos import createPosOpening
 
@@ -345,6 +353,26 @@ def _cash_modes(pos_profile: str) -> list:
     return modes
 
 
+def _open_order_count(scope) -> int:
+    """Kassirni smenani yopishdan to'xtatadigan buyurtmalar soni.
+
+    NEGA `frappe.db.count("POS Invoice", {"docstatus": 0}) EMAS`
+    ===========================================================
+    Bekor qilingan chek O'CHIRILMAYDI — u `docstatus = 0` bo'lib qoladi va
+    faqat `custom_cancelled = 1` bilan belgilanadi
+    (`utils/order_cancel.py`). Xom `docstatus = 0` sanog'i ularni ham
+    qo'shib yuboradi va kassa yopilmay qoladi:
+
+        «Filialda 2 ta to'lanmagan buyurtma bor» — lekin kassirning
+        buyurtmalar ro'yxati BO'SH, chunki u `custom_cancelled = 0`
+        bo'yicha filtrlangan. Kassir nimani yopishni topa olmaydi.
+
+    Shuning uchun sanoq ham, ro'yxat ham AYNAN bitta manbadan olinadi:
+    `table_status.get_open_orders()`.
+    """
+    return len(table_status.get_open_orders(scope.branch))
+
+
 @frappe.whitelist()
 def get_shift_closing_data():
     """Kassani yopish oynasi uchun ma'lumot.
@@ -378,9 +406,7 @@ def get_shift_closing_data():
         # Sanaladigan usullar (odatda bitta — "Cash").
         "cash_modes": _cash_modes(scope.pos_profile),
         "countdown_seconds": CLOSING_COUNTDOWN_SECONDS,
-        "open_orders": frappe.db.count(
-            "POS Invoice", {"docstatus": 0, "branch": scope.branch}
-        ),
+        "open_orders": _open_order_count(scope),
     }
 
 
@@ -397,6 +423,7 @@ def close_shift(counted_cash):
     """
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
+    cashier_permissions.assert_shift_operator(scope.pos_profile, _("yopishni"))
 
     shift = _get_shift(scope)
     if not shift.get("open"):
@@ -404,7 +431,7 @@ def close_shift(counted_cash):
 
     # To'lanmagan buyurtma qolgan bo'lsa smenani yopish MUMKIN EMAS —
     # aks holda o'sha buyurtmalar hisobotdan tushib qoladi.
-    pending = frappe.db.count("POS Invoice", {"docstatus": 0, "branch": scope.branch})
+    pending = _open_order_count(scope)
     if pending:
         frappe.throw(
             _(

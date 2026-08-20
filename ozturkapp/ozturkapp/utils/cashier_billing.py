@@ -122,14 +122,20 @@ def _find_service_charge_row(template: str, account: str = None):
 #  Oshxona holati — FAQAT O'QISH (TZ §12, §15, §16)
 # ═══════════════════════════════════════════════════════════════════
 
-def get_kitchen_state(invoice: str) -> dict:
+def get_kitchen_state(invoice: str, progress=None) -> dict:
     """Chekka tegishli KOT'lar holati.
 
     Kassa bu holatni FAQAT KO'RSATADI. Hech qachon o'zgartirmaydi —
     tayyorlash jarayoni oshxonaning mas'uliyati (TZ §12).
 
-    `preparation_started` kelajakdagi ofitsant bekor qilish qoidasi (TZ §16)
-    uchun kerak bo'ladi; hozir faqat axborot sifatida qaytariladi.
+    `preparation_started` — buyurtmani bekor qilish qoidasining asosi
+    (`utils/order_cancel.py`): oshxona ishga kirishmagan bo'lsa chekni har
+    qanday kassir bekor qiladi, kirishgan bo'lsa faqat menejer.
+
+    Args:
+        progress: `kitchen_status.get_order_progress()` natijasi. Berilmasa
+            o'zi so'raydi — chaqiruvchi uni allaqachon hisoblagan bo'lsa
+            ikkinchi so'rov qilinmaydi.
     """
     empty = {
         "kot_count": 0,
@@ -149,8 +155,20 @@ def get_kitchen_state(invoice: str) -> dict:
     if not kots:
         return empty
 
+    from ozturkapp.ozturkapp.utils import kitchen_status as _kitchen
+
     served = sum(1 for k in kots if (k.order_status or "") == "Served")
-    started = any(k.start_time_prep or (k.order_status or "") == "Served" for k in kots)
+
+    # DIQQAT: `start_time_prep` bu yerda ISHLATILMAYDI.
+    # U `URY KOT` DocType'ida `default = "Now"` — ya'ni KOT YARATILGANDA
+    # to'ladi, oshpaz ishni boshlaganda emas. Bazadagi har bir KOT'da u
+    # `creation` ga teng, shuning uchun unga tayangan tekshiruv "ish har
+    # doim boshlangan" deb javob berardi. Yagona ishonchli manba —
+    # mahsulot darajasidagi `custom_kitchen_status`.
+    if progress is None:
+        progress = _kitchen.get_order_progress(invoice)
+    started = bool(progress.get("started"))
+
     pending = len(kots) - served
 
     if served == len(kots):
@@ -269,7 +287,15 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
     }
 
     if include_kitchen:
-        bill["kitchen"] = get_kitchen_state(doc.name)
+        progress = _kitchen.get_order_progress(doc.name)
+        bill["kitchen"] = get_kitchen_state(doc.name, progress)
+
+        # Kassa oynasi «Buyurtmani bekor qilish» tugmasini SHU javobga
+        # qarab chizadi. Server bir xil javobni `assert_can_cancel()` da
+        # qayta qo'llaydi — tugmani chetlab o'tish hech narsa bermaydi.
+        from ozturkapp.ozturkapp.utils import order_cancel
+
+        bill["cancellation"] = order_cancel.describe(doc, progress)
 
     return bill
 

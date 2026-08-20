@@ -24,7 +24,13 @@ from frappe.tests.utils import FrappeTestCase
 
 from ozturkapp.ozturkapp.api import cashier as cashier_api
 from ozturkapp.ozturkapp.overrides import pos_invoice as pos_invoice_override
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
+from ozturkapp.ozturkapp.utils import (
+    cashier_billing,
+    cashier_permissions,
+    kitchen_status,
+    order_cancel,
+    table_status,
+)
 
 
 def _free_table(branch=None):
@@ -800,14 +806,52 @@ class TestShiftManagement(FrappeTestCase):
         )
 
     def test_closing_is_blocked_while_orders_are_open(self):
-        """To'lanmagan buyurtma bo'lsa kassa yopilmaydi."""
-        import inspect
+        """To'lanmagan buyurtma bo'lsa kassa yopilmaydi.
 
+        ILGARI BU TEST MANBA MATNINI O'QIRDI (`assertIn('"docstatus": 0')`)
+        va shu sababli haqiqiy xatoni o'tkazib yubordi: sanoq bekor
+        qilingan cheklarni ham qo'shib hisoblardi, kassir esa
+        «2 ta to'lanmagan buyurtma bor» xabarini ko'rib, ro'yxatdan hech
+        narsa topa olmasdi. Endi tekshiruv HULQ-ATVOR darajasida.
+        """
         from ozturkapp.ozturkapp.api import cashier as cashier_api
 
-        source = inspect.getsource(cashier_api.close_shift)
-        self.assertIn('"docstatus": 0', source)
-        self.assertIn("to'lanmagan buyurtma", source)
+        scope = cashier_permissions.resolve_scope()
+        if not cashier_api._get_shift(scope).get("open"):
+            self.skipTest("Ochiq kassa smenasi yo'q")
+
+        # Testlar Administrator nomidan ketadi, u esa POS Profile'ga
+        # biriktirilgan kassir emas — `assert_shift_operator()` bizni
+        # tekshirmoqchi bo'lgan qadamga yetkazmasdan to'xtatadi.
+        # Shu bitta tekshiruvni vaqtincha chetlab o'tamiz.
+        real_check = cashier_permissions.can_operate_shift
+        cashier_permissions.can_operate_shift = lambda profile, user=None: True
+        self.addCleanup(
+            setattr, cashier_permissions, "can_operate_shift", real_check
+        )
+
+        table = _free_table(scope.branch)
+        if not table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, 0, 0)
+            """,
+            (name, table, scope.branch),
+        )
+
+        try:
+            with self.assertRaises(frappe.ValidationError) as caught:
+                cashier_api.close_shift(json.dumps({}))
+            self.assertIn("to'lanmagan buyurtma", str(caught.exception))
+        finally:
+            frappe.db.delete("POS Invoice", {"name": name})
 
     def test_page_has_shift_buttons(self):
         page = frappe.get_doc("Page", "restaurant-cashier")
@@ -1346,3 +1390,601 @@ class TestCashierSeesKitchenUpdates(FrappeTestCase):
         source = inspect.getsource(kitchen_realtime.emit_item_change)
         self.assertIn('"branch": branch', source)   # isOurBranch()
         self.assertIn('"invoice": invoice', source)  # touchesSelection()
+
+
+class TestOrderCancellation(FrappeTestCase):
+    """Ofitsant xato zakaz olganda kassir uni bekor qiladi.
+
+    QOIDA
+    =====
+        Oshxona hali BOSHLAMAGAN  ->  har qanday kassir
+        Oshxona BOSHLAB YUBORGAN  ->  faqat menejer
+
+    Qoida `utils/order_cancel.py` da, "boshlangan" degan fakt esa
+    `kitchen_status.get_order_progress()` da — bu yerda ikkalasi ham
+    HULQ-ATVOR darajasida sinaladi, manba matnini o'qib emas.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.table = _free_table(self.scope.branch)
+        if not self.table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+
+        self.branch = self.scope.branch
+        self.invoices, self.kots = [], []
+
+        # Testlar Administrator nomidan ketadi, ya'ni u DOIM menejer.
+        # Oddiy kassirni ko'rsatish uchun rol tekshiruvi vaqtincha
+        # almashtiriladi — `tearDown` uni qaytaradi.
+        self._real_supervisor_check = cashier_permissions.has_supervisor_role
+
+    def tearDown(self):
+        cashier_permissions.has_supervisor_role = self._real_supervisor_check
+
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        for name in self.invoices:
+            frappe.db.delete("POS Invoice", {"name": name})
+
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 0, update_modified=False
+        )
+
+    # ── Yordamchilar ──────────────────────────────────────────────────
+
+    def _as_cashier(self, supervisor: bool):
+        """Menejer huquqi bor/yo'q holatini taqlid qiladi."""
+        cashier_permissions.has_supervisor_role = lambda user=None: supervisor
+
+    def _draft(self, table=None):
+        """Qoralama chek qatori — to'liq hujjat kerak emas (yengil usul)."""
+        table = self.table if table is None else table
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, invoice_printed, custom_cancelled,
+                 grand_total, rounded_total)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, 0, 0, 100, 100)
+            """,
+            (name, table or None, self.branch),
+        )
+        self.invoices.append(name)
+        return name
+
+    def _kot(self, invoice, statuses, kot_type="New Order"):
+        """Chekka KOT va uning mahsulotlarini biriktiradi."""
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, %s, 'Ready For Prepare')
+            """,
+            (kot, invoice, self.branch, kot_type),
+        )
+        self.kots.append(kot)
+
+        for idx, status in enumerate(statuses, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, quantity,
+                     custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, 1, %s)
+                """,
+                (
+                    frappe.generate_hash(length=10),
+                    kot,
+                    idx,
+                    f"TEST-TAOM-{idx}",
+                    status,
+                ),
+            )
+        return kot
+
+    def _row(self, invoice):
+        return frappe._dict(name=invoice)
+
+    def _describe(self, invoice):
+        """API qanday uzatsa, test ham shunday uzatadi (to'liq hujjat emas)."""
+        return order_cancel.describe(
+            frappe.db.get_value(
+                "POS Invoice",
+                invoice,
+                ["name", "docstatus", "custom_cancelled"],
+                as_dict=True,
+            )
+        )
+
+    def _item_statuses(self, kot):
+        return sorted(
+            frappe.get_all(
+                "URY KOT Items",
+                filters={"parent": kot, "parenttype": "URY KOT"},
+                pluck="custom_kitchen_status",
+            )
+        )
+
+    # ── "Boshlangan" degan fakt ───────────────────────────────────────
+
+    def test_start_time_prep_alone_does_not_mean_the_kitchen_started(self):
+        """REGRESSIYA: `start_time_prep` ni bekor qilish shartiga bog'lab bo'lmaydi.
+
+        `URY KOT.start_time_prep` DocType'da `default = "Now"` — u KOT
+        YARATILGANDA to'ladi, oshpaz ishni boshlaganda emas. Unga tayangan
+        tekshiruv "ish har doim boshlangan" deb javob berardi va kassir
+        hech qachon bekor qila olmasdi.
+        """
+        invoice = self._draft()
+        kot = self._kot(invoice, [kitchen_status.PENDING, kitchen_status.PENDING])
+
+        # URY xuddi shunday yozadi.
+        frappe.db.set_value(
+            "URY KOT", kot, "start_time_prep", "12:00:00", update_modified=False
+        )
+
+        progress = kitchen_status.get_order_progress(invoice)
+
+        self.assertTrue(progress["has_kot"])
+        self.assertFalse(
+            progress["started"],
+            "hamma taom 'Kutilmoqda' — oshxona hali boshlamagan",
+        )
+
+    def test_one_item_beyond_pending_means_started(self):
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PENDING, kitchen_status.PREPARING])
+
+        progress = kitchen_status.get_order_progress(invoice)
+
+        self.assertTrue(progress["started"])
+        self.assertEqual(progress["pending_count"], 1)
+        self.assertEqual(
+            [row["status"] for row in progress["started_items"]],
+            [kitchen_status.PREPARING],
+        )
+
+    def test_cancelled_item_does_not_count_as_started(self):
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PENDING, kitchen_status.CANCELLED])
+
+        self.assertFalse(kitchen_status.get_order_progress(invoice)["started"])
+
+    def test_cancellation_kot_is_not_kitchen_work(self):
+        """«Cancelled» KOT — ko'rsatma, ovqat emas (TZ §9)."""
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PREPARING], kot_type="Cancelled")
+
+        self.assertFalse(kitchen_status.get_order_progress(invoice)["started"])
+
+    def test_order_without_a_kot_can_be_cancelled(self):
+        """KOT yaratilmagan (masalan oshxona sozlanmagan) chek ham bekor bo'ladi."""
+        invoice = self._draft()
+
+        progress = kitchen_status.get_order_progress(invoice)
+        self.assertFalse(progress["has_kot"])
+        self.assertFalse(progress["started"])
+
+    # ── Kim bekor qila oladi ──────────────────────────────────────────
+
+    def test_plain_cashier_may_cancel_before_the_kitchen_starts(self):
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PENDING, kitchen_status.PENDING])
+        self._as_cashier(supervisor=False)
+
+        state = self._describe(invoice)
+
+        self.assertTrue(state["allowed"])
+        self.assertFalse(state["requires_supervisor"])
+        self.assertFalse(state["kitchen_started"])
+
+    def test_plain_cashier_is_blocked_once_the_kitchen_starts(self):
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PREPARING])
+        self._as_cashier(supervisor=False)
+
+        state = self._describe(invoice)
+
+        self.assertFalse(state["allowed"])
+        self.assertTrue(state["requires_supervisor"])
+        self.assertTrue(state["blocked_reason"], "sabab aytilishi kerak")
+
+        with self.assertRaises(frappe.ValidationError):
+            order_cancel.cancel_invoice(self._row(invoice), "xato zakaz", self.scope)
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"),
+            0,
+            "rad etilgan urinish hech narsani o'zgartirmasligi kerak",
+        )
+
+    def test_manager_may_force_cancel_after_the_kitchen_started(self):
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PREPARING])
+        self._as_cashier(supervisor=True)
+
+        state = self._describe(invoice)
+
+        self.assertTrue(state["allowed"])
+        self.assertTrue(state["requires_supervisor"])
+        self.assertTrue(state["warning"], "menejer ogohlantirilishi kerak")
+
+        result = order_cancel.cancel_invoice(
+            self._row(invoice), "mijoz voz kechdi", self.scope
+        )
+
+        self.assertTrue(result["kitchen_started"])
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 1
+        )
+
+    def test_paid_order_can_never_be_cancelled(self):
+        invoice = self._draft()
+        frappe.db.set_value("POS Invoice", invoice, "docstatus", 1)
+
+        state = self._describe(invoice)
+        self.assertFalse(state["allowed"])
+        self.assertFalse(state["requires_supervisor"])
+
+    def test_reason_is_required(self):
+        invoice = self._draft()
+        self._as_cashier(supervisor=False)
+
+        for empty in ("", "   ", "."):
+            with self.assertRaises(frappe.ValidationError):
+                order_cancel.cancel_invoice(self._row(invoice), empty, self.scope)
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 0
+        )
+
+    # ── Bekor qilishning oqibatlari ───────────────────────────────────
+
+    def test_cancelling_keeps_the_document_and_records_the_reason(self):
+        invoice = self._draft()
+        self._as_cashier(supervisor=False)
+
+        order_cancel.cancel_invoice(
+            self._row(invoice), "Ofitsant noto'g'ri stolga yozdi", self.scope
+        )
+
+        row = frappe.db.get_value(
+            "POS Invoice",
+            invoice,
+            ["docstatus", "custom_cancelled", "cancel_reason"],
+            as_dict=True,
+        )
+        self.assertEqual(row.docstatus, 0, "hujjat o'chirilmaydi va bekor qilinmaydi")
+        self.assertEqual(row.custom_cancelled, 1)
+        self.assertEqual(row.cancel_reason, "Ofitsant noto'g'ri stolga yozdi")
+
+    def test_cancelling_closes_the_kitchen_ticket(self):
+        """Busiz oshpaz bekor qilingan buyurtmani tayyorlab yuboradi."""
+        invoice = self._draft()
+        kot = self._kot(invoice, [kitchen_status.PENDING, kitchen_status.PENDING])
+        self._as_cashier(supervisor=False)
+
+        result = order_cancel.cancel_invoice(
+            self._row(invoice), "xato zakaz", self.scope
+        )
+
+        self.assertEqual(result["cancelled_items"], 2)
+        self.assertEqual(
+            self._item_statuses(kot),
+            [kitchen_status.CANCELLED, kitchen_status.CANCELLED],
+        )
+        self.assertNotEqual(
+            frappe.db.get_value("URY KOT", kot, "order_status"),
+            "Ready For Prepare",
+            "URY Mosaic 'Ready For Prepare' bo'yicha filtrlaydi — chipta "
+            "ekranda qolib ketmasligi kerak",
+        )
+
+    def test_served_items_are_left_alone(self):
+        """Berilgan taom jismonan chiqib bo'lgan — uni bekor deb yozib bo'lmaydi."""
+        invoice = self._draft()
+        kot = self._kot(invoice, [kitchen_status.SERVED, kitchen_status.PENDING])
+        self._as_cashier(supervisor=True)
+
+        result = order_cancel.cancel_invoice(
+            self._row(invoice), "mijoz qolganidan voz kechdi", self.scope
+        )
+
+        self.assertEqual(result["cancelled_items"], 1)
+        self.assertEqual(
+            self._item_statuses(kot),
+            sorted([kitchen_status.CANCELLED, kitchen_status.SERVED]),
+        )
+
+    def test_cancelling_frees_the_table(self):
+        invoice = self._draft()
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 1, update_modified=False
+        )
+        self._as_cashier(supervisor=False)
+
+        result = order_cancel.cancel_invoice(
+            self._row(invoice), "xato zakaz", self.scope
+        )
+
+        self.assertIn(self.table, result["freed_tables"])
+        self.assertEqual(frappe.db.get_value("URY Table", self.table, "occupied"), 0)
+
+    def test_table_stays_occupied_while_another_bill_is_open(self):
+        """Hisob bo'lingan bo'lsa stol band qolishi kerak (TZ §23)."""
+        cancelled = self._draft()
+        self._draft()  # o'sha stolda ikkinchi ochiq chek
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 1, update_modified=False
+        )
+        self._as_cashier(supervisor=False)
+
+        result = order_cancel.cancel_invoice(
+            self._row(cancelled), "xato zakaz", self.scope
+        )
+
+        self.assertEqual(result["freed_tables"], [])
+        self.assertEqual(frappe.db.get_value("URY Table", self.table, "occupied"), 1)
+
+    def test_order_without_a_table_can_be_cancelled(self):
+        """Desktop POS / olib ketish buyurtmalarida stol bo'lmaydi."""
+        invoice = self._draft(table="")
+        self._as_cashier(supervisor=False)
+
+        result = order_cancel.cancel_invoice(
+            self._row(invoice), "xato zakaz", self.scope
+        )
+
+        self.assertEqual(result["freed_tables"], [])
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 1
+        )
+
+    def test_double_cancellation_is_rejected(self):
+        invoice = self._draft()
+        self._as_cashier(supervisor=False)
+        order_cancel.cancel_invoice(self._row(invoice), "xato zakaz", self.scope)
+
+        with self.assertRaises(frappe.ValidationError):
+            order_cancel.cancel_invoice(self._row(invoice), "yana", self.scope)
+
+
+class TestCancelledOrderDoesNotBlockClosing(FrappeTestCase):
+    """REGRESSIYA: bekor qilingan chek kassani yopishga xalaqit bermaydi.
+
+    ILGARI QANDAY BUZILGANDI
+    ========================
+    Bekor qilingan chek o'chirilmaydi — `docstatus = 0` bo'lib qoladi va
+    faqat `custom_cancelled = 1` bilan belgilanadi. Smena yopish sanog'i
+    esa xom `{"docstatus": 0, "branch": ...}` bo'yicha ishlardi, ya'ni
+    ularni ham qo'shib yuborardi:
+
+        «Filialda 2 ta to'lanmagan buyurtma bor» — lekin kassirning
+        ro'yxati BO'SH edi (u `custom_cancelled = 0` bo'yicha
+        filtrlangan). Kassir nimani yopishni topa olmay qolardi.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.table = _free_table(self.scope.branch)
+        if not self.table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+        self.created = []
+
+    def tearDown(self):
+        for name in self.created:
+            frappe.db.delete("POS Invoice", {"name": name})
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 0, update_modified=False
+        )
+
+    def _draft(self, cancelled=0):
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, 0, %s)
+            """,
+            (name, self.table, self.scope.branch, cancelled),
+        )
+        self.created.append(name)
+        return name
+
+    def test_cancelled_draft_is_not_counted_as_open(self):
+        from ozturkapp.ozturkapp.api import cashier as cashier_api
+
+        before = cashier_api._open_order_count(self.scope)
+        cancelled = self._draft(cancelled=1)
+
+        self.assertEqual(
+            cashier_api._open_order_count(self.scope),
+            before,
+            "bekor qilingan chek 'to'lanmagan buyurtma' sifatida sanalmasligi kerak",
+        )
+        self.assertTrue(
+            frappe.db.exists("POS Invoice", cancelled),
+            "hujjat audit uchun bazada qolishi kerak",
+        )
+
+    def test_live_draft_is_still_counted(self):
+        from ozturkapp.ozturkapp.api import cashier as cashier_api
+
+        before = cashier_api._open_order_count(self.scope)
+        self._draft(cancelled=0)
+
+        self.assertEqual(cashier_api._open_order_count(self.scope), before + 1)
+
+    def test_count_and_list_come_from_the_same_source(self):
+        """Sanoq bilan ro'yxat hech qachon bir-biriga zid bo'lmasligi kerak."""
+        from ozturkapp.ozturkapp.api import cashier as cashier_api
+
+        self._draft(cancelled=1)
+        self._draft(cancelled=0)
+
+        self.assertEqual(
+            cashier_api._open_order_count(self.scope),
+            len(table_status.get_open_orders(self.scope.branch)),
+        )
+
+
+class TestCashierPageCancelButton(FrappeTestCase):
+    """Kassa sahifasida bekor qilish tugmasi va stolsiz buyurtma."""
+
+    def setUp(self):
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+        self.script = page.script
+
+    def test_page_has_a_cancel_action(self):
+        self.assertIn('data-action="cancel-order"', self.script)
+        self.assertIn("cancelOrder(detail, button)", self.script)
+
+    def test_cancel_asks_for_a_reason(self):
+        self.assertIn("api.order.cancel_order", self.script)
+        self.assertIn('fieldname: "reason"', self.script)
+
+    def test_button_state_comes_from_the_server(self):
+        """Tugma holati frontendda HISOBLANMAYDI (TZ §17)."""
+        self.assertIn("bill.cancellation", self.script)
+        self.assertIn("cancellation.requires_supervisor", self.script)
+
+    def test_orders_without_a_table_can_be_opened(self):
+        self.assertIn("selectOrder(invoice)", self.script)
+        self.assertIn('data-invoice="', self.script)
+
+
+class TestShiftOperatorRestriction(FrappeTestCase):
+    """Kassani faqat POS Profile'ga biriktirilgan kassir ocha/yopa oladi.
+
+    NEGA
+    ====
+    ERPNext Z-hisobotni `where owner = <POS Opening Entry.user>` bilan
+    yig'adi (`pos_closing_entry.get_pos_invoices`). Smena boshqa
+    foydalanuvchi nomiga ochilsa, cheklar hisobotdan tushib qoladi va
+    `consolidated_invoice` siz osilib, buxgalteriyaga hech qachon
+    yetib bormaydi.
+    """
+
+    def setUp(self):
+        from ozturkapp.ozturkapp.api import cashier as cashier_api
+
+        self.api = cashier_api
+        self.scope = cashier_permissions.resolve_scope()
+        self.profile = self.scope.pos_profile
+        self.listed = cashier_permissions.pos_profile_users(self.profile)
+        if not self.listed:
+            self.skipTest("POS Profile'da `applicable_for_users` bo'sh")
+
+    # ── Qoida ─────────────────────────────────────────────────────────
+
+    def test_listed_user_may_operate(self):
+        self.assertTrue(
+            cashier_permissions.can_operate_shift(self.profile, self.listed[0])
+        )
+
+    def test_unlisted_user_may_not_operate(self):
+        self.assertFalse(
+            cashier_permissions.can_operate_shift(self.profile, "hech-kim@example.com")
+        )
+
+    def test_empty_profile_list_means_no_restriction(self):
+        """Sozlanmagan profil butun kassani to'xtatib qo'ymasligi kerak."""
+        self.assertTrue(cashier_permissions.can_operate_shift("", "hech-kim@example.com"))
+
+    def test_operator_names_are_human_readable(self):
+        """Xato xabarida e-pochta emas, ism ko'rinishi kerak (TZ §19)."""
+        names = cashier_permissions.shift_operator_names(self.profile)
+        self.assertTrue(names)
+
+    # ── Hujjat darajasi — HAR QANDAY yo'lni qamrab oladi ──────────────
+
+    def test_opening_entry_rejects_an_unlisted_owner(self):
+        """Desk, Desktop POS yoki kassa sahifasi — farqi yo'q."""
+        if "Administrator" in self.listed:
+            self.skipTest("Administrator ro'yxatda — sinov ma'nosiz")
+
+        with self.assertRaises(frappe.ValidationError):
+            self._opening(user="Administrator").insert()
+
+    def test_opening_entry_accepts_a_listed_owner(self):
+        doc = self._opening(user=self.listed[0])
+        doc.insert()
+        self.assertTrue(doc.name)
+        self.assertEqual(doc.docstatus, 0)
+
+    def _opening(self, user):
+        doc = frappe.new_doc("POS Opening Entry")
+        doc.update(
+            {
+                "period_start_date": frappe.utils.now_datetime(),
+                "posting_date": frappe.utils.nowdate(),
+                "user": user,
+                "pos_profile": self.profile,
+                "company": frappe.db.get_value("POS Profile", self.profile, "company"),
+            }
+        )
+        for mode in self.api._cash_modes(self.profile):
+            doc.append("balance_details", {"mode_of_payment": mode, "opening_amount": 0})
+        return doc
+
+    # ── API darajasi — kassa sahifasi ─────────────────────────────────
+
+    def test_open_shift_api_rejects_an_unlisted_user(self):
+        """Testlar Administrator nomidan ketadi — u ro'yxatda yo'q."""
+        if frappe.session.user in self.listed:
+            self.skipTest("Joriy foydalanuvchi ro'yxatda — sinov ma'nosiz")
+
+        with self.assertRaises(frappe.PermissionError):
+            self.api.open_shift(json.dumps([]))
+
+    def test_close_shift_api_rejects_an_unlisted_user(self):
+        if frappe.session.user in self.listed:
+            self.skipTest("Joriy foydalanuvchi ro'yxatda — sinov ma'nosiz")
+
+        with self.assertRaises(frappe.PermissionError):
+            self.api.close_shift(json.dumps({}))
+
+    def test_context_tells_the_page_whether_it_may_operate(self):
+        ctx = self.api.get_cashier_context()
+
+        self.assertIn("can_operate_shift", ctx["permissions"])
+        self.assertEqual(
+            ctx["permissions"]["can_operate_shift"],
+            frappe.session.user in self.listed,
+        )
+        self.assertTrue(ctx["shift_operators"], "kim ochishi aytilishi kerak")
+
+
+class TestShiftGateForUnauthorizedUser(FrappeTestCase):
+    """Ruxsatsiz foydalanuvchi sahifani ko'radi, lekin kassani ocholmaydi.
+
+    Talab: Administrator kassa sahifasiga kira olsin va «Kassa yopiq»
+    holatini ko'rsin, lekin ochish formasi UMUMAN chiqmasin.
+    """
+
+    def setUp(self):
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+        self.script = page.script
+
+    def test_gate_checks_the_permission_before_drawing_the_form(self):
+        self.assertIn("can_operate_shift", self.script)
+        self.assertIn("$form.empty()", self.script)
+
+    def test_gate_still_shows_who_may_open_it(self):
+        self.assertIn("shift_operators", self.script)
+
+    def test_close_button_is_hidden_for_unauthorized_user(self):
+        self.assertIn("isOpen && canOperate", self.script)
