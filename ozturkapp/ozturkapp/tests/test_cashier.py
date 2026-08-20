@@ -2494,3 +2494,62 @@ class TestMoneyFormatting(FrappeTestCase):
             "{{ format_amount(value) }}", {"value": 1080800}
         )
         self.assertEqual(rendered, "1 080 800")
+
+
+class TestAmountInputsAreGrouped(FrappeTestCase):
+    """Kassir YOZAYOTGAN summa ham probel bilan guruhlanadi.
+
+    NEGA
+    ====
+    Xato eng ko'p aynan yozayotganda bo'ladi: bitta ortiqcha nol bir
+    qarashda ko'rinmaydi. `1080800` va `10808000` bir xilga o'xshaydi,
+    `1 080 800` va `10 808 000` esa yo'q.
+
+    Buning uchun maydon `type="number"` BO'LMASLIGI shart — brauzer unda
+    probelga yo'l qo'ymaydi va qiymatni bo'sh deb hisoblaydi.
+    """
+
+    def setUp(self):
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+        self.script = page.script
+
+    def test_no_amount_field_is_a_number_input(self):
+        for field in ("rc-pay__input", "rc-count-input", "rc-shift-input"):
+            block = self.script.split(field, 1)[1][:200]
+            self.assertNotIn(
+                'type="number"', block,
+                f"{field} hali `type=number` — probel yozib bo'lmaydi",
+            )
+
+    def test_typed_amounts_are_parsed_back_to_numbers(self):
+        """Probelli matn serverga son bo'lib ketishi shart."""
+        self.assertIn("function parseAmount(", self.script)
+        # To'lov, ko'r sanoq va kassa ochish — uchalasi ham.
+        self.assertGreaterEqual(self.script.count("parseAmount("), 4)
+        self.assertNotIn("flt($input.val())", self.script)
+
+    def test_every_amount_field_is_bound_to_the_formatter(self):
+        self.assertIn("function bindAmountInput(", self.script)
+        self.assertGreaterEqual(self.script.count("bindAmountInput("), 4)
+
+    def test_caret_is_restored_after_regrouping(self):
+        """Kursor tiklanmasa kassir raqamni o'rtasidan to'g'irlay olmaydi."""
+        self.assertIn("setSelectionRange", self.script)
+
+
+class TestWorkspacesHaveNoDescription(FrappeTestCase):
+    """Kassa va Oshxona workspace'larida ortiqcha izoh bo'lmasligi kerak."""
+
+    def test_only_header_and_shortcut_remain(self):
+        for name in ("Kassa", "Oshxona"):
+            if not frappe.db.exists("Workspace", name):
+                self.skipTest(f"'{name}' workspace hali o'rnatilmagan")
+
+            blocks = json.loads(
+                frappe.db.get_value("Workspace", name, "content") or "[]"
+            )
+            types = [block.get("type") for block in blocks]
+
+            self.assertNotIn("paragraph", types, f"{name}: izoh olib tashlanishi kerak")
+            self.assertIn("shortcut", types, f"{name}: sahifa yorlig'i qolishi kerak")

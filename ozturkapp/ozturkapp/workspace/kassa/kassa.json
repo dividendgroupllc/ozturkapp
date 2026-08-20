@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\":\"kassa-header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Kassa</b></span>\",\"col\":12}},{\"id\":\"kassa-shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Kassa\",\"col\":4}},{\"id\":\"kassa-spacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"kassa-hint\",\"type\":\"paragraph\",\"data\":{\"text\":\"Zal rejasi, buyurtmalar, hisob va to'lov. Kassa smenasini shu yerdan ochib-yopiladi.\",\"col\":12}}]",
+ "content": "[{\"id\":\"kassa-header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Kassa</b></span>\",\"col\":12}},{\"id\":\"kassa-shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Kassa\",\"col\":4}}]",
  "creation": "2026-08-20 00:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,

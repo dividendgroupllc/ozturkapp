@@ -561,7 +561,7 @@ ozturk.cashier.Screen = class CashierScreen {
 							(mode) => `<tr>
 								<td>${esc(mode)}</td>
 								<td class="rc-num">
-									<input class="rc-shift-input" type="number" step="any" min="0"
+									<input class="rc-shift-input" type="text" inputmode="numeric"
 										value="0" data-mode="${esc(mode)}"
 										aria-label="${esc(mode)}">
 								</td>
@@ -578,13 +578,14 @@ ozturk.cashier.Screen = class CashierScreen {
 			</div>`);
 
 		const $error = $form.find(".rc-pay__error");
+		bindAmountInput($form.find(".rc-shift-input"));
 
 		$form.on("click", '[data-action="open-shift"]', async (e) => {
 			const rows = $form
 				.find(".rc-shift-input")
 				.map((_, input) => ({
 					mode_of_payment: input.dataset.mode,
-					opening_amount: flt(input.value),
+					opening_amount: parseAmount(input.value),
 				}))
 				.get();
 
@@ -1572,8 +1573,9 @@ ozturk.cashier.Screen = class CashierScreen {
 				.map(
 					(mode) => `<div class="rc-count__row">
 						<span>${esc(mode)}</span>
-						<input class="rc-pay__input rc-count-input" type="number" step="any" min="0"
-							value="${preset}" placeholder="0" data-mode="${esc(mode)}"
+						<input class="rc-pay__input rc-count-input" type="text" inputmode="numeric"
+							value="${esc(preset === "" ? "" : groupAmount(preset))}"
+							placeholder="0" data-mode="${esc(mode)}"
 							aria-label="${esc(mode)}">
 					</div>`
 				)
@@ -1644,6 +1646,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			this.setModalLocked(false);
 		}
 
+		bindAmountInput($body.find(".rc-count-input"));
 		setTimeout(() => $body.find(".rc-count-input").first().trigger("focus"), 60);
 
 		$body.on("click", '[data-action="submit"]', async (e) => {
@@ -1652,7 +1655,7 @@ ozturk.cashier.Screen = class CashierScreen {
 
 			$body.find(".rc-count-input").each((_, input) => {
 				if (String(input.value).trim() === "") missing = true;
-				counted[input.dataset.mode] = flt(input.value);
+				counted[input.dataset.mode] = parseAmount(input.value);
 			});
 
 			if (missing) {
@@ -1781,8 +1784,9 @@ ozturk.cashier.Screen = class CashierScreen {
 			</div>
 
 			<div class="rc-pay__label">${esc(__("Qabul qilingan summa"))}</div>
-			<input class="rc-pay__input" type="number" inputmode="decimal" step="any"
-				value="${due}" aria-label="${esc(__("Qabul qilingan summa"))}">
+			<input class="rc-pay__input" type="text" inputmode="numeric"
+				value="${esc(groupAmount(due))}"
+				aria-label="${esc(__("Qabul qilingan summa"))}">
 			<div class="rc-pay__quick"></div>
 
 			<div class="rc-pay__change"><span>${esc(
@@ -1821,7 +1825,7 @@ ozturk.cashier.Screen = class CashierScreen {
 
 		const recalc = () => {
 			// Bu FAQAT ko'rsatish uchun. Haqiqiy tekshiruv serverda (TZ §17).
-			const paid = flt($input.val());
+			const paid = parseAmount($input.val());
 			const change = paid - due;
 			$change.toggleClass("rc-pay__change--short", change < 0);
 			$change
@@ -1834,13 +1838,13 @@ ozturk.cashier.Screen = class CashierScreen {
 			e.currentTarget.setAttribute("aria-pressed", "true");
 		});
 		$body.on("click", ".rc-quick", (e) => {
-			$input.val(e.currentTarget.dataset.amount);
+			$input.val(groupAmount(e.currentTarget.dataset.amount));
 			recalc();
 		});
-		$input.on("input", recalc);
+		bindAmountInput($input, recalc);
 		$body.on("click", '[data-action="confirm"]', async (e) => {
 			const mode = $body.find('.rc-mode[aria-pressed="true"]').data("mode");
-			const amount = flt($input.val());
+			const amount = parseAmount($input.val());
 			const button = e.currentTarget;
 
 			$error.text("");
@@ -2148,6 +2152,69 @@ function esc(value) {
 				"'": "&#39;",
 			}[ch])
 	);
+}
+
+/**
+ * Kiritilayotgan summani PROBEL bilan guruhlaydi: `1080800` -> `1 080 800`.
+ *
+ * NEGA KIRITISH MAYDONIDA HAM
+ * ===========================
+ * Kassir eng ko'p xatoni AYNAN yozayotganda qiladi: nolni bittasini
+ * ortiq yoki kam bosgani bir qarashda ko'rinmaydi. `1080800` va
+ * `10808000` bir xilga o'xshaydi, `1 080 800` va `10 808 000` esa yo'q.
+ *
+ * Shu sababli maydon `type="number"` EMAS — brauzer unda probelga yo'l
+ * qo'ymaydi. `inputmode="numeric"` telefon/planshetda raqamli
+ * klaviaturani baribir ochadi.
+ */
+function groupAmount(text) {
+	const raw = String(text == null ? "" : text).replace(/\s/g, "").replace(",", ".");
+	const negative = raw.startsWith("-");
+
+	const digits = raw.replace(/[^\d.]/g, "");
+	const dot = digits.indexOf(".");
+	const whole = dot === -1 ? digits : digits.slice(0, dot);
+	const fraction = dot === -1 ? null : digits.slice(dot + 1).replace(/\./g, "").slice(0, 2);
+
+	const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+	// Yozish jarayonida `1234,` holati ham bo'ladi — vergul saqlanadi.
+	const text2 = fraction === null ? grouped : `${grouped},${fraction}`;
+
+	return (negative ? "-" : "") + text2;
+}
+
+/** Guruhlangan matndan sonni qaytaradi: `1 234,50` -> `1234.5`. */
+function parseAmount(text) {
+	const raw = String(text == null ? "" : text).replace(/\s/g, "").replace(",", ".");
+	const negative = raw.startsWith("-");
+	const value = flt(raw.replace(/[^\d.]/g, ""));
+	return negative ? -value : value;
+}
+
+/**
+ * Maydonni guruhlab turadigan qiladi va KURSORNI joyida saqlaydi.
+ *
+ * Kursorni tiklamasak, probel qo'shilgan zahoti u satr oxiriga sakraydi
+ * va kassir raqamni o'rtasidan to'g'irlay olmaydi.
+ */
+function bindAmountInput($input, onChange) {
+	$input.on("input", (event) => {
+		const el = event.currentTarget;
+		const caret = el.selectionStart || 0;
+		const typedBefore = (el.value.slice(0, caret).match(/[\d.,]/g) || []).length;
+
+		el.value = groupAmount(el.value);
+
+		let seen = 0;
+		let pos = 0;
+		while (pos < el.value.length && seen < typedBefore) {
+			if (/[\d.,]/.test(el.value[pos])) seen += 1;
+			pos += 1;
+		}
+		el.setSelectionRange(pos, pos);
+
+		if (onChange) onChange();
+	});
 }
 
 function fmtQty(value) {
