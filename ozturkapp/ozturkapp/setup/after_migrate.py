@@ -18,7 +18,10 @@ def run():
 	from ozturkapp.ozturkapp.setup.kassa_setup import create_party_types
 	from ozturkapp.ozturkapp.setup.print_format_setup import create_sales_order_print_format
 	from ozturkapp.ozturkapp.setup.receipt_format import setup as setup_receipt_format
-	from ozturkapp.ozturkapp.setup.cancelled_orders import detach_tables
+	from ozturkapp.ozturkapp.setup.cancelled_orders import (
+		detach_tables,
+		reconcile_cancel_kots,
+	)
 	from ozturkapp.ozturkapp.setup.ury_custom_fields import (
 		create_fields as create_ury_pos_fields,
 	)
@@ -35,6 +38,9 @@ def run():
 		# `custom_cancelled_table` maydonini yaratadi va tozalash o'sha
 		# maydonga yozadi.
 		detach_tables,
+		# Tuzatishdan oldin yaratilgan bekor-KOT'lar: bekor qilingan taom
+		# oshxona ekranida «Kutilmoqda» bo'lib osilib qolgan edi.
+		reconcile_cancel_kots,
 		create_permissions,
 		create_party_types,
 		create_sales_order_print_format,

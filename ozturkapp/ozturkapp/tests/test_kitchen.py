@@ -696,3 +696,152 @@ class TestRemovedItemLeavesTheKitchen(FrappeTestCase):
         source = inspect.getsource(kitchen_realtime.on_kot_submit)
         self.assertIn("CANCELLATION_KOT_TYPES", source)
         self.assertIn("_on_cancellation_kot", source)
+
+
+class TestRepairOfAlreadyBrokenTickets(FrappeTestCase):
+    """Tuzatishdan OLDIN yaratilgan buzuq chiptalarni tozalash.
+
+    Ekrandagi holat (mijoz skrinshoti):
+
+        KOT-00012   CLOSED PIDE   TAYYORLANMOQDA  [Tayyor]   <-- 1-nusxa
+        CNCL-KOT-1  QISMAN BEKOR QILINDI: CLOSED PIDE x1      <-- 2-nusxa
+
+    Ofitsant taomni HALI NAVBATDA turganda bekor qilgan edi, lekin u asl
+    chiptada qolib ketgani uchun oshpaz uni ko'rgan va «Tayyorlashni
+    boshlash» ni bosgan. Kod tuzatilgani bilan bu YOZUVLAR o'zi
+    tuzalmaydi — shuning uchun bir martalik tozalash kerak.
+    """
+
+    def setUp(self):
+        from ozturkapp.ozturkapp.utils import cashier_permissions
+
+        self.branch = cashier_permissions.resolve_scope().branch
+        self.invoice = frappe.generate_hash(length=10)
+        self.kots = []
+
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0, %s, 0, 0)
+            """,
+            (self.invoice, self.branch),
+        )
+
+    def tearDown(self):
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        frappe.db.delete("POS Invoice", {"name": self.invoice})
+
+    def _kot(self, kot_type, items, verified=0):
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status, production, verified)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, %s, 'Ready For Prepare', 'Oshxona', %s)
+            """,
+            (kot, self.invoice, self.branch, kot_type, verified),
+        )
+        self.kots.append(kot)
+        for idx, (item, qty, status, cancelled) in enumerate(items, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, item_name,
+                     quantity, cancelled_qty, custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, %s, %s, %s, %s)
+                """,
+                (frappe.generate_hash(length=10), kot, idx, item, item,
+                 qty, cancelled, status),
+            )
+        return kot
+
+    def _screen(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        return {row["kot"]: row for row in kitchen.get_active_kots()}
+
+    def _shown_items(self):
+        return [
+            item["item"]
+            for card in self._screen().values()
+            if card["invoice"] == self.invoice
+            for item in card["items"]
+        ]
+
+    # ── Aynan skrinshotdagi holat ─────────────────────────────────────
+
+    def test_repairs_the_screenshot_scenario(self):
+        """Oshpaz boshlab yuborgan bekor qilingan taom ham yo'qoladi."""
+        from ozturkapp.ozturkapp.setup.cancelled_orders import reconcile_cancel_kots
+
+        cooking = self._kot("New Order", [
+            ("CLOSED PIDE", 1, ks.PREPARING, 0),   # xato tufayli boshlangan
+            ("ÇOBAN SALAD", 1, ks.PREPARING, 0),   # haqiqiy zakaz
+        ])
+        cancel = self._kot("Partially cancelled", [("CLOSED PIDE", 1, ks.PENDING, 1)])
+
+        self.assertIn("CLOSED PIDE", self._shown_items(), "boshlang'ich holat noto'g'ri")
+
+        reconcile_cancel_kots()
+
+        shown = self._shown_items()
+        self.assertNotIn("CLOSED PIDE", shown, "bekor qilingan taom qolib ketdi")
+        self.assertIn("ÇOBAN SALAD", shown, "haqiqiy zakazga tegilmasligi kerak")
+        self.assertNotIn(cancel, self._screen(), "«to'xtat» kartasi ham yo'qolishi kerak")
+        self.assertTrue(cooking)
+
+    def test_served_items_are_never_touched(self):
+        """Berilgan taom jismonan chiqib bo'lgan — uni bekor deb yozib bo'lmaydi."""
+        from ozturkapp.ozturkapp.setup.cancelled_orders import reconcile_cancel_kots
+
+        cooking = self._kot("New Order", [("CLOSED PIDE", 1, ks.SERVED, 0)])
+        self._kot("Partially cancelled", [("CLOSED PIDE", 1, ks.PENDING, 1)])
+
+        reconcile_cancel_kots()
+
+        status = frappe.get_all(
+            "URY KOT Items", filters={"parent": cooking}, pluck="custom_kitchen_status"
+        )
+        self.assertEqual(status, [ks.SERVED])
+
+    def test_repair_is_idempotent(self):
+        from ozturkapp.ozturkapp.setup.cancelled_orders import reconcile_cancel_kots
+
+        cooking = self._kot("New Order", [("CLOSED PIDE", 2, ks.PENDING, 0)])
+        self._kot("Partially cancelled", [("CLOSED PIDE", 2, ks.PENDING, 1)])
+
+        reconcile_cancel_kots()
+        after_first = frappe.get_all(
+            "URY KOT Items", filters={"parent": cooking},
+            fields=["quantity", "custom_kitchen_status"],
+        )
+
+        reconcile_cancel_kots()  # ikkinchi marta
+        after_second = frappe.get_all(
+            "URY KOT Items", filters={"parent": cooking},
+            fields=["quantity", "custom_kitchen_status"],
+        )
+
+        self.assertEqual(after_first, after_second, "takroriy yurgizish qo'shimcha kamaytirdi")
+
+    def test_already_verified_tickets_are_skipped(self):
+        """Yopilgan chipta qayta ishlanmasligi kerak."""
+        from ozturkapp.ozturkapp.setup.cancelled_orders import reconcile_cancel_kots
+
+        cooking = self._kot("New Order", [("CLOSED PIDE", 1, ks.PENDING, 0)])
+        self._kot("Partially cancelled", [("CLOSED PIDE", 1, ks.PENDING, 1)], verified=1)
+
+        reconcile_cancel_kots()
+
+        status = frappe.get_all(
+            "URY KOT Items", filters={"parent": cooking}, pluck="custom_kitchen_status"
+        )
+        self.assertEqual(status, [ks.PENDING], "yopilgan chipta tegilmasligi kerak")

@@ -325,7 +325,7 @@ def _close_kitchen_tickets(invoice: str, branch: str) -> int:
     return count
 
 
-def apply_item_cancellation(cancel_kot) -> bool:
+def apply_item_cancellation(cancel_kot, repair: bool = False) -> bool:
     """URY bekor-KOT yaratganda ASL chiptadagi qatorni ham yopadi.
 
     NEGA BU KERAK
@@ -352,6 +352,14 @@ def apply_item_cancellation(cancel_kot) -> bool:
     `cancel_kot.original_kot` ga TAYANILMAYDI: URY uni birinchi mos
     KOT'da to'xtatib yozadi, ya'ni ro'yxat to'liq bo'lmaydi.
 
+    Args:
+        repair: TUZATISHDAN OLDIN yaratilgan yozuvlarni tozalash rejimi.
+            Odatda faqat `Kutilmoqda` dagi qator yopiladi. Tuzatishdan
+            oldin esa bekor qilingan taom oshxona ekranida ko'rinib
+            turaverdi va oshpaz uni bilmasdan boshlab yuborgan bo'lishi
+            mumkin — o'sha porsiyalar ham yopiladi. `Berildi` ga
+            TEGILMAYDI: u jismonan chiqib bo'lgan.
+
     Returns:
         bool: `True` — hammasi navbatda edi, ya'ni oshxona ishni
         boshlamagan. Bunda «to'xtat» kartasi ham keraksiz.
@@ -372,7 +380,9 @@ def apply_item_cancellation(cancel_kot) -> bool:
         if need <= 0:
             continue
 
-        unmatched += _consume_pending_rows(invoice, row.get("item"), need, touched)
+        unmatched += _consume_pending_rows(
+            invoice, row.get("item"), need, touched, repair=repair
+        )
 
     for kot, production in touched.items():
         _sync_cancelled_kot(kot)
@@ -381,7 +391,9 @@ def apply_item_cancellation(cancel_kot) -> bool:
     return unmatched <= 0
 
 
-def _consume_pending_rows(invoice: str, item: str, need: int, touched: dict) -> int:
+def _consume_pending_rows(
+    invoice: str, item: str, need: int, touched: dict, repair: bool = False
+) -> int:
     """Navbatdagi qatorlardan `need` donani yopadi. Qolganini qaytaradi.
 
     Qaytgan qiymat > 0 bo'lsa — o'shancha dona ALLAQACHON oshxonada
@@ -392,6 +404,15 @@ def _consume_pending_rows(invoice: str, item: str, need: int, touched: dict) -> 
     if not invoice or not item or need <= 0:
         return need
 
+    # Odatda faqat navbatdagi porsiya yopiladi. Tuzatish rejimida esa
+    # boshlangan porsiyalar ham — ular oshxonaga XATO tufayli tushgan.
+    # `Berildi` va allaqachon `Bekor qilingan` hech qachon tegilmaydi.
+    allowed = (
+        (kitchen_status.PENDING, kitchen_status.PREPARING, kitchen_status.READY)
+        if repair
+        else (kitchen_status.PENDING,)
+    )
+
     rows = frappe.db.sql(
         """
         SELECT ki.name, ki.parent, ki.quantity, ki.cancelled_qty, k.production
@@ -400,8 +421,11 @@ def _consume_pending_rows(invoice: str, item: str, need: int, touched: dict) -> 
         WHERE k.invoice = %(invoice)s AND k.docstatus = 1
           AND k.type IN %(types)s
           AND ki.item = %(item)s
-          AND IFNULL(ki.custom_kitchen_status, %(pending)s) = %(pending)s
-        ORDER BY k.creation DESC, ki.idx DESC
+          AND IFNULL(ki.custom_kitchen_status, %(pending)s) IN %(allowed)s
+        ORDER BY
+          CASE WHEN IFNULL(ki.custom_kitchen_status, %(pending)s) = %(pending)s
+               THEN 0 ELSE 1 END,
+          k.creation DESC, ki.idx DESC
         FOR UPDATE
         """,
         {
@@ -409,6 +433,7 @@ def _consume_pending_rows(invoice: str, item: str, need: int, touched: dict) -> 
             "item": item,
             "types": kitchen_status.COOKING_KOT_TYPES,
             "pending": kitchen_status.PENDING,
+            "allowed": allowed,
         },
         as_dict=True,
     )
