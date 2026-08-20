@@ -590,12 +590,26 @@ def _assert_removals_allowed(invoice: str, incoming: list):
 
     for item_code, old_qty in current.items():
         new_qty = wanted.get(item_code, 0)
-        if new_qty >= old_qty:
+        removing = old_qty - new_qty
+        if removing <= 0:
             continue  # qo'shish yoki o'zgarishsiz — ruxsat
 
         state = kitchen.get(item_code)
-        if state and not state["can_waiter_cancel"]:
-            item_name = frappe.db.get_value("Item", item_code, "item_name") or item_code
+        if not state:
+            continue  # KOT yo'q — oshxona bu taomni umuman ko'rmagan
+
+        # NECHTASI hali boshlanmaganiga qaraymiz, umumiy holatga EMAS.
+        # Bitta taom ikki raundda buyurtma qilingan bo'lishi mumkin:
+        # 1 dona pishmoqda, 1 dona navbatda. Umumiy holat «Kutilmoqda»
+        # bo'lib ko'rinadi, lekin olib tashlash faqat NAVBATDAGISIGA
+        # tegishli (`kitchen_status.get_item_statuses_for_invoice`).
+        pending = flt(state.get("pending_qty") or 0)
+        if removing <= pending:
+            continue
+
+        item_name = frappe.db.get_value("Item", item_code, "item_name") or item_code
+
+        if pending <= 0:
             frappe.throw(
                 _(
                     "'{0}' allaqachon oshxonada ({1}) — uni olib tashlash yoki "
@@ -603,6 +617,14 @@ def _assert_removals_allowed(invoice: str, incoming: list):
                 ).format(item_name, state["label"]),
                 title=_("Bekor qilib bo'lmaydi"),
             )
+
+        frappe.throw(
+            _(
+                "'{0}' — {1} donasi allaqachon oshxonada. Ko'pi bilan {2} "
+                "donasini olib tashlash mumkin."
+            ).format(item_name, int(old_qty - pending), int(pending)),
+            title=_("Bekor qilib bo'lmaydi"),
+        )
 
 
 def _current_shift_user(scope):

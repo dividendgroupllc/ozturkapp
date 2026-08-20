@@ -313,16 +313,32 @@ def get_item_statuses_for_invoice(invoice: str) -> dict:
         # Bir mahsulot bir necha KOT'da bo'lsa — eng ORQADA qolgan holat
         # ko'rsatiladi (hammasi tayyor bo'lmaguncha "tayyor" demaymiz).
         if not current or STATUSES.index(status) < STATUSES.index(current["status"]):
-            result[row.item] = {
-                "status": status,
-                "label": label(status),
-                "can_waiter_cancel": can_waiter_cancel(status),
+            result[row.item] = dict(
+                current or {"qty": 0, "pending_qty": 0},
+                status=status,
+                label=label(status),
+                can_waiter_cancel=can_waiter_cancel(status),
                 # Ofitsant ilovasi "Berildi" tugmasini shu ikkisiga qarab
                 # chizadi va AYNAN shu qatorni serverga yuboradi.
-                "kot_item": row.kot_item,
-                "self_service": row.production in self_service,
-            }
+                kot_item=row.kot_item,
+                self_service=row.production in self_service,
+            )
 
-        result[row.item]["qty"] = result[row.item].get("qty", 0) + cint(row.quantity)
+        entry = result[row.item]
+        entry["qty"] = entry.get("qty", 0) + cint(row.quantity)
+
+        # NECHTASI hali boshlanmagan.
+        #
+        # NEGA UMUMIY HOLAT YETMAYDI
+        # ==========================
+        # Bitta taom ikki raundda buyurtma qilinishi mumkin: birinchisi
+        # allaqachon tayyorlanmoqda, ikkinchisi hali navbatda. Yuqoridagi
+        # "eng orqada qolgan holat" qoidasi bunday taomni «Kutilmoqda»
+        # deb ko'rsatadi — va shunga tayangan tekshiruv PISHAYOTGAN
+        # porsiyani ham olib tashlashga ruxsat berardi.
+        if status == PENDING:
+            entry["pending_qty"] = entry.get("pending_qty", 0) + cint(row.quantity)
+        else:
+            entry.setdefault("pending_qty", 0)
 
     return result

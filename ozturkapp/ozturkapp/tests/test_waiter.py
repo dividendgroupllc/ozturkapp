@@ -55,15 +55,15 @@ class TestWaiterCancellationRule(FrappeTestCase):
     """TZ §8 — tayyorlash boshlangach o'zgartirib bo'lmaydi."""
 
     def test_rule_delegates_to_single_source(self):
-        source = inspect.getsource(waiter._assert_removals_allowed)
-        self.assertIn("get_item_statuses_for_invoice", source)
-        self.assertIn("can_waiter_cancel", source)
+        """Guard oshxona holatini O'ZI hisoblamaydi — `kitchen_status` dan oladi.
 
-    def test_adding_items_is_always_allowed(self):
-        """Qo'shish hech qachon bloklanmaydi — faqat kamaytirish/olib tashlash."""
+        Qoidaning HULQ-ATVORI `TestWaiterRemovesSingleItem` da sinaladi
+        (qo'shish bloklanmaydi, faqat navbatdagi porsiya olinadi va h.k.).
+        Bu yerda esa manba yagonaligi tekshiriladi: guard ikkinchi marta
+        "boshlanganmi?" degan mantiqni yozib qo'ymasligi kerak.
+        """
         source = inspect.getsource(waiter._assert_removals_allowed)
-        self.assertIn("if new_qty >= old_qty:", source)
-        self.assertIn("continue", source)
+        self.assertIn("kitchen_status.get_item_statuses_for_invoice", source)
 
     def test_kitchen_status_is_source_of_truth(self):
         self.assertTrue(ks.can_waiter_cancel(ks.PENDING))
@@ -365,7 +365,7 @@ class TestWaiterCancelsWholeOrder(FrappeTestCase):
         removal = inspect.getsource(waiter._assert_removals_allowed)
         cancel = inspect.getsource(waiter.cancel_order)
 
-        self.assertIn("can_waiter_cancel", removal)
+        self.assertIn("kitchen_status.get_item_statuses_for_invoice", removal)
         self.assertIn("order_cancel", cancel)
 
 
@@ -385,3 +385,144 @@ class TestWaiterAppKnowsWhenToShowTheButton(FrappeTestCase):
     def test_item_level_flag_is_still_exposed(self):
         source = inspect.getsource(ks.get_item_statuses_for_invoice)
         self.assertIn("can_waiter_cancel", source)
+
+
+class TestWaiterRemovesSingleItem(FrappeTestCase):
+    """Zakazdagi bitta taomni olib tashlash (TZ §8).
+
+    Qoida: FAQAT hali boshlanmagan porsiyani olib tashlash mumkin.
+    Umumiy holatga emas, NECHTASI navbatda ekaniga qaraladi — bitta taom
+    ikki raundda buyurtma qilingan bo'lishi mumkin.
+    """
+
+    def setUp(self):
+        self.branch = cashier_permissions.resolve_scope().branch
+        self.invoices, self.kots = [], []
+
+    def tearDown(self):
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        for name in self.invoices:
+            frappe.db.delete("POS Invoice Item", {"parent": name})
+            frappe.db.delete("POS Invoice", {"name": name})
+
+    # ── Fikstura ──────────────────────────────────────────────────────
+
+    def _order(self, item_code, qty):
+        """Chek + bitta mahsulot qatori."""
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0, %s, 0, 0)
+            """,
+            (name, self.branch),
+        )
+        self.invoices.append(name)
+
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice Item`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 parent, parenttype, parentfield, idx, item_code, qty, rate, amount)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, 'POS Invoice', 'items', 1, %s, %s, 1000, %s)
+            """,
+            (frappe.generate_hash(length=10), name, item_code, qty, qty * 1000),
+        )
+        return name
+
+    def _kot(self, invoice, item_code, statuses):
+        """Har bir holat uchun bitta donalik KOT qatori."""
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, 'New Order', 'Ready For Prepare')
+            """,
+            (kot, invoice, self.branch),
+        )
+        self.kots.append(kot)
+
+        for idx, status in enumerate(statuses, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, quantity,
+                     custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, 1, %s)
+                """,
+                (frappe.generate_hash(length=10), kot, idx, item_code, status),
+            )
+        return kot
+
+    def _wants(self, item_code, qty):
+        return [{"item": item_code, "qty": qty}]
+
+    # ── Qoida ─────────────────────────────────────────────────────────
+
+    def test_pending_item_can_be_removed(self):
+        invoice = self._order("TAOM-A", 2)
+        self._kot(invoice, "TAOM-A", [ks.PENDING, ks.PENDING])
+
+        # 2 -> 0 (butunlay olib tashlash)
+        waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 0))
+
+    def test_pending_item_can_be_reduced(self):
+        invoice = self._order("TAOM-A", 3)
+        self._kot(invoice, "TAOM-A", [ks.PENDING, ks.PENDING, ks.PENDING])
+
+        waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 1))
+
+    def test_started_item_cannot_be_removed(self):
+        invoice = self._order("TAOM-A", 1)
+        self._kot(invoice, "TAOM-A", [ks.PREPARING])
+
+        with self.assertRaises(frappe.ValidationError):
+            waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 0))
+
+    def test_only_the_pending_portion_may_be_removed(self):
+        """REGRESSIYA: 1 dona pishmoqda, 1 dona navbatda.
+
+        Umumiy holat «Kutilmoqda» bo'lib ko'rinadi (eng orqada qolgan
+        holat qoidasi). Ilgari shunga tayanib IKKALASINI ham olib
+        tashlash mumkin edi — ya'ni pishayotgan porsiya ham.
+        """
+        invoice = self._order("TAOM-A", 2)
+        self._kot(invoice, "TAOM-A", [ks.PREPARING, ks.PENDING])
+
+        # 1 donani olib tashlash — mumkin (navbatdagisi).
+        waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 1))
+
+        # Ikkalasini ham — MUMKIN EMAS.
+        with self.assertRaises(frappe.ValidationError):
+            waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 0))
+
+    def test_adding_is_never_blocked(self):
+        invoice = self._order("TAOM-A", 1)
+        self._kot(invoice, "TAOM-A", [ks.SERVED])
+
+        waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 5))
+
+    def test_item_without_a_kot_can_be_removed(self):
+        """Oshxona bu taomni umuman ko'rmagan — to'sqinlik yo'q."""
+        invoice = self._order("TAOM-A", 2)
+
+        waiter._assert_removals_allowed(invoice, self._wants("TAOM-A", 0))
+
+    def test_pending_count_is_exposed_to_the_app(self):
+        """Ilova steperni shu songa qarab cheklaydi."""
+        invoice = self._order("TAOM-A", 3)
+        self._kot(invoice, "TAOM-A", [ks.PREPARING, ks.PENDING, ks.PENDING])
+
+        state = ks.get_item_statuses_for_invoice(invoice)["TAOM-A"]
+        self.assertEqual(state["qty"], 3)
+        self.assertEqual(state["pending_qty"], 2)
