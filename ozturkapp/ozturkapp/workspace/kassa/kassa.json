@@ -1,0 +1,48 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"kassa-header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Kassa</b></span>\",\"col\":12}},{\"id\":\"kassa-shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Kassa\",\"col\":4}},{\"id\":\"kassa-spacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"kassa-hint\",\"type\":\"paragraph\",\"data\":{\"text\":\"Zal rejasi, buyurtmalar, hisob va to'lov. Kassa smenasini shu yerdan ochib-yopiladi.\",\"col\":12}}]",
+ "creation": "2026-08-20 00:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "retail",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Kassa",
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Kassa",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [
+  {
+   "role": "URY Cashier"
+  },
+  {
+   "role": "URY Manager"
+  },
+  {
+   "role": "System Manager"
+  }
+ ],
+ "sequence_id": 40.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Kassa",
+   "link_to": "restaurant-cashier",
+   "type": "Page"
+  }
+ ],
+ "title": "Kassa"
+}

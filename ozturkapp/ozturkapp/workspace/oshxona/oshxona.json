@@ -1,0 +1,48 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"oshxona-header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Oshxona</b></span>\",\"col\":12}},{\"id\":\"oshxona-shortcut\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Oshxona\",\"col\":4}},{\"id\":\"oshxona-spacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"oshxona-hint\",\"type\":\"paragraph\",\"data\":{\"text\":\"Oshxona ekrani (KDS): kelgan taomlar va ularning tayyorlanish holati.\",\"col\":12}}]",
+ "creation": "2026-08-20 00:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "tool",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Oshxona",
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Oshxona",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [
+  {
+   "role": "URY Kitchen"
+  },
+  {
+   "role": "URY Manager"
+  },
+  {
+   "role": "System Manager"
+  }
+ ],
+ "sequence_id": 41.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Oshxona",
+   "link_to": "restaurant-kitchen",
+   "type": "Page"
+  }
+ ],
+ "title": "Oshxona"
+}

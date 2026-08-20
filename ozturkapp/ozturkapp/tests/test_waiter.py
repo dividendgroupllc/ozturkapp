@@ -15,7 +15,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from ozturkapp.ozturkapp.api import waiter
 from ozturkapp.ozturkapp.setup.waiter_setup import WAITER_ROLE
-from ozturkapp.ozturkapp.utils import kitchen_status as ks
+from ozturkapp.ozturkapp.utils import cashier_permissions, kitchen_status as ks
 
 
 class TestWaiterUsesExistingUryFlow(FrappeTestCase):
@@ -216,3 +216,172 @@ class TestMenuRealtime(FrappeTestCase):
 
         source = inspect.getsource(dynamic_pricing)
         self.assertGreaterEqual(source.count("_emit_menu_change(branch)"), 2)
+
+
+class TestWaiterCancelsWholeOrder(FrappeTestCase):
+    """Ofitsant xato olgan buyurtmani BUTUNLAY bekor qiladi (TZ §8).
+
+    Qoida bitta taomni olib tashlash bilan bir xil manbadan olinadi
+    (`utils/kitchen_status.py`): oshxona ishga kirishmaguncha mumkin,
+    kirishgandan keyin yo'q.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.branch = self.scope.branch
+        self.invoices, self.kots = [], []
+
+        # Testlar Administrator nomidan ketadi — u menejer, ya'ni
+        # «majburan bekor qilish» huquqiga ega. Ofitsantda bunday huquq
+        # yo'q, shuning uchun rol tekshiruvini almashtiramiz.
+        self._real_supervisor = cashier_permissions.has_supervisor_role
+        cashier_permissions.has_supervisor_role = lambda user=None: False
+
+    def tearDown(self):
+        cashier_permissions.has_supervisor_role = self._real_supervisor
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        for name in self.invoices:
+            frappe.db.delete("POS Invoice", {"name": name})
+
+    # ── Fikstura ──────────────────────────────────────────────────────
+
+    def _draft(self, printed=0):
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled, waiter)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, 0, 'Administrator')
+            """,
+            (name, self.branch, printed),
+        )
+        self.invoices.append(name)
+        return name
+
+    def _kot(self, invoice, statuses):
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, 'New Order', 'Ready For Prepare')
+            """,
+            (kot, invoice, self.branch),
+        )
+        self.kots.append(kot)
+
+        for idx, status in enumerate(statuses, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, quantity,
+                     custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, 1, %s)
+                """,
+                (frappe.generate_hash(length=10), kot, idx, f"TEST-TAOM-{idx}", status),
+            )
+        return kot
+
+    # ── Qoida ─────────────────────────────────────────────────────────
+
+    def test_endpoint_exists(self):
+        """Ilova aynan shu metodni chaqiradi."""
+        self.assertTrue(callable(getattr(waiter, "cancel_order", None)))
+
+    def test_waiter_may_cancel_while_everything_is_pending(self):
+        invoice = self._draft()
+        kot = self._kot(invoice, [ks.PENDING, ks.PENDING])
+
+        result = waiter.cancel_order(invoice, "Ofitsant xato stolga yozdi")
+
+        self.assertEqual(result["cancelled_items"], 2)
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 1
+        )
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "cancel_reason"),
+            "Ofitsant xato stolga yozdi",
+        )
+        # Oshxona chiptasi ham yopilishi kerak — aks holda oshpaz bekor
+        # qilingan buyurtmani tayyorlab yuboradi.
+        self.assertNotEqual(
+            frappe.db.get_value("URY KOT", kot, "order_status"), "Ready For Prepare"
+        )
+
+    def test_order_without_a_kot_can_still_be_cancelled(self):
+        """KOT yaratilmagan bo'lsa ham (oshxona sozlanmagan) bekor bo'ladi."""
+        invoice = self._draft()
+
+        waiter.cancel_order(invoice, "xato zakaz")
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 1
+        )
+
+    def test_waiter_may_not_cancel_once_the_kitchen_started(self):
+        invoice = self._draft()
+        self._kot(invoice, [ks.PENDING, ks.PREPARING])
+
+        with self.assertRaises(frappe.ValidationError):
+            waiter.cancel_order(invoice, "fikrimdan qaytdim")
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 0
+        )
+
+    def test_billed_order_cannot_be_cancelled(self):
+        """Hisob mijozga chiqarilgan bo'lsa — bu kassirning ishi."""
+        invoice = self._draft(printed=1)
+        self._kot(invoice, [ks.PENDING])
+
+        with self.assertRaises(frappe.ValidationError):
+            waiter.cancel_order(invoice, "kech qoldi")
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 0
+        )
+
+    def test_reason_is_required(self):
+        invoice = self._draft()
+
+        for empty in ("", "   "):
+            with self.assertRaises(frappe.ValidationError):
+                waiter.cancel_order(invoice, empty)
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 0
+        )
+
+    def test_the_same_rule_governs_removing_a_single_item(self):
+        """Bitta taomni olib tashlash ham, butun buyurtma ham — bir manba."""
+        removal = inspect.getsource(waiter._assert_removals_allowed)
+        cancel = inspect.getsource(waiter.cancel_order)
+
+        self.assertIn("can_waiter_cancel", removal)
+        self.assertIn("order_cancel", cancel)
+
+
+class TestWaiterAppKnowsWhenToShowTheButton(FrappeTestCase):
+    """Ilova qoidani O'ZI HISOBLAMAYDI — server aytadi (TZ §8)."""
+
+    def test_get_order_returns_the_cancellation_block(self):
+        source = inspect.getsource(waiter.get_order)
+        self.assertIn("build_bill", source)
+
+        stripped = inspect.getsource(waiter._strip_financials)
+        # Pul maydonlari olib tashlanadi, LEKIN qoidalar qolishi kerak —
+        # aks holda ilova tugmani chizolmaydi.
+        self.assertNotIn("cancellation", stripped)
+        self.assertNotIn("kitchen", stripped)
+
+    def test_item_level_flag_is_still_exposed(self):
+        source = inspect.getsource(ks.get_item_statuses_for_invoice)
+        self.assertIn("can_waiter_cancel", source)

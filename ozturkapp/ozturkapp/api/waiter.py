@@ -682,6 +682,57 @@ def request_bill(invoice):
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  6.5. Buyurtmani bekor qilish (TZ §8, §14)
+# ═══════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def cancel_order(invoice, reason):
+    """Xato olingan buyurtmani BUTUNLAY bekor qilish.
+
+    QACHON MUMKIN
+    =============
+    Oshxona ishga kirishmaguncha — ya'ni chekdagi HAMMA taom hali
+    «Kutilmoqda» holatida turganda. Oshpaz birortasini boshlab yuborsa,
+    ofitsant uchun yo'l yopiladi (`utils/order_cancel.py`).
+
+    Bu qoida `submit_order()` dagi qoidaning davomi:
+
+        bitta taomni olib tashlash   -> `_assert_removals_allowed()`
+        BUTUN buyurtmani bekor qilish -> shu metod
+
+    Ikkalasi ham `kitchen_status` dagi AYNI holatga qaraydi, shuning
+    uchun ilova ikki xil javob olmaydi.
+
+    NEGA `submit_order` ni bo'sh ro'yxat bilan chaqirish MUMKIN EMAS
+    ===============================================================
+    Bekor qilish — alohida, ataylab qilinadigan amal va u SABAB talab
+    qiladi (sabab hisobotga tushadi). Bo'sh ro'yxat esa ilovadagi
+    xatodan ham kelib chiqishi mumkin, shuning uchun `submit_order`
+    kamida bitta taom talab qilishda davom etadi.
+
+    Args:
+        invoice: `POS Invoice` nomi.
+        reason: bekor qilish sababi — majburiy.
+
+    Returns:
+        dict: invoice, cancelled_items, freed_tables, kitchen_started
+    """
+    require_waiter()
+    scope = cashier_permissions.resolve_scope()
+    row = cashier_permissions.assert_invoice_in_scope(invoice, scope, docstatus=0)
+
+    if cint(row.invoice_printed):
+        frappe.throw(
+            _("Hisob allaqachon chiqarilgan — buyurtmani bekor qilib bo'lmaydi."),
+            title=_("Buyurtma yopilgan"),
+        )
+
+    from ozturkapp.ozturkapp.utils import order_cancel
+
+    return order_cancel.cancel_invoice(row, reason, scope)
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  7. Mijoz yaratish (TZ §7.3 — ixtiyoriy)
 # ═══════════════════════════════════════════════════════════════════
 
