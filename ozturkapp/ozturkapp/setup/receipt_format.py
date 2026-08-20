@@ -127,8 +127,8 @@ RECEIPT_HTML = """
 		<tr>
 			<td class="name">{{ item.item_name or item.item_code }}</td>
 			<td class="num">{{ item.qty | int }}</td>
-			<td class="num">{{ item.get_formatted("rate") }}</td>
-			<td class="num">{{ item.get_formatted("amount") }}</td>
+			<td class="num">{{ format_amount(item.rate) }}</td>
+			<td class="num">{{ format_amount(item.amount) }}</td>
 		</tr>
 		{%- if item.comment %}
 		<tr><td class="oz-note" colspan="4">{{ item.comment }}</td></tr>
@@ -143,17 +143,17 @@ RECEIPT_HTML = """
 <table class="oz-totals">
 	<tr>
 		<td>Jami</td>
-		<td>{{ doc.get_formatted("net_total") }}</td>
+		<td>{{ format_amount(doc.net_total) }}</td>
 	</tr>
 	{%- for row in doc.taxes %}
 	<tr>
 		<td>{{ row.description }}</td>
-		<td>{{ row.get_formatted("tax_amount") }}</td>
+		<td>{{ format_amount(row.tax_amount) }}</td>
 	</tr>
 	{%- endfor %}
 	<tr class="oz-grand">
 		<td>Umumiy summa</td>
-		<td>{{ doc.get_formatted("rounded_total") or doc.get_formatted("grand_total") }}</td>
+		<td>{{ format_amount(doc.rounded_total or doc.grand_total) }}</td>
 	</tr>
 </table>
 
@@ -162,11 +162,11 @@ RECEIPT_HTML = """
 <table class="oz-totals">
 	{%- for payment in doc.payments %}
 	{%- if payment.amount %}
-	<tr><td>{{ payment.mode_of_payment }}</td><td>{{ payment.get_formatted("amount") }}</td></tr>
+	<tr><td>{{ payment.mode_of_payment }}</td><td>{{ format_amount(payment.amount) }}</td></tr>
 	{%- endif %}
 	{%- endfor %}
 	{%- if doc.change_amount %}
-	<tr><td>Qaytim</td><td>{{ doc.get_formatted("change_amount") }}</td></tr>
+	<tr><td>Qaytim</td><td>{{ format_amount(doc.change_amount) }}</td></tr>
 	{%- endif %}
 </table>
 {%- endif %}

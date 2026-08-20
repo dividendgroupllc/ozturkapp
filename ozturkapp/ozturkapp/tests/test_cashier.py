@@ -2398,3 +2398,99 @@ class TestCancelledOrderReleasesTheTable(FrappeTestCase):
             remembered,
             "takroriy yurgizish eslab qolingan nomni buzmasligi kerak",
         )
+
+
+class TestMoneyFormatting(FrappeTestCase):
+    """Summalar probel bilan guruhlanadi: `200000` -> `200 000`.
+
+    NEGA
+    ====
+    `1080800` ni bir qarashda o'qib bo'lmaydi, `1 080 800` ni bo'ladi.
+    Kassir ham, ofitsant ham ekranga bir soniyaga qaraydi — noto'g'ri
+    o'qilgan raqam pul xatosiga aylanadi.
+
+    Qoida UCH joyda bir xil bo'lishi shart, aks holda bitta son ikki
+    ekranda turlicha ko'rinadi:
+
+        server / chek     utils/money.py       format_amount()
+        kassa oynasi      restaurant_cashier.js money()
+        ofitsant ilovasi  lib/core/format.dart  Fmt.money()
+    """
+
+    def test_thousands_are_separated_by_a_space(self):
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(200000), "200 000")
+        self.assertEqual(format_amount(1080800), "1 080 800")
+        self.assertEqual(format_amount(646000), "646 000")
+
+    def test_small_numbers_are_untouched(self):
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(0), "0")
+        self.assertEqual(format_amount(500), "500")
+        self.assertEqual(format_amount(999), "999")
+        self.assertEqual(format_amount(1000), "1 000")
+
+    def test_zero_kopeks_are_not_shown(self):
+        """Summalar butun so'mda — `,00` faqat ekranni to'ldiradi."""
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(200000.0), "200 000")
+        self.assertEqual(format_amount(200000.004), "200 000")
+
+    def test_real_kopeks_are_shown_with_a_comma(self):
+        """Tiyin bo'lsa YASHIRILMAYDI — probel bilan vergul juftlashadi."""
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(1234.5), "1 234,50")
+        self.assertEqual(format_amount(1234.05), "1 234,05")
+
+    def test_rounding_carries_into_the_whole_part(self):
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(1.999), "2")
+        self.assertEqual(format_amount(999.999), "1 000")
+
+    def test_negative_amounts_keep_the_sign(self):
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(-75000), "-75 000")
+
+    def test_none_is_zero(self):
+        from ozturkapp.ozturkapp.utils.money import format_amount
+
+        self.assertEqual(format_amount(None), "0")
+
+    # ── Uch tomon bir xil qoidaga tayanadi ────────────────────────────
+
+    def test_cashier_page_does_not_use_frappe_currency_format(self):
+        """`format_currency()` saytning `#,###.##` sozlamasiga tayanadi."""
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+
+        self.assertNotIn("format_currency(flt(value)", page.script)
+        # Minglik ajratgich — probel.
+        self.assertIn('(?=(\\d{3})+(?!\\d))/g,', page.script.replace("\n", ""))
+
+    def test_receipt_uses_the_shared_formatter(self):
+        """Mijoz cheki ham probel bilan chiqadi."""
+        import inspect
+
+        from ozturkapp.ozturkapp.setup import receipt_format
+
+        source = inspect.getsource(receipt_format)
+        self.assertIn("format_amount(doc.rounded_total", source)
+        self.assertNotIn('get_formatted("rounded_total")', source)
+
+    def test_formatter_is_available_to_print_formats(self):
+        """Chek Jinja shabloni `format_amount()` ni ko'ra olishi kerak."""
+        methods = frappe.get_hooks("jinja", {}).get("methods") or []
+        self.assertIn("ozturkapp.ozturkapp.utils.money.format_amount", methods)
+
+    def test_jinja_render_produces_spaces(self):
+        """Uchdan-uchgacha: shablon haqiqatan probel bilan chizadi."""
+        rendered = frappe.render_template(
+            "{{ format_amount(value) }}", {"value": 1080800}
+        )
+        self.assertEqual(rendered, "1 080 800")

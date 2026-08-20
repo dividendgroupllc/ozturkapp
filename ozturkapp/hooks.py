@@ -252,6 +252,12 @@ doctype_js = {
 # ----------
 
 # add methods and filters to jinja environment
+# Chop etish shakllarida summani probel bilan ko'rsatish uchun
+# (`{{ format_amount(doc.rounded_total) }}`). Qoida `utils/money.py` da.
+jinja = {
+	"methods": ["ozturkapp.ozturkapp.utils.money.format_amount"],
+}
+
 # jinja = {
 # 	"methods": "ozturkapp.utils.jinja_methods",
 # 	"filters": "ozturkapp.utils.jinja_filters"

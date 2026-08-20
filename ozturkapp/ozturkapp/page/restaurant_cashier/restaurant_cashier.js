@@ -1990,8 +1990,48 @@ ozturk.cashier.Screen = class CashierScreen {
 			.then((r) => r.message);
 	}
 
+	/**
+	 * Summani PROBEL bilan guruhlaydi: `1080800` -> `1 080 800`.
+	 *
+	 * NEGA `format_currency()` EMAS
+	 * =============================
+	 * U saytning raqam formatiga tayanadi (`#,###.##`) va shu saytda
+	 * `лв 1,080,800.00` chiqaradi. Uchta muammo bor:
+	 *
+	 *   1. vergul — ingliz yozuvi; o'zbek/rus yozuvida u O'NLIK
+	 *      ajratgich sifatida o'qiladi, ya'ni chalg'itadi;
+	 *   2. `,00` — summalar butun so'mda, nol tiyin faqat ekranni
+	 *      to'ldiradi;
+	 *   3. `лв` — bolgar levi belgisi, UZS uchun noto'g'ri (Currency
+	 *      yozuvida shunday sozlangan).
+	 *
+	 * Saytning global sozlamasini o'zgartirish butun ERPNext'ga ta'sir
+	 * qiladi, shuning uchun qoida O'ZIMIZDA:
+	 * `utils/money.py: format_amount()` va ofitsant ilovasidagi
+	 * `Fmt.money()` — uchalasi bir xil natija berishi shart.
+	 */
 	money(value) {
-		return format_currency(flt(value), (this.ctx && this.ctx.currency) || undefined);
+		const number = flt(value);
+		const negative = number < 0;
+		const abs = Math.abs(number);
+
+		const whole = Math.trunc(abs);
+		let fraction = Math.round((abs - whole) * 100);
+
+		// Yaxlitlash butun songa o'tkazgan bo'lishi mumkin: 1.999 -> 2,00.
+		const carried = fraction >= 100;
+		const grouped = String(carried ? whole + 1 : whole).replace(
+			/\B(?=(\d{3})+(?!\d))/g,
+			" "
+		);
+		if (carried) fraction = 0;
+
+		// Tiyin FAQAT nolga teng bo'lmasa ko'rsatiladi.
+		const text = fraction
+			? `${grouped},${String(fraction).padStart(2, "0")}`
+			: grouped;
+
+		return negative ? `-${text}` : text;
 	}
 
 	busy(button, state) {
