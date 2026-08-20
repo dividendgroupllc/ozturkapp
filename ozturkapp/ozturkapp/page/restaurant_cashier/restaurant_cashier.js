@@ -167,10 +167,21 @@ ozturk.cashier.Screen = class CashierScreen {
 			this.renderOrderTabs();
 			this.subscribe();
 
-			// Smena ochilmagan bo'lsa kassa oynasi UMUMAN ko'rsatilmaydi —
-			// stol ham, buyurtma ham. Sotuv smenasiz mumkin emas, shuning
-			// uchun yagona mumkin bo'lgan amal — kassani ochish.
-			if (!(this.ctx.shift || {}).open) {
+			// ── Smena yopiq bo'lsa kim nima ko'radi ───────────────────
+			//
+			// KASSIR (kassani ocha oladigan) — bloklovchi ekran. Stol ham,
+			// buyurtma ham ko'rsatilmaydi: sotuv smenasiz mumkin emas,
+			// ya'ni uning yagona mumkin bo'lgan amali — kassani ochish.
+			//
+			// ADMINISTRATOR / MENEJER (ocholmaydigan) — bloklanmaydi. U
+			// kuzatish uchun kiradi: zal, buyurtmalar va cheklar ko'rinadi.
+			// Kassa yopiqligi yuqori paneldagi QIZIL «Kassa yopiq» yozuvida
+			// turadi. Sotuv amallarini server baribir rad etadi
+			// (`cashier_permissions.assert_shift_open`), shuning uchun
+			// bloklovchi ekran unga faqat xalaqit berardi.
+			const canOperate = !!(this.ctx.permissions || {}).can_operate_shift;
+
+			if (!(this.ctx.shift || {}).open && canOperate) {
 				this.renderShiftGate();
 				this.setState("shift");
 				return;
@@ -444,11 +455,22 @@ ozturk.cashier.Screen = class CashierScreen {
 		this.el.build.textContent = ozturk.cashier.BUILD;
 
 		const shift = this.ctx.shift || {};
+		const canOperate = !!(this.ctx.permissions || {}).can_operate_shift;
+
 		this.el.shift.className =
 			"rc-shift " + (shift.open ? "rc-shift--open" : "rc-shift--closed");
 		this.el.shift.textContent = shift.open
 			? __("Kassa ochiq")
 			: __("Kassa yopiq");
+
+		// Kassani ocholmaydigan foydalanuvchi (Administrator, menejer)
+		// bloklovchi ekranni KO'RMAYDI — u uchun holatning yagona manbai
+		// shu qizil yozuv. Kim ocha olishini ham shu yerda aytamiz, aks
+		// holda u kimni chaqirishni bilmaydi.
+		this.el.shift.title =
+			!shift.open && !canOperate && this.ctx.shift_operators
+				? __("Kassani faqat {0} ochadi.", [this.ctx.shift_operators])
+				: __("Kassa smenasi");
 
 		this.renderShiftButton(shift);
 
@@ -509,29 +531,12 @@ ozturk.cashier.Screen = class CashierScreen {
 		// FAQAT NAQD. Bank/karta bo'yicha boshlang'ich qoldiq yo'q — u pul
 		// kassada emas, bankda turadi va kassir uni sanay olmaydi. Server
 		// ham shuni majburlaydi (`_opening_balance_details`).
+		// DIQQAT: bu ekran FAQAT kassani ocha oladigan foydalanuvchiga
+		// chiziladi — qaror `boot()` da qabul qilinadi. Ocholmaydigan
+		// foydalanuvchi bu yergacha yetib kelmaydi, u to'g'ridan-to'g'ri
+		// kuzatuv rejimida ishlaydi.
 		const modes = this.ctx.cash_modes || [];
 		const $form = $(this.el.gate).off();
-		const $message = this.$root.find(".rc-gate .rc-boot__message");
-
-		// ── Kassani ochish huquqi bormi? ──────────────────────────────
-		// Yo'q bo'lsa (Administrator, menejer, boshqa filial kassiri) —
-		// sahifa ochiladi va HOLAT ko'rinadi, lekin ochish formasi UMUMAN
-		// chizilmaydi. Sabab `utils/cashier_permissions.py` da: smenani
-		// kim ochgani `POS Invoice.owner` ni belgilaydi va noto'g'ri egali
-		// smena cheklarni Z-hisobotdan tushirib qoldiradi.
-		if (!(this.ctx.permissions || {}).can_operate_shift) {
-			$message.text(
-				this.ctx.shift_operators
-					? __("Kassani faqat {0} ochadi.", [this.ctx.shift_operators])
-					: __("Kassani ochishga sizda ruxsat yo'q.")
-			);
-			$form.empty();
-			return;
-		}
-
-		$message.text(
-			__("Sotuvni boshlash uchun kassadagi naqd pulni sanang va quyida kiriting.")
-		);
 
 		if (!modes.length) {
 			$form.html(

@@ -1968,10 +1968,15 @@ class TestShiftOperatorRestriction(FrappeTestCase):
 
 
 class TestShiftGateForUnauthorizedUser(FrappeTestCase):
-    """Ruxsatsiz foydalanuvchi sahifani ko'radi, lekin kassani ocholmaydi.
+    """Kassa YOPIQ bo'lganda kim nima ko'radi.
 
-    Talab: Administrator kassa sahifasiga kira olsin va «Kassa yopiq»
-    holatini ko'rsin, lekin ochish formasi UMUMAN chiqmasin.
+        KASSIR (ocha oladi)      -> bloklovchi ekran + ochish formasi
+        ADMINISTRATOR / MENEJER  -> bloklanmaydi, zal va buyurtmalar
+                                    ko'rinadi, holat esa yuqori paneldagi
+                                    QIZIL «Kassa yopiq» yozuvida turadi
+
+    Sotuv amallarini server baribir rad etadi (`assert_shift_open`),
+    shuning uchun kuzatuvchini bloklashning ma'nosi yo'q.
     """
 
     def setUp(self):
@@ -1979,11 +1984,14 @@ class TestShiftGateForUnauthorizedUser(FrappeTestCase):
         page.load_assets()
         self.script = page.script
 
-    def test_gate_checks_the_permission_before_drawing_the_form(self):
-        self.assertIn("can_operate_shift", self.script)
-        self.assertIn("$form.empty()", self.script)
+    def test_only_the_operator_is_blocked_by_the_gate(self):
+        self.assertIn("!(this.ctx.shift || {}).open && canOperate", self.script)
 
-    def test_gate_still_shows_who_may_open_it(self):
+    def test_status_is_shown_to_everyone_in_red(self):
+        self.assertIn("rc-shift--closed", self.script)
+        self.assertIn('__("Kassa yopiq")', self.script)
+
+    def test_status_tells_who_may_open_the_register(self):
         self.assertIn("shift_operators", self.script)
 
     def test_close_button_is_hidden_for_unauthorized_user(self):
