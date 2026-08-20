@@ -21,6 +21,7 @@ import re
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import flt
 
 from ozturkapp.ozturkapp.api import cashier as cashier_api
 from ozturkapp.ozturkapp.overrides import pos_invoice as pos_invoice_override
@@ -1996,3 +1997,404 @@ class TestShiftGateForUnauthorizedUser(FrappeTestCase):
 
     def test_close_button_is_hidden_for_unauthorized_user(self):
         self.assertIn("isOpen && canOperate", self.script)
+
+
+class TestBulkClosingMatchesErpnext(FrappeTestCase):
+    """Tez `make_closing_entry_from_opening()` ERPNext bilan AYNAN bir xil.
+
+    NEGA BU TEST BOR
+    ================
+    `utils/pos_closing.py` ERPNext'ning ichki funksiyasini almashtiradi —
+    chek-boshiga 11 ta so'rov o'rniga jami 3 ta bulk so'rov. Tezlik
+    yaxshi, lekin bu PUL hisobi: bironta maydon tushib qolsa Z-hisobot
+    jimgina noto'g'ri chiqadi va buni hech kim payqamaydi.
+
+    Shuning uchun ikkala versiya HAR SAFAR maydonma-maydon
+    solishtiriladi. ERPNext yangilanganda bu test birinchi bo'lib
+    ogohlantiradi.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.profile = self.scope.pos_profile
+        self.user = "Administrator"
+        self.invoices = []
+
+        self.opening = frappe._dict(
+            name="TEST-OPE",
+            period_start_date=frappe.utils.add_to_date(
+                frappe.utils.now_datetime(), days=-1
+            ),
+            pos_profile=self.profile,
+            user=self.user,
+            company=frappe.db.get_value("POS Profile", self.profile, "company"),
+            balance_details=[
+                frappe._dict(mode_of_payment=mode, opening_amount=50000)
+                for mode in cashier_api._cash_modes(self.profile)
+            ],
+        )
+
+    def tearDown(self):
+        for name in self.invoices:
+            frappe.db.delete("Sales Taxes and Charges", {"parent": name})
+            frappe.db.delete("Sales Invoice Payment", {"parent": name})
+            frappe.db.delete("POS Invoice", {"name": name})
+
+    # ── Fikstura ──────────────────────────────────────────────────────
+
+    def _invoice(self, grand_total, qty, taxes=(), payments=()):
+        """To'langan, hali konsolidatsiya qilinmagan chek."""
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 posting_date, posting_time, pos_profile, customer, branch,
+                 grand_total, net_total, total_qty, consolidated_invoice)
+            values (%s, now(), now(), %s, %s, 1,
+                 curdate(), curtime(), %s, 'TEST-MIJOZ', %s, %s, %s, %s, '')
+            """,
+            (name, self.user, self.user, self.profile, self.scope.branch,
+             grand_total, grand_total, qty),
+        )
+        self.invoices.append(name)
+
+        for idx, (account, rate, amount) in enumerate(taxes, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabSales Taxes and Charges`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx,
+                     charge_type, account_head, rate, tax_amount)
+                values (%s, now(), now(), %s, %s, 1, %s, 'POS Invoice', 'taxes', %s,
+                     'On Net Total', %s, %s, %s)
+                """,
+                (frappe.generate_hash(length=10), self.user, self.user,
+                 name, idx, account, rate, amount),
+            )
+
+        for idx, (mode, amount) in enumerate(payments, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabSales Invoice Payment`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, mode_of_payment, amount)
+                values (%s, now(), now(), %s, %s, 1, %s, 'POS Invoice', 'payments',
+                     %s, %s, %s)
+                """,
+                (frappe.generate_hash(length=10), self.user, self.user,
+                 name, idx, mode, amount),
+            )
+        return name
+
+    # ── Solishtiruv ───────────────────────────────────────────────────
+
+    def _both(self):
+        from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import (
+            make_closing_entry_from_opening as erpnext_version,
+        )
+
+        from ozturkapp.ozturkapp.utils.pos_closing import (
+            make_closing_entry_from_opening as bulk_version,
+        )
+
+        return erpnext_version(self.opening), bulk_version(self.opening)
+
+    def _rows(self, doc, table, keys):
+        return sorted(
+            tuple(flt(row.get(k)) if isinstance(row.get(k), (int, float)) else row.get(k)
+                  for k in keys)
+            for row in doc.get(table) or []
+        )
+
+    def test_totals_match(self):
+        self._invoice(120000, 3, payments=[("Нахт", 120000)])
+        self._invoice(80000, 2, payments=[("Нахт", 80000)])
+
+        theirs, ours = self._both()
+
+        self.assertEqual(flt(ours.grand_total), flt(theirs.grand_total))
+        self.assertEqual(flt(ours.net_total), flt(theirs.net_total))
+        self.assertEqual(flt(ours.total_quantity), flt(theirs.total_quantity))
+        self.assertGreater(flt(ours.grand_total), 0, "sinov ma'lumoti tushmagan")
+
+    def test_transactions_match(self):
+        self._invoice(120000, 3, payments=[("Нахт", 120000)])
+        self._invoice(80000, 2, payments=[("Нахт", 80000)])
+
+        theirs, ours = self._both()
+        keys = ["pos_invoice", "customer", "grand_total"]
+
+        self.assertEqual(
+            self._rows(ours, "pos_transactions", keys),
+            self._rows(theirs, "pos_transactions", keys),
+        )
+        self.assertEqual(len(ours.pos_transactions), 2)
+
+    def test_payments_are_aggregated_the_same_way(self):
+        """Bir xil usul bo'yicha jamlanadi, ochilish summasi saqlanadi."""
+        self._invoice(120000, 3, payments=[("Нахт", 100000), ("Нахт", 20000)])
+        self._invoice(80000, 2, payments=[("Нахт", 80000)])
+
+        theirs, ours = self._both()
+        keys = ["mode_of_payment", "opening_amount", "expected_amount"]
+
+        self.assertEqual(
+            self._rows(ours, "payment_reconciliation", keys),
+            self._rows(theirs, "payment_reconciliation", keys),
+        )
+
+    def test_taxes_are_aggregated_the_same_way(self):
+        """Soliqlar `(account_head, rate)` juftligi bo'yicha jamlanadi."""
+        account = frappe.db.get_value("Account", {"company": self.opening.company}, "name")
+        if not account:
+            self.skipTest("Kompaniyada hisob topilmadi")
+
+        self._invoice(120000, 3, taxes=[(account, 12, 12000)],
+                      payments=[("Нахт", 120000)])
+        self._invoice(80000, 2, taxes=[(account, 12, 8000)],
+                      payments=[("Нахт", 80000)])
+
+        theirs, ours = self._both()
+        keys = ["account_head", "rate", "amount"]
+
+        self.assertEqual(
+            self._rows(ours, "taxes", keys),
+            self._rows(theirs, "taxes", keys),
+        )
+        self.assertEqual(len(ours.taxes), 1, "bir xil hisob+stavka birlashishi kerak")
+
+    def test_consolidated_invoices_are_excluded(self):
+        paid = self._invoice(50000, 1, payments=[("Нахт", 50000)])
+        frappe.db.set_value("POS Invoice", paid, "consolidated_invoice", "ACC-SINV-TEST")
+
+        theirs, ours = self._both()
+
+        self.assertEqual(len(ours.pos_transactions), len(theirs.pos_transactions))
+        self.assertNotIn(
+            paid, [row.pos_invoice for row in ours.pos_transactions]
+        )
+
+    def test_invoices_of_another_user_are_excluded(self):
+        other = self._invoice(50000, 1, payments=[("Нахт", 50000)])
+        frappe.db.set_value("POS Invoice", other, "owner", "kassa@gmail.com")
+
+        theirs, ours = self._both()
+
+        self.assertEqual(len(ours.pos_transactions), len(theirs.pos_transactions))
+        self.assertNotIn(other, [row.pos_invoice for row in ours.pos_transactions])
+
+    def test_invoices_outside_the_window_are_excluded(self):
+        old = self._invoice(50000, 1, payments=[("Нахт", 50000)])
+        frappe.db.set_value(
+            "POS Invoice", old, "posting_date",
+            frappe.utils.add_to_date(frappe.utils.nowdate(), days=-5),
+        )
+
+        theirs, ours = self._both()
+
+        self.assertEqual(len(ours.pos_transactions), len(theirs.pos_transactions))
+        self.assertNotIn(old, [row.pos_invoice for row in ours.pos_transactions])
+
+    def test_bulk_version_uses_far_fewer_queries(self):
+        """Tezlikning O'ZI ham regressiyadan himoyalanadi."""
+        for _ in range(6):
+            self._invoice(50000, 1, payments=[("Нахт", 50000)])
+
+        counts = {}
+        real_sql = frappe.db.sql
+
+        for label, fn in (("erpnext", None), ("bulk", None)):
+            counts[label] = 0
+
+        def counted(label):
+            def wrapper(*args, **kwargs):
+                counts[label] += 1
+                return real_sql(*args, **kwargs)
+            return wrapper
+
+        from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import (
+            make_closing_entry_from_opening as erpnext_version,
+        )
+        from ozturkapp.ozturkapp.utils.pos_closing import (
+            make_closing_entry_from_opening as bulk_version,
+        )
+
+        try:
+            frappe.db.sql = counted("erpnext")
+            erpnext_version(self.opening)
+            frappe.db.sql = counted("bulk")
+            bulk_version(self.opening)
+        finally:
+            frappe.db.sql = real_sql
+
+        self.assertLess(
+            counts["bulk"], counts["erpnext"] / 3,
+            f"bulk={counts['bulk']} erpnext={counts['erpnext']} — tezlik yo'qolgan",
+        )
+
+
+class TestCancelledOrderReleasesTheTable(FrappeTestCase):
+    """Bekor qilingan chek stolni ushlab turmasligi kerak.
+
+    MUAMMO QANDAY BO'LGAN
+    =====================
+    Bekor qilingan chek `docstatus = 0` bo'lib qoladi. URY esa stoldagi
+    "faol buyurtma"ni stol bog'lami bo'yicha qidiradi va bizning
+    `custom_cancelled` bayrog'imizni BILMAYDI::
+
+        ury_order.get_order_invoice():
+            filters    {docstatus: 0, invoice_printed: 0}
+            or_filters {restaurant_table: <stol>,
+                        custom_merged_tables: like %<stol>%}
+
+    Shu sababli Table-1 dagi zakaz bekor qilingandan keyin o'sha stolga
+    yangi zakaz olinganda «Table-1 is already occupied» chiqardi
+    (`ury_order.py:840`) — `URY Table.occupied = 0` bo'lsa ham. Stol
+    amalda abadiy bloklanardi.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.table = _free_table(self.scope.branch)
+        if not self.table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+        if not frappe.db.has_column("POS Invoice", "custom_cancelled_table"):
+            self.skipTest("`custom_cancelled_table` maydoni hali yaratilmagan")
+
+        self.created = []
+        self._real_supervisor = cashier_permissions.has_supervisor_role
+        cashier_permissions.has_supervisor_role = lambda user=None: False
+
+    def tearDown(self):
+        cashier_permissions.has_supervisor_role = self._real_supervisor
+        for name in self.created:
+            frappe.db.delete("POS Invoice", {"name": name})
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 0, update_modified=False
+        )
+
+    def _draft(self, cancelled=0):
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, 0, %s)
+            """,
+            (name, self.table, self.scope.branch, cancelled),
+        )
+        self.created.append(name)
+        return name
+
+    def _ury_would_find(self):
+        """URY'ning `get_order_invoice()` dagi AYNAN o'sha so'rovi."""
+        return frappe.get_all(
+            "POS Invoice",
+            filters={"docstatus": 0, "invoice_printed": 0},
+            or_filters={
+                "restaurant_table": self.table,
+                "custom_merged_tables": ["like", f"%{self.table}%"],
+            },
+            pluck="name",
+        )
+
+    # ── Qoida ─────────────────────────────────────────────────────────
+
+    def test_live_order_is_still_found_by_ury(self):
+        """Nazorat: faol zakaz TOPILISHI kerak, aks holda test ma'nosiz."""
+        live = self._draft()
+        self.assertIn(live, self._ury_would_find())
+
+    def test_cancelling_detaches_the_table(self):
+        invoice = self._draft()
+
+        order_cancel.cancel_invoice(
+            frappe._dict(name=invoice), "xato zakaz", self.scope
+        )
+
+        row = frappe.db.get_value(
+            "POS Invoice", invoice,
+            ["restaurant_table", "custom_merged_tables", "custom_cancelled_table"],
+            as_dict=True,
+        )
+        self.assertIsNone(row.restaurant_table, "stol bog'lami uzilishi kerak")
+        self.assertIsNone(row.custom_merged_tables)
+        self.assertEqual(
+            row.custom_cancelled_table, self.table,
+            "qaysi stol bo'lgani audit uchun saqlanishi kerak",
+        )
+
+    def test_ury_no_longer_finds_a_cancelled_order(self):
+        """REGRESSIYA: «Table-1 is already occupied» qaytmasligi kerak."""
+        invoice = self._draft()
+        self.assertIn(invoice, self._ury_would_find())
+
+        order_cancel.cancel_invoice(
+            frappe._dict(name=invoice), "xato zakaz", self.scope
+        )
+
+        self.assertNotIn(
+            invoice, self._ury_would_find(),
+            "bekor qilingan chek stolni bloklab turibdi",
+        )
+
+    def test_cancelled_order_stays_in_the_database(self):
+        """Stol uziladi, LEKIN hujjat audit uchun qoladi."""
+        invoice = self._draft()
+        order_cancel.cancel_invoice(
+            frappe._dict(name=invoice), "xato zakaz", self.scope
+        )
+
+        row = frappe.db.get_value(
+            "POS Invoice", invoice,
+            ["docstatus", "custom_cancelled", "cancel_reason"], as_dict=True,
+        )
+        self.assertEqual(row.docstatus, 0)
+        self.assertEqual(row.custom_cancelled, 1)
+        self.assertEqual(row.cancel_reason, "xato zakaz")
+
+    def test_bill_still_shows_which_table_it_was(self):
+        invoice = self._draft()
+        order_cancel.cancel_invoice(
+            frappe._dict(name=invoice), "xato zakaz", self.scope
+        )
+
+        bill = cashier_billing.build_bill(
+            frappe.get_doc("POS Invoice", invoice), self.scope, include_kitchen=False
+        )
+        self.assertEqual(bill["table"], self.table)
+
+    # ── Eski ma'lumotni tozalash ──────────────────────────────────────
+
+    def test_legacy_cancelled_orders_are_detached_on_migrate(self):
+        """Tuzatishdan OLDIN bekor qilinganlar ham tozalanishi kerak."""
+        from ozturkapp.ozturkapp.setup.cancelled_orders import detach_tables
+
+        stuck = self._draft(cancelled=1)  # eski usulda: stol bog'lami joyida
+        self.assertIn(stuck, self._ury_would_find())
+
+        detach_tables()
+
+        self.assertNotIn(stuck, self._ury_would_find())
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", stuck, "custom_cancelled_table"),
+            self.table,
+        )
+
+    def test_cleanup_is_idempotent(self):
+        from ozturkapp.ozturkapp.setup.cancelled_orders import detach_tables
+
+        stuck = self._draft(cancelled=1)
+        detach_tables()
+        remembered = frappe.db.get_value("POS Invoice", stuck, "custom_cancelled_table")
+
+        detach_tables()  # ikkinchi marta
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", stuck, "custom_cancelled_table"),
+            remembered,
+            "takroriy yurgizish eslab qolingan nomni buzmasligi kerak",
+        )

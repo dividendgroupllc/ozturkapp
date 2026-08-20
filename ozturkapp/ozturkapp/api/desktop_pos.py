@@ -334,9 +334,10 @@ def getPosClosingData(pos_opening_entry):
                 "reconciliation": [{"mode_of_payment", "opening_amount",
                                     "expected_amount"}]}`
     """
-    from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import (
-        make_closing_entry_from_opening,
-    )
+    # ERPNext'nikining bulk o'qiydigan nusxasi — natija AYNAN bir xil,
+    # lekin chek-boshiga 11 ta so'rov o'rniga jami 3 ta so'rov
+    # (`utils/pos_closing.py` da sabab batafsil yozilgan).
+    from ozturkapp.ozturkapp.utils.pos_closing import make_closing_entry_from_opening
 
     opening = frappe.get_doc("POS Opening Entry", pos_opening_entry)
     _assert_not_finalized(opening)
@@ -485,9 +486,10 @@ def createPosClosing(pos_opening_entry, payment_reconciliation):
         dict: `{"name": str, "z_report_data": {...}}` — z_report_data
         Desktop POS'dagi Z-hisobot chekini chop etish uchun.
     """
-    from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import (
-        make_closing_entry_from_opening,
-    )
+    # ERPNext'nikining bulk o'qiydigan nusxasi — natija AYNAN bir xil,
+    # lekin chek-boshiga 11 ta so'rov o'rniga jami 3 ta so'rov
+    # (`utils/pos_closing.py` da sabab batafsil yozilgan).
+    from ozturkapp.ozturkapp.utils.pos_closing import make_closing_entry_from_opening
 
     from ozturkapp.ozturkapp.utils import cashier_permissions
 

@@ -138,9 +138,32 @@ def resolve_pos_profile(branch: str) -> str:
 def resolve_scope(user: str = None) -> frappe._dict:
     """Kassa metodlari ishlatadigan yagona kontekst obyekti.
 
-    Returns:
-        frappe._dict: branch, pos_profile, restaurant, company, currency
+    SO'ROV ICHIDA KESHLANADI
+    ========================
+    Bu funksiya deyarli har bir whitelisted metodda chaqiriladi, ba'zilarida
+    esa bir necha marta (`open_shift_name()` uni yana ichkaridan chaqiradi).
+    Har chaqiruv 5 ta so'rov — bitta HTTP so'rovida 20+ ortiqcha so'rov
+    demakdir.
+
+    Kesh FAQAT joriy so'rov umriga (`frappe.local`) — global emas. Global
+    keshda POS Profile almashtirilganda yoki `frappe.set_user()` bilan rol
+    almashganda eski ko'lam osilib qolardi. Kalitga foydalanuvchi ham
+    kiritiladi, chunki `resolve_scope(user=...)` argumenti bor.
     """
+    cache = getattr(frappe.local, "_ozturk_scope_cache", None)
+    if cache is None:
+        cache = frappe.local._ozturk_scope_cache = {}
+
+    key = user or frappe.session.user
+    if key in cache:
+        return cache[key]
+
+    scope = _build_scope(user)
+    cache[key] = scope
+    return scope
+
+
+def _build_scope(user: str = None) -> frappe._dict:
     branch = resolve_branch(user)
     pos_profile = resolve_pos_profile(branch)
 

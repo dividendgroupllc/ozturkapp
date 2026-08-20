@@ -526,3 +526,139 @@ class TestWaiterRemovesSingleItem(FrappeTestCase):
         state = ks.get_item_statuses_for_invoice(invoice)["TAOM-A"]
         self.assertEqual(state["qty"], 3)
         self.assertEqual(state["pending_qty"], 2)
+
+
+class TestWaiterBootstrap(FrappeTestCase):
+    """Login'dan keyingi barcha ma'lumot BITTA so'rovda.
+
+    NEGA
+    ====
+    Serverda uchta metod ~35 ms, lekin telefonda har biri ALOHIDA TCP
+    ulanish + RTT. Uch to'lqin WiFi'da osongina 0.5–2 soniyaga aylanadi —
+    ofitsant sezadigan kutish aynan shu, ma'lumotning hajmi emas.
+    """
+
+    def setUp(self):
+        # `get_menu()` URY orqali ketadi va u foydalanuvchining FILIALINI
+        # talab qiladi (`ury_pos/api.py: getBranch()`). Administrator hech
+        # qaysi filialga biriktirilmagan, shuning uchun sinov haqiqiy
+        # ofitsant nomidan bajariladi.
+        self._real_user = frappe.session.user
+        waiter_user = frappe.db.get_value(
+            "URY User", {"parenttype": "Branch"}, "user"
+        )
+        if not waiter_user:
+            self.skipTest("Filialga biriktirilgan foydalanuvchi yo'q")
+
+        frappe.set_user(waiter_user)
+        if not set(frappe.get_roles()).intersection(
+            {"URY Captain", "URY Manager", "System Manager"}
+        ):
+            frappe.set_user(self._real_user)
+            self.skipTest("Foydalanuvchida ofitsant roli yo'q")
+
+    def tearDown(self):
+        frappe.set_user(self._real_user)
+
+    def test_bootstrap_returns_everything_the_app_needs(self):
+        data = waiter.get_bootstrap()
+
+        self.assertEqual(sorted(data.keys()), ["context", "menu", "tables"])
+        self.assertIn("site", data["context"], "soket namespace'i uchun shart")
+        self.assertIn("shift", data["context"])
+        self.assertIn("tables", data["tables"])
+        self.assertIn("items", data["menu"])
+
+    def test_bootstrap_matches_the_separate_endpoints(self):
+        """Yagona so'rov eski uchta metod bilan BIR XIL ma'lumot berishi kerak."""
+        data = waiter.get_bootstrap()
+
+        self.assertEqual(
+            [t["name"] for t in data["tables"]["tables"]],
+            [t["name"] for t in waiter.get_tables()["tables"]],
+        )
+        self.assertEqual(
+            [i["item"] for i in data["menu"]["items"]],
+            [i["item"] for i in waiter.get_menu()["items"]],
+        )
+        self.assertEqual(data["context"]["branch"], waiter.get_context()["branch"])
+
+    def test_bootstrap_costs_fewer_queries_than_three_calls(self):
+        """`resolve_scope()` uch marta emas, bir marta hisoblanishi kerak."""
+        counter = {"n": 0}
+        real_sql = frappe.db.sql
+
+        def counted(*args, **kwargs):
+            counter["n"] += 1
+            return real_sql(*args, **kwargs)
+
+        def run(fn):
+            frappe.local._ozturk_scope_cache = {}
+            frappe.local._ozturk_payment_methods = {}
+            counter["n"] = 0
+            frappe.db.sql = counted
+            try:
+                fn()
+            finally:
+                frappe.db.sql = real_sql
+            return counter["n"]
+
+        separate = run(lambda: (waiter.get_context(),
+                                waiter.get_tables(),
+                                waiter.get_menu()))
+        combined = run(waiter.get_bootstrap)
+
+        self.assertLess(
+            combined, separate,
+            f"bootstrap={combined} alohida={separate} — takror so'rovlar qaytgan",
+        )
+
+    def test_old_endpoints_still_work(self):
+        """Eski APK'lar ishlashda davom etishi kerak."""
+        for fn in (waiter.get_context, waiter.get_tables, waiter.get_menu,
+                   waiter.get_shift_state):
+            self.assertTrue(fn(), f"{fn.__name__} bo'sh qaytardi")
+
+
+class TestRequestScopedCaches(FrappeTestCase):
+    """So'rov ichidagi keshlar — takroriy so'rovlarni yo'qotadi."""
+
+    def setUp(self):
+        frappe.local._ozturk_scope_cache = {}
+        frappe.local._ozturk_payment_methods = {}
+
+    def test_scope_is_built_once_per_request(self):
+        counter = {"n": 0}
+        real = cashier_permissions._build_scope
+
+        def counted(user=None):
+            counter["n"] += 1
+            return real(user)
+
+        cashier_permissions._build_scope = counted
+        try:
+            for _ in range(5):
+                cashier_permissions.resolve_scope()
+        finally:
+            cashier_permissions._build_scope = real
+
+        self.assertEqual(counter["n"], 1, "ko'lam bir marta qurilishi kerak")
+
+    def test_cache_is_keyed_by_user(self):
+        """`resolve_scope(user=...)` boshqa foydalanuvchi uchun qayta hisoblanadi."""
+        first = cashier_permissions.resolve_scope()
+        second = cashier_permissions.resolve_scope(user="kassa@gmail.com")
+
+        self.assertIsNot(first, second, "har user uchun alohida ko'lam kerak")
+        self.assertEqual(first.user, frappe.session.user)
+        self.assertEqual(second.user, "kassa@gmail.com")
+
+    def test_payment_methods_are_fetched_once(self):
+        from ozturkapp.ozturkapp.utils import cashier_billing
+
+        profile = cashier_permissions.resolve_scope().pos_profile
+        first = cashier_billing.get_payment_methods(profile)
+        second = cashier_billing.get_payment_methods(profile)
+
+        self.assertIs(first, second, "ikkinchi chaqiruv keshdan kelishi kerak")
+        self.assertTrue(all("type" in m for m in first), "usul turi bo'lishi kerak")

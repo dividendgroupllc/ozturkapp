@@ -465,9 +465,10 @@ def close_shift(counted_cash):
     counted = _parse_counted_cash(counted_cash, scope.pos_profile)
 
     # ── Solishtiruv jadvalini SERVER quradi ───────────────────────────
-    from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import (
-        make_closing_entry_from_opening,
-    )
+    # ERPNext'nikining bulk o'qiydigan nusxasi — natija AYNAN bir xil,
+    # lekin chek-boshiga 11 ta so'rov o'rniga jami 3 ta so'rov
+    # (`utils/pos_closing.py` da sabab batafsil yozilgan).
+    from ozturkapp.ozturkapp.utils.pos_closing import make_closing_entry_from_opening
 
     opening = frappe.get_doc("POS Opening Entry", shift["name"])
     expected = make_closing_entry_from_opening(opening)

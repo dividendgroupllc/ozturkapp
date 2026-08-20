@@ -135,6 +135,42 @@ def get_context():
 
 
 @frappe.whitelist()
+def get_bootstrap(room=None):
+    """Kirgandan keyingi BARCHA boshlang'ich ma'lumot — BITTA so'rovda.
+
+    NEGA BU KERAK
+    =============
+    Ilgari ilova login'dan keyin uchta to'lqinda so'rov yuborardi::
+
+        login  ->  get_context  ->  (get_tables ‖ get_menu)
+
+    Server tomonida bularning hammasi ~25 ms, lekin telefonda har bir
+    to'lqin alohida TCP ulanish + RTT: WiFi'da 3 ta to'lqin osongina
+    0.5–2 soniyaga aylanadi (Android quvvat tejash rejimida undan ham
+    ko'p). Ma'lumotning o'zi kichik — sekinlik ROUND-TRIP dan.
+
+    Endi login'dan keyin bitta so'rov yetadi::
+
+        login  ->  get_bootstrap
+
+    Eski uchta metod O'Z JOYIDA QOLADI: ular ilovada alohida yangilash
+    uchun ham ishlatiladi (stollarni qayta o'qish, menyu o'zgarganda),
+    va eski APK'lar ishlashda davom etishi kerak.
+
+    Ichkarida `resolve_scope()` bir marta hisoblanadi va so'rov keshida
+    saqlanadi (`cashier_permissions.resolve_scope`), ya'ni uchta metod
+    uni uch marta qayta qurmaydi.
+    """
+    require_waiter()
+
+    return {
+        "context": get_context(),
+        "tables": get_tables(room=room),
+        "menu": get_menu(room=room),
+    }
+
+
+@frappe.whitelist()
 def get_shift_state():
     """Kassa smenasi ochiqmi — bloklovchi oyna uchun YENGIL so'rov.
 

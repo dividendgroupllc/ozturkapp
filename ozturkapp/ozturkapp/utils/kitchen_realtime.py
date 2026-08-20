@@ -100,6 +100,17 @@ def on_kot_submit(doc, method=None):
     if doc.doctype != "URY KOT":
         return
 
+    from ozturkapp.ozturkapp.utils import kitchen_status, notifications
+
+    # ── Bekor qilish KOT'i — OVQAT BUYURTMASI EMAS ────────────────────
+    # URY taom zakazdan olib tashlanganda shunday hujjat yaratadi.
+    # Ilgari u shu yerdan o'tib, oshxonaga «Yangi buyurtma» xabarini
+    # yuborardi — ya'ni olib tashlangan taom yangi buyurtma bo'lib
+    # ko'rinardi.
+    if doc.get("type") in kitchen_status.CANCELLATION_KOT_TYPES:
+        _on_cancellation_kot(doc)
+        return
+
     emit_kot_change(
         doc.get("branch"), doc.name, "KOT_CREATED",
         doc.get("production"), doc.get("invoice"),
@@ -111,13 +122,75 @@ def on_kot_submit(doc, method=None):
     # KOT'ni Desktop POS ham, kassir ham, ofitsant ilovasi ham yaratadi.
     # Manbaning har biriga alohida xabar yozsak, bittasi unutilardi va
     # o'sha yo'l bilan kelgan buyurtma jimgina o'tib ketardi.
-    from ozturkapp.ozturkapp.utils import notifications
-
     notifications.order_placed(
         doc.get("branch"),
         doc.get("invoice"),
         doc.get("restaurant_table"),
         len(doc.get("kot_items") or []),
+        doc.get("production"),
+    )
+
+
+def _on_cancellation_kot(doc):
+    """Taom zakazdan olib tashlandi — asl chiptani ham yopamiz.
+
+    NEGA SHU YERDA
+    ==============
+    Taomni olib tashlash yo'llari ko'p: ofitsant ilovasi, Desktop POS,
+    kassa oynasi, URY POS. Hammasi oxir-oqibat `sync_order()` ga boradi
+    va u bekor-KOT yaratadi. Ya'ni `URY KOT.on_submit` — YAGONA choke
+    point. Har bir mijozga alohida tozalash yozsak, bittasi unutilardi.
+
+    IKKI XIL NATIJA
+    ===============
+        oshxona hali boshlamagan  -> asl qator ham, «to'xtat» kartasi
+                                     ham yo'qoladi; oshpaz bezovta
+                                     qilinmaydi (yo'q ishni to'xtatib
+                                     bo'lmaydi)
+        oshxona boshlab yuborgan  -> karta EKRANDA QOLADI va oshpazga
+                                     «TO'XTATING» xabari boradi
+    """
+    from ozturkapp.ozturkapp.utils import notifications, order_cancel
+
+    branch = doc.get("branch")
+    nothing_to_stop = order_cancel.apply_item_cancellation(doc)
+
+    if nothing_to_stop:
+        # Chiptani darhol "ko'rilgan" deb yopamiz. `verified` +
+        # `order_status` — URY'ning O'Z mexanizmi
+        # (`ury_kot_display.confirm_cancel_kot`), shuning uchun Mosaic
+        # KDS ham bu kartani ko'rsatmaydi.
+        frappe.db.set_value(
+            "URY KOT",
+            doc.name,
+            {
+                "verified": 1,
+                "verified_by": frappe.session.user,
+                "order_status": "Cancelled",
+            },
+            update_modified=False,
+        )
+
+    emit_kot_change(
+        branch,
+        doc.name,
+        "KOT_CANCELLED" if nothing_to_stop else "KOT_STOP_REQUESTED",
+        doc.get("production"),
+        doc.get("invoice"),
+    )
+
+    if nothing_to_stop:
+        return
+
+    names = ", ".join(
+        f"{row.get('item_name') or row.get('item')} ×{row.get('cancelled_qty') or row.get('quantity')}"
+        for row in (doc.get("kot_items") or [])
+    )
+    notifications.order_cancelled(
+        branch,
+        doc.get("invoice"),
+        names,
+        doc.get("restaurant_table"),
         doc.get("production"),
     )
 

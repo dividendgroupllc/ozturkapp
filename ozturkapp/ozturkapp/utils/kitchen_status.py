@@ -211,6 +211,13 @@ def derive_kot_status(item_statuses) -> str:
 #: bildirmaydi va shu sababli quyidagi hisobga kirmaydi.
 COOKING_KOT_TYPES = ("New Order", "Order Modified", "Duplicate")
 
+#: Ko'rsatma KOT'lari — OVQAT EMAS (TZ §9).
+#:
+#: Taom zakazdan olib tashlanganda URY yangi shunday KOT yaratadi
+#: (`ury_kot_generate.create_cancel_kot_doc`). U ASL chiptaga TEGMAYDI —
+#: shuning uchun uni biz yopamiz (`order_cancel.apply_item_cancellation`).
+CANCELLATION_KOT_TYPES = ("Cancelled", "Partially cancelled")
+
 
 def get_order_progress(invoice: str) -> dict:
     """Chek bo'yicha oshxona ishi BOSHLANGANMI?

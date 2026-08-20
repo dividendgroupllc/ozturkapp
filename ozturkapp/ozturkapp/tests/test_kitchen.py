@@ -14,6 +14,7 @@ import re
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import cint
 
 from ozturkapp.ozturkapp.utils import kitchen_status as ks
 
@@ -489,3 +490,209 @@ class TestStaffNotifications(FrappeTestCase):
         for leak in ("grand_total", "amount", "customer", "paid_amount"):
             with self.subTest(leak=leak):
                 self.assertNotIn(f'"{leak}"', source)
+
+
+class TestRemovedItemLeavesTheKitchen(FrappeTestCase):
+    """Zakazdan olib tashlangan taom oshxona ekranidan yo'qoladi.
+
+    MUAMMO QANDAY BO'LGAN
+    =====================
+    URY taom olib tashlanganda faqat YANGI «Partially cancelled» KOT
+    yaratadi, asl chiptaga TEGMAYDI. Natijada oshpaz bitta taomni ikki
+    marta ko'rardi: asl kartada hamon «Kutilmoqda» va «Tayyorlashni
+    boshlash» tugmasi bilan, ustiga qizil «Qisman bekor qilindi»
+    kartasi. Ya'ni bekor qilingan taom bemalol pishirilardi.
+
+    KUTILAYOTGAN XULQ
+    =================
+        oshxona boshlamagan  -> taom ham, «to'xtat» kartasi ham yo'qoladi
+        oshxona boshlagan    -> ofitsant olib tashlay olmaydi; menejer
+                                majburan bekor qilsa karta QOLADI
+        4 taomdan 1 tasi olinsa -> ekranda 3 ta qoladi
+    """
+
+    def setUp(self):
+        from ozturkapp.ozturkapp.utils import cashier_permissions
+
+        self.branch = cashier_permissions.resolve_scope().branch
+        self.invoice = frappe.generate_hash(length=10)
+        self.kots = []
+
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0, %s, 0, 0)
+            """,
+            (self.invoice, self.branch),
+        )
+
+    def tearDown(self):
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        frappe.db.delete("POS Invoice", {"name": self.invoice})
+
+    # ── Fikstura ──────────────────────────────────────────────────────
+
+    def _kot(self, kot_type, items, production="Oshxona", verified=0):
+        """`items` = [(item, qty, status, cancelled_qty)]."""
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status, production, verified)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, %s, 'Ready For Prepare', %s, %s)
+            """,
+            (kot, self.invoice, self.branch, kot_type, production, verified),
+        )
+        self.kots.append(kot)
+
+        for idx, (item, qty, status, cancelled) in enumerate(items, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, item_name,
+                     quantity, cancelled_qty, custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    frappe.generate_hash(length=10), kot, idx, item, item,
+                    qty, cancelled, status,
+                ),
+            )
+        return kot
+
+    def _cancel_kot(self, items, production="Oshxona"):
+        """Bekor-KOT yaratib, `on_submit` hook'ini AYNAN URY kabi ishga tushiradi."""
+        from ozturkapp.ozturkapp.utils.kitchen_realtime import on_kot_submit
+
+        kot = self._kot("Partially cancelled", items, production=production)
+        on_kot_submit(frappe.get_doc("URY KOT", kot))
+        return kot
+
+    def _statuses(self, kot):
+        return frappe.get_all(
+            "URY KOT Items",
+            filters={"parent": kot, "parenttype": "URY KOT"},
+            fields=["item", "quantity", "custom_kitchen_status"],
+            order_by="idx asc",
+        )
+
+    def _screen(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        return {row["kot"]: row for row in kitchen.get_active_kots()}
+
+    # ── Oshxona hali boshlamagan ──────────────────────────────────────
+
+    def test_removed_pending_item_disappears_from_the_original_ticket(self):
+        bar = self._kot("New Order", [("CHOY", 1, ks.PENDING, 0),
+                                      ("AYRAN", 1, ks.PENDING, 0)], production="Bar")
+        oshxona = self._kot("New Order", [("PIDE", 1, ks.PENDING, 0),
+                                          ("SALAD", 1, ks.PENDING, 0)])
+
+        cancel = self._cancel_kot([("PIDE", 1, ks.PENDING, 1)])
+
+        # Asl qator yopildi.
+        rows = {r.item: r.custom_kitchen_status for r in self._statuses(oshxona)}
+        self.assertEqual(rows["PIDE"], ks.CANCELLED)
+        self.assertEqual(rows["SALAD"], ks.PENDING)
+
+        # «To'xtat» kartasi yopildi — to'xtatadigan ish yo'q edi.
+        self.assertEqual(frappe.db.get_value("URY KOT", cancel, "verified"), 1)
+        self.assertEqual(
+            frappe.db.get_value("URY KOT", cancel, "order_status"), "Cancelled"
+        )
+        self.assertTrue(bar)  # bar chiptasiga tegilmagan
+
+    def test_kitchen_screen_shows_three_items_out_of_four(self):
+        self._kot("New Order", [("CHOY", 1, ks.PENDING, 0),
+                                ("AYRAN", 1, ks.PENDING, 0)], production="Bar")
+        self._kot("New Order", [("PIDE", 1, ks.PENDING, 0),
+                                ("SALAD", 1, ks.PENDING, 0)])
+
+        self._cancel_kot([("PIDE", 1, ks.PENDING, 1)])
+
+        screen = self._screen()
+        shown = [
+            item["item"]
+            for card in screen.values()
+            if card["invoice"] == self.invoice
+            for item in card["items"]
+        ]
+
+        self.assertEqual(sorted(shown), ["AYRAN", "CHOY", "SALAD"])
+        self.assertNotIn("PIDE", shown, "bekor qilingan taom ko'rinmasligi kerak")
+
+    def test_no_stop_card_when_the_kitchen_had_not_started(self):
+        self._kot("New Order", [("PIDE", 1, ks.PENDING, 0),
+                                ("SALAD", 1, ks.PENDING, 0)])
+        cancel = self._cancel_kot([("PIDE", 1, ks.PENDING, 1)])
+
+        self.assertNotIn(cancel, self._screen(), "«to'xtat» kartasi keraksiz")
+
+    def test_emptied_ticket_leaves_the_screen(self):
+        """Chiptadagi hamma taom olinsa karta ham yo'qoladi."""
+        oshxona = self._kot("New Order", [("PIDE", 1, ks.PENDING, 0)])
+        self._cancel_kot([("PIDE", 1, ks.PENDING, 1)])
+
+        self.assertNotIn(oshxona, self._screen())
+        self.assertEqual(
+            frappe.db.get_value("URY KOT", oshxona, "order_status"), "Cancelled"
+        )
+
+    # ── Oshxona boshlab yuborgan ──────────────────────────────────────
+
+    def test_started_item_keeps_the_stop_card(self):
+        """Menejer majburan bekor qilgan — oshpaz «to'xtat» ni KO'RISHI kerak."""
+        oshxona = self._kot("New Order", [("PIDE", 1, ks.PREPARING, 0)])
+        cancel = self._cancel_kot([("PIDE", 1, ks.PREPARING, 1)])
+
+        # Pishayotgan qatorga TEGILMAYDI.
+        rows = {r.item: r.custom_kitchen_status for r in self._statuses(oshxona)}
+        self.assertEqual(rows["PIDE"], ks.PREPARING)
+
+        self.assertEqual(frappe.db.get_value("URY KOT", cancel, "verified"), 0)
+        self.assertIn(cancel, self._screen(), "«to'xtat» kartasi ko'rinishi kerak")
+
+    # ── Qisman kamaytirish ────────────────────────────────────────────
+
+    def test_partial_reduction_lowers_the_quantity(self):
+        """2 tadan 1 tasi olinsa oshxona 1 ta pishirishi kerak.
+
+        URY Mosaic KDS per-item holatni bilmaydi va aynan `quantity` ni
+        ko'rsatadi — shuning uchun sonning O'ZI kamayishi shart.
+        """
+        oshxona = self._kot("New Order", [("PIDE", 2, ks.PENDING, 0)])
+        self._cancel_kot([("PIDE", 2, ks.PENDING, 1)])
+
+        row = self._statuses(oshxona)[0]
+        # `quantity` — URY'da Data maydoni, ya'ni satr qaytadi.
+        self.assertEqual(cint(row.quantity), 1)
+        self.assertEqual(row.custom_kitchen_status, ks.PENDING)
+
+    def test_newest_round_is_cancelled_first(self):
+        """1 dona pishmoqda, 1 dona navbatda -> navbatdagisi ketadi."""
+        old = self._kot("New Order", [("PIDE", 1, ks.PREPARING, 0)])
+        new = self._kot("New Order", [("PIDE", 1, ks.PENDING, 0)])
+
+        self._cancel_kot([("PIDE", 1, ks.PENDING, 1)])
+
+        self.assertEqual(self._statuses(old)[0].custom_kitchen_status, ks.PREPARING)
+        self.assertEqual(self._statuses(new)[0].custom_kitchen_status, ks.CANCELLED)
+
+    def test_cancellation_kot_does_not_announce_a_new_order(self):
+        """Ilgari olib tashlash oshxonaga «Yangi buyurtma» deb ketardi."""
+        import inspect
+
+        from ozturkapp.ozturkapp.utils import kitchen_realtime
+
+        source = inspect.getsource(kitchen_realtime.on_kot_submit)
+        self.assertIn("CANCELLATION_KOT_TYPES", source)
+        self.assertIn("_on_cancellation_kot", source)

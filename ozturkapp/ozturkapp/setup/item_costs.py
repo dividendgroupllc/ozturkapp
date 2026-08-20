@@ -72,14 +72,29 @@ def missing_costs(restaurant: str = None) -> list:
     Zaxira tovari bo'lmagan (`is_stock_item = 0`) taomlarga tannarx kerak
     emas — ular uchun stok provodkasi yozilmaydi.
     """
-    missing = []
-    for row in _menu_items(restaurant):
-        item = frappe.db.get_value(
-            "Item", row.item, ["is_stock_item", "valuation_rate"], as_dict=True
+    rows = _menu_items(restaurant)
+    if not rows:
+        return []
+
+    # BITTA so'rov. Ilgari har bir menyu tovari uchun alohida
+    # `frappe.db.get_value("Item", ...)` ketardi — 32 taomli menyuda 32
+    # ta so'rov. Bu funksiya kassa oynasi HAR ochilganda (ogohlantirish
+    # uchun) va smena yopilganda chaqiriladi, ya'ni narxi doim to'lanadi.
+    stock_items = {
+        row.name: row
+        for row in frappe.get_all(
+            "Item",
+            filters={"name": ["in", [r.item for r in rows]], "is_stock_item": 1},
+            fields=["name", "valuation_rate"],
         )
-        if not item or not item.is_stock_item:
-            continue
-        if flt(item.valuation_rate) > 0:
+    }
+
+    missing = []
+    for row in rows:
+        item = stock_items.get(row.item)
+        # Ro'yxatda yo'q = zaxira tovari emas (yoki Item o'chirilgan).
+        # Ikkalasida ham stok provodkasi yozilmaydi, tannarx kerak emas.
+        if not item or flt(item.valuation_rate) > 0:
             continue
         missing.append({"item": row.item, "item_name": row.item_name, "rate": flt(row.rate)})
     return missing

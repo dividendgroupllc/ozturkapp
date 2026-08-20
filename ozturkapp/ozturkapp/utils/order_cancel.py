@@ -204,19 +204,36 @@ def cancel_invoice(row, reason, scope=None) -> dict:
     branch = fresh.branch or (scope or {}).get("branch")
     tables = _tables_of(fresh)
 
-    frappe.db.set_value(
-        "POS Invoice",
-        invoice,
-        {
-            "custom_cancelled": 1,
-            "cancel_reason": reason,
-            # Maydon Data — unga o'qiladigan ism yoziladi (mavjud ma'lumot
-            # ham shunday). Aniq foydalanuvchi `modified_by` da qoladi:
-            # URY'ning "Cancelled Invoices" hisoboti AYNAN undan o'qiydi.
-            "custom_cancel_by": _user_label(frappe.session.user),
-        },
-        update_modified=True,
-    )
+    values = {
+        "custom_cancelled": 1,
+        "cancel_reason": reason,
+        # Maydon Data — unga o'qiladigan ism yoziladi (mavjud ma'lumot
+        # ham shunday). Aniq foydalanuvchi `modified_by` da qoladi:
+        # URY'ning "Cancelled Invoices" hisoboti AYNAN undan o'qiydi.
+        "custom_cancel_by": _user_label(frappe.session.user),
+    }
+
+    # ── STOL BOG'LAMI UZILADI ─────────────────────────────────────────
+    # Bekor qilingan chek `docstatus = 0` bo'lib qoladi, URY esa stoldagi
+    # "faol buyurtma"ni AYNAN shu bog'lam bo'yicha qidiradi va bizning
+    # `custom_cancelled` bayrog'imizni bilmaydi:
+    #
+    #     ury_order.get_order_invoice():
+    #         filters    {docstatus: 0, invoice_printed: 0}
+    #         or_filters {restaurant_table: <stol>,
+    #                     custom_merged_tables: like %<stol>%}
+    #
+    # Natijada o'sha stolga keyingi zakaz olinganda URY bekor qilingan
+    # chekni topib «Table-1 is already occupied» deb rad etardi
+    # (`ury_order.py:840`) — stol `URY Table.occupied = 0` bo'lsa ham.
+    #
+    # Qaysi stol bo'lgani audit uchun alohida maydonda saqlanadi.
+    if tables and frappe.db.has_column("POS Invoice", "custom_cancelled_table"):
+        values["custom_cancelled_table"] = ", ".join(tables)
+        values["restaurant_table"] = None
+        values["custom_merged_tables"] = None
+
+    frappe.db.set_value("POS Invoice", invoice, values, update_modified=True)
 
     cancelled_items = _close_kitchen_tickets(invoice, branch)
     freed = _free_empty_tables(branch, tables)
@@ -306,6 +323,134 @@ def _close_kitchen_tickets(invoice: str, branch: str) -> int:
         emit_kot_change(branch, kot, REASON_CODE, production, invoice)
 
     return count
+
+
+def apply_item_cancellation(cancel_kot) -> bool:
+    """URY bekor-KOT yaratganda ASL chiptadagi qatorni ham yopadi.
+
+    NEGA BU KERAK
+    =============
+    Ofitsant zakazdan bitta taomni olib tashlaganda URY faqat YANGI
+    hujjat yaratadi (`ury_kot_generate.create_cancel_kot_doc`) — asl
+    KOT qatoriga UMUMAN TEGMAYDI. Natijada oshpaz bitta taomni IKKI
+    marta ko'radi: asl chiptada hamon «Kutilmoqda» va «Tayyorlashni
+    boshlash» tugmasi bilan, ustiga qizil «Qisman bekor qilindi»
+    kartasi. Ya'ni u bekor qilingan taomni bemalol pishirib yuboradi.
+
+    Shu funksiya asl qatorni «iste'mol qiladi»:
+
+        to'liq olib tashlangan  ->  qator `Cancelled` bo'ladi
+        qisman kamaytirilgan    ->  `quantity` kamayadi
+
+    QATORLAR QAYSI TARTIBDA
+    =======================
+    Faqat hali `Kutilmoqda` dagilari va ENG YANGISIDAN boshlab. Bitta
+    taom bir necha raundda buyurtma qilingan bo'lishi mumkin: birinchi
+    porsiya allaqachon pishmoqda, ikkinchisi navbatda — bekor bo'lishi
+    kerak bo'lgani AYNAN oxirgisi.
+
+    `cancel_kot.original_kot` ga TAYANILMAYDI: URY uni birinchi mos
+    KOT'da to'xtatib yozadi, ya'ni ro'yxat to'liq bo'lmaydi.
+
+    Returns:
+        bool: `True` — hammasi navbatda edi, ya'ni oshxona ishni
+        boshlamagan. Bunda «to'xtat» kartasi ham keraksiz.
+    """
+    rows = cancel_kot.get("kot_items") or []
+    if not rows:
+        return True
+
+    invoice = cancel_kot.get("invoice")
+    branch = cancel_kot.get("branch")
+
+    touched, unmatched = {}, 0
+
+    for row in rows:
+        # `cancelled_qty` — nechtasi bekor qilingani. Ba'zi oqimlarda u
+        # to'lmaydi, unda butun qator bekor qilingan deb qaraladi.
+        need = cint(row.get("cancelled_qty")) or cint(row.get("quantity"))
+        if need <= 0:
+            continue
+
+        unmatched += _consume_pending_rows(invoice, row.get("item"), need, touched)
+
+    for kot, production in touched.items():
+        _sync_cancelled_kot(kot)
+        emit_kot_change(branch, kot, "KOT_ITEM_CANCELLED", production, invoice)
+
+    return unmatched <= 0
+
+
+def _consume_pending_rows(invoice: str, item: str, need: int, touched: dict) -> int:
+    """Navbatdagi qatorlardan `need` donani yopadi. Qolganini qaytaradi.
+
+    Qaytgan qiymat > 0 bo'lsa — o'shancha dona ALLAQACHON oshxonada
+    (`Preparing`/`Ready`/`Served`). Bu faqat menejer majburan bekor
+    qilganda bo'ladi: ofitsantga `waiter._assert_removals_allowed()`
+    bunday qilishga ruxsat bermaydi.
+    """
+    if not invoice or not item or need <= 0:
+        return need
+
+    rows = frappe.db.sql(
+        """
+        SELECT ki.name, ki.parent, ki.quantity, ki.cancelled_qty, k.production
+        FROM `tabURY KOT Items` ki
+        INNER JOIN `tabURY KOT` k ON k.name = ki.parent
+        WHERE k.invoice = %(invoice)s AND k.docstatus = 1
+          AND k.type IN %(types)s
+          AND ki.item = %(item)s
+          AND IFNULL(ki.custom_kitchen_status, %(pending)s) = %(pending)s
+        ORDER BY k.creation DESC, ki.idx DESC
+        FOR UPDATE
+        """,
+        {
+            "invoice": invoice,
+            "item": item,
+            "types": kitchen_status.COOKING_KOT_TYPES,
+            "pending": kitchen_status.PENDING,
+        },
+        as_dict=True,
+    )
+
+    for row in rows:
+        if need <= 0:
+            break
+
+        qty = cint(row.quantity)
+        if qty <= 0:
+            continue
+
+        if need >= qty:
+            # Butun qator ketadi — oshxona ekranidan yo'qoladi.
+            frappe.db.set_value(
+                "URY KOT Items",
+                row.name,
+                {
+                    "custom_kitchen_status": kitchen_status.CANCELLED,
+                    "custom_status_changed_by": frappe.session.user,
+                },
+                update_modified=False,
+            )
+            need -= qty
+        else:
+            # Qisman: `quantity` HAQIQATAN kamayadi. URY Mosaic KDS
+            # per-item holatni bilmaydi va aynan shu maydonni ko'rsatadi,
+            # shuning uchun uni yangilamasak Mosaic eski sonni chizardi.
+            frappe.db.set_value(
+                "URY KOT Items",
+                row.name,
+                {
+                    "quantity": qty - need,
+                    "cancelled_qty": cint(row.cancelled_qty) + need,
+                },
+                update_modified=False,
+            )
+            need = 0
+
+        touched[row.parent] = row.production
+
+    return need
 
 
 def _sync_cancelled_kot(kot: str):

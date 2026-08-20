@@ -253,7 +253,10 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
         "paid": cint(doc.docstatus) == 1,
         "billed": bool(cint(doc.get("invoice_printed"))),
         "cancelled": bool(cint(doc.get("custom_cancelled"))),
-        "table": doc.get("restaurant_table"),
+        # Bekor qilinganda stol bog'lami UZILADI (`utils/order_cancel.py`) —
+        # aks holda URY o'sha stolga yangi zakaz olishga yo'l qo'ymasdi.
+        # Ko'rsatish uchun eslab qolingan nomdan foydalanamiz.
+        "table": doc.get("restaurant_table") or doc.get("custom_cancelled_table"),
         "merged_tables": doc.get("custom_merged_tables"),
         "room": doc.get("custom_restaurant_room"),
         "order_type": doc.get("order_type"),
@@ -312,18 +315,46 @@ def _user_label(user: str) -> str:
 # ═══════════════════════════════════════════════════════════════════
 
 def get_payment_methods(pos_profile: str) -> list:
-    """POS Profile'da sozlangan to'lov usullari (TZ §10 — dublikat yo'q)."""
+    """POS Profile'da sozlangan to'lov usullari (TZ §10 — dublikat yo'q).
+
+    SO'ROV ICHIDA KESHLANADI
+    ========================
+    Smenani yopish oqimida bu funksiya UCH marta chaqiriladi
+    (`_cash_modes()` orqali), har biri o'z so'rovlari bilan. Kesh faqat
+    joriy so'rov umriga — POS Profile tahrirlangan zahoti keyingi
+    so'rovda yangisi o'qiladi.
+    """
+    cache = getattr(frappe.local, "_ozturk_payment_methods", None)
+    if cache is None:
+        cache = frappe.local._ozturk_payment_methods = {}
+    if pos_profile in cache:
+        return cache[pos_profile]
+
     rows = frappe.get_all(
         "POS Payment Method",
         filters={"parent": pos_profile, "parenttype": "POS Profile"},
         fields=["mode_of_payment", "default", "allow_in_returns", "idx"],
         order_by="idx asc",
     )
-    return [
+
+    # Usul turlarini BITTA so'rovda olamiz. Ilgari har bir qator uchun
+    # alohida `Mode of Payment` so'rovi ketardi.
+    types = {
+        row.name: row.type
+        for row in frappe.get_all(
+            "Mode of Payment",
+            filters={"name": ["in", [r.mode_of_payment for r in rows]]},
+            fields=["name", "type"],
+        )
+    } if rows else {}
+
+    methods = [
         {
             "mode_of_payment": row.mode_of_payment,
             "default": bool(cint(row.default)),
-            "type": frappe.db.get_value("Mode of Payment", row.mode_of_payment, "type"),
+            "type": types.get(row.mode_of_payment),
         }
         for row in rows
     ]
+    cache[pos_profile] = methods
+    return methods

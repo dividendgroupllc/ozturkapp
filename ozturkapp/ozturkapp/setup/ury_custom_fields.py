@@ -132,6 +132,35 @@ URY_CUSTOM_FIELDS = {
             "allow_on_submit": 1,
         },
         {
+            # BEKOR QILINGAN CHEK STOLNI USHLAB TURMASLIGI KERAK
+            # ==================================================
+            # `custom_cancelled = 1` chek `docstatus = 0` bo'lib qoladi va
+            # URY uning `restaurant_table` ini ko'rib turadi:
+            #
+            #     ury_order.get_order_invoice():
+            #         filters    {docstatus: 0, invoice_printed: 0}
+            #         or_filters {restaurant_table: <stol>, ...}
+            #
+            # Bu so'rov `custom_cancelled` ni BILMAYDI, shuning uchun bekor
+            # qilingan chek "stoldagi faol buyurtma" bo'lib topiladi va
+            # keyingi zakazda «Table-1 is already occupied» xatosi chiqadi
+            # (`ury_order.py:840`).
+            #
+            # Yechim: bekor qilinganda stol bog'lami UZILADI, lekin qaysi
+            # stol bo'lgani AUDIT uchun shu yerda saqlanadi.
+            "fieldname": "custom_cancelled_table",
+            "label": "Bekor qilingan stol",
+            "fieldtype": "Data",
+            "insert_after": "custom_cancelled",
+            "description": (
+                "Chek bekor qilinganda qaysi stolga tegishli bo'lgani. "
+                "Stol bog'lami uziladi — aks holda u yangi buyurtmani to'sadi."
+            ),
+            "read_only": 1,
+            "no_copy": 1,
+            "print_hide": 1,
+        },
+        {
             "fieldname": "custom_cancel_requested_time",
             "label": "Bekor So'ralgan Vaqt",
             "fieldtype": "Datetime",

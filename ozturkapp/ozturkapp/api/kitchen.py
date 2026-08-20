@@ -29,7 +29,9 @@ from ozturkapp.ozturkapp.utils.kitchen_realtime import emit_kot_change, emit_ite
 COOKING_KOT_TYPES = ("New Order", "Order Modified", "Duplicate")
 
 #: Bekor qilish ko'rsatmasi bo'lgan KOT turlari — bular OVQAT EMAS (TZ §9).
-CANCELLATION_KOT_TYPES = ("Cancelled", "Partially cancelled")
+#: Ta'rif `utils/kitchen_status.py` da — u yerda `order_cancel` ham
+#: shu ro'yxatga tayanadi, ikki joyda ayri yozilsa bir kun ajralib ketardi.
+CANCELLATION_KOT_TYPES = kitchen_status.CANCELLATION_KOT_TYPES
 
 #: Ekranda ko'rsatiladigan vaqt oynasi (soat).
 KOT_WINDOW_HOURS = 12
@@ -155,8 +157,18 @@ def get_active_kots(station=None, include_served=0):
 
         derived = kitchen_status.derive_kot_status([i["status"] for i in items])
 
+        # ── Karta ro'yxatda qolsinmi? ─────────────────────────────
+        if is_cancellation:
+            # «To'xtat» kartasi FAQAT oshxona ishni boshlab yuborgan
+            # bo'lsa kerak. Boshlanmagan bo'lsa to'xtatadigan ish yo'q va
+            # `_on_cancellation_kot()` uni allaqachon yopib qo'ygan
+            # (`verified = 1`, `order_status = "Cancelled"`) — o'sha
+            # maydonlar Mosaic KDS uchun ham signal.
+            if cint(kot.verified) or (kot.order_status or "") == "Cancelled":
+                continue
+
         # Yakunlangan KOT'lar ro'yxatni to'ldirmasin.
-        if not cint(include_served) and not is_cancellation:
+        elif not cint(include_served):
             if derived in (kitchen_status.SERVED, kitchen_status.CANCELLED):
                 continue
 
@@ -224,6 +236,16 @@ def _load_items(kot_names: list) -> dict:
     grouped = {}
     for row in rows:
         status = kitchen_status.normalize(row.custom_kitchen_status)
+
+        # Bekor qilingan taom oshxona ekranidan BUTUNLAY yo'qoladi.
+        #
+        # Uni "Bekor qilingan" yorlig'i bilan ko'rsatish ham mumkin edi,
+        # lekin oshpazga bu shovqin: u pishirmaydigan narsa ro'yxatni
+        # to'ldirib turadi. 4 ta taomdan 1 tasi olib tashlansa ekranda
+        # aniq 3 ta qolishi kerak.
+        if status == kitchen_status.CANCELLED:
+            continue
+
         action = kitchen_status.next_action(status)
 
         elapsed = None

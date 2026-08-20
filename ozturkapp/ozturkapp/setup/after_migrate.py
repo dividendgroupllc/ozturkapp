@@ -18,6 +18,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.kassa_setup import create_party_types
 	from ozturkapp.ozturkapp.setup.print_format_setup import create_sales_order_print_format
 	from ozturkapp.ozturkapp.setup.receipt_format import setup as setup_receipt_format
+	from ozturkapp.ozturkapp.setup.cancelled_orders import detach_tables
 	from ozturkapp.ozturkapp.setup.ury_custom_fields import (
 		create_fields as create_ury_pos_fields,
 	)
@@ -30,6 +31,10 @@ def run():
 		create_fields,
 		create_property_setters,
 		create_ury_pos_fields,
+		# DIQQAT: `create_ury_pos_fields` dan KEYIN — u
+		# `custom_cancelled_table` maydonini yaratadi va tozalash o'sha
+		# maydonga yozadi.
+		detach_tables,
 		create_permissions,
 		create_party_types,
 		create_sales_order_print_format,

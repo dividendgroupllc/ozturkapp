@@ -50,6 +50,7 @@ KITCHEN = "kitchen"
 BILL_REQUESTED = "BILL_REQUESTED"
 ITEM_READY = "ITEM_READY"
 ORDER_PLACED = "ORDER_PLACED"
+ORDER_CANCELLED = "ORDER_CANCELLED"
 
 
 def notify(branch, audience, kind, title, body="", **refs):
@@ -112,6 +113,25 @@ def item_ready(branch, invoice, item_name, table=None, waiter=None, station=None
         invoice=invoice,
         table=table,
         waiter=waiter,
+        station=station,
+    )
+
+
+def order_cancelled(branch, invoice, items, table=None, station=None):
+    """Taom OLIB TASHLANDI, lekin oshxona uni allaqachon boshlab yuborgan.
+
+    Bu xabar faqat shu holatda chiqadi. Oshxona hali qo'l urmagan bo'lsa
+    to'xtatadigan ish yo'q — chipta jimgina yopiladi va oshpaz umuman
+    bezovta qilinmaydi (`kitchen_realtime._on_cancellation_kot`).
+    """
+    notify(
+        branch,
+        KITCHEN,
+        ORDER_CANCELLED,
+        "TO'XTATING — buyurtma bekor qilindi",
+        f"Stol {table} — {items}" if table else items,
+        invoice=invoice,
+        table=table,
         station=station,
     )
 
