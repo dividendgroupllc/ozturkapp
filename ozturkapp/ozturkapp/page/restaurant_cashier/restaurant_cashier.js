@@ -571,6 +571,7 @@ ozturk.cashier.Screen = class CashierScreen {
 						.join("")}
 				</tbody>
 			</table>
+			${this.numpadHtml()}
 			<div class="rc-pay__error" role="alert"></div>
 			<div class="rc-actions">
 				<button class="rc-btn rc-btn--pay" data-action="open-shift">${esc(
@@ -579,7 +580,9 @@ ozturk.cashier.Screen = class CashierScreen {
 			</div>`);
 
 		const $error = $form.find(".rc-pay__error");
-		bindAmountInput($form.find(".rc-shift-input"));
+		const $shiftInputs = $form.find(".rc-shift-input");
+		bindAmountInput($shiftInputs);
+		this.bindNumpad($form, $shiftInputs);
 
 		$form.on("click", '[data-action="open-shift"]', async (e) => {
 			const rows = $form
@@ -1971,8 +1974,15 @@ ozturk.cashier.Screen = class CashierScreen {
 		let active = $inputs.get(0);
 		let fresh = true;
 		$inputs.on("focus", (e) => {
+			// Har bosishdan keyin pastda `el.focus()` chaqiriladi — maydon
+			// hali hech qachon haqiqiy fokus olmagan bo'lsa (masalan
+			// "Kassani ochish"da avtomatik fokus yo'q), bu chaqiruv o'ZI
+			// birinchi haqiqiy "focus" hodisasini keltirib chiqaradi va
+			// `fresh`ni ikkinchi marta (noto'g'ri) qayta yoqib yuboradi —
+			// natijada 2-raqam 1-sini o'chirib yuborardi. Shuning uchun
+			// FAQAT boshqa maydonga o'tilganda tozalanadi.
+			if (e.currentTarget !== active) fresh = true;
 			active = e.currentTarget;
-			fresh = true;
 		});
 
 		$body.on("click", ".rc-numpad__key", (e) => {
