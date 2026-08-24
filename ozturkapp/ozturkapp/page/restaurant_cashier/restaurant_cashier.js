@@ -1956,18 +1956,33 @@ ozturk.cashier.Screen = class CashierScreen {
 	 * Tugma bosilganda FOKUSDAGI (yoki oxirgi fokuslangan) maydonga raqam
 	 * qo'shiladi. `input` hodisasi qo'lda chaqiriladi — shu bilan
 	 * `bindAmountInput()`dagi guruhlash/qayta hisoblash o'zgarishsiz ishlaydi.
+	 *
+	 * MAYDON OLDINDAN TO'LDIRILGAN BO'LSA (masalan to'lov summasi —
+	 * to'lanadigan summa bilan boshlanadi): jismoniy klaviaturada bu
+	 * muammo emas, chunki fokus bilan birga matn TANLANADI va birinchi
+	 * bosilgan tugma uni almashtiradi. Ekran klaviaturasi esa `value`ga
+	 * to'g'ridan-to'g'ri YOZADI — tanlovga qaramaydi, shuning uchun eski
+	 * summaning OXIRIGA qo'shilib ketardi. Fokusdan keyingi BIRINCHI
+	 * bosishda maydon avval tozalanadi, shundan keyin odatdagidek ishlaydi.
 	 */
 	bindNumpad($body, $inputs) {
 		if (!this.ctx || !this.ctx.enable_virtual_keyboard) return;
 
 		let active = $inputs.get(0);
+		let fresh = true;
 		$inputs.on("focus", (e) => {
 			active = e.currentTarget;
+			fresh = true;
 		});
 
 		$body.on("click", ".rc-numpad__key", (e) => {
 			const el = active || $inputs.get(0);
 			if (!el) return;
+
+			if (fresh) {
+				el.value = "";
+				fresh = false;
+			}
 
 			const key = e.currentTarget.dataset.key;
 			if (key === "⌫") {
