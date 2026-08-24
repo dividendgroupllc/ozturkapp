@@ -562,7 +562,7 @@ ozturk.cashier.Screen = class CashierScreen {
 								<td>${esc(mode)}</td>
 								<td class="rc-num">
 									<input class="rc-shift-input" type="text" inputmode="numeric"
-										value="0" data-mode="${esc(mode)}"
+										value="" placeholder="0" data-mode="${esc(mode)}"
 										aria-label="${esc(mode)}">
 								</td>
 							</tr>`
@@ -1474,17 +1474,30 @@ ozturk.cashier.Screen = class CashierScreen {
 	// ═══════════════════════════════════════════════════════════
 
 	/**
-	 * Kassani yopish — IKKI BOSQICHLI KO'R SANOQ.
+	 * Kassani yopish — KETMA-KET IKKI MOS SANOQ (ko'r sanoq).
 	 *
-	 *     1-bosqich: naqd pulni sanab kiriting  ->  [Davom etish]
+	 *     1-kiritish: naqd pulni sanab kiriting  ->  [Davom etish]
 	 *                        |
 	 *                60 soniya teskari sanoq (pulni QAYTA sanang)
 	 *                        |
-	 *     2-bosqich: yana bir marta kiriting    ->  [Kassani yopish]
+	 *     2-kiritish: yana bir marta kiriting    ->  [Kassani yopish]
 	 *
-	 * Ikkinchi kiritish 1-bosqichdagi qiymat bilan SOLISHTIRILADI. Mos
-	 * kelmasa yopilmaydi va sanoq boshidan boshlanadi — shu tariqa
-	 * shoshib yozilgan xato raqam o'tib ketmaydi.
+	 * Har bir kiritish O'ZIDAN OLDINGISI bilan solishtiriladi — KETMA-KET
+	 * ikkitasi mos kelsa kassa yopiladi.
+	 *
+	 * Mos kelmasa sanoq BOSHIDAN BOSHLANMAYDI. Ilgari hammasi bekor
+	 * qilinardi va hozirgina kiritilgan TO'G'RI raqam ham yo'qolardi —
+	 * kassir uni yana ikki marta kiritishga majbur bo'lardi:
+	 *
+	 *     200 000 -> 180 000 (bekor) -> 180 000 -> 180 000   = 4 kiritish
+	 *
+	 * Endi oxirgi kiritish yangi taqqoslash asosi bo'lib qoladi:
+	 *
+	 *     200 000 -> 180 000 -> 180 000 (mos — yopiladi)     = 3 kiritish
+	 *
+	 * Har kiritishdan oldingi 60 soniyalik sanoq esa SAQLANADI: usiz
+	 * kassir sanamasdan bir xil raqamni ketma-ket yozib yuborardi va
+	 * ko'r sanoq nazorat vazifasini bajarmay qolardi.
 	 *
 	 * Birinchi kiritilgan summa 2-bosqichda KO'RSATILMAYDI, aks holda
 	 * kassir uni ko'chirib yozib qo'yardi va nazorat ma'nosini yo'qotardi.
@@ -1520,8 +1533,9 @@ ozturk.cashier.Screen = class CashierScreen {
 	 * Sanoq bosqichini chizadi.
 	 *
 	 * @param {object} data   server bergan yopish ma'lumoti
-	 * @param {object|null} first  1-bosqichda kiritilgan summalar
-	 *        (`null` bo'lsa — birinchi bosqich)
+	 * @param {object|null} first  OLDINGI kiritishda olingan summalar —
+	 *        yangi kiritish AYNAN shu bilan solishtiriladi (`null` bo'lsa
+	 *        — eng birinchi kiritish, solishtiradigan narsa yo'q)
 	 */
 	renderCountStep(data, first) {
 		const second = first !== null;
@@ -1534,19 +1548,35 @@ ozturk.cashier.Screen = class CashierScreen {
 		// o'qiydi — ya'ni qaysi ishlovchi ishga tushishidan qat'i nazar
 		// natija bir xil bo'ladi.
 		this.countFirst = first;
+
+		// Nechanchi kiritish ekani — faqat sarlavha uchun. Mos kelmaganda
+		// sanoq boshidan boshlanmagani sababli bu 2 dan oshishi mumkin, va
+		// kassir nechanchi urinishda turganini ko'rib turadi.
+		this.countAttempt = second ? cint(this.countAttempt) + 1 : 1;
+
 		const modes = data.cash_modes || [];
 
-		// SAVDO BO'LMAGAN SMENA
-		// =====================
-		// Chek yozilmagan bo'lsa sanaydigan narsa yo'q — maydon 0 bilan
-		// to'ldiriladi va kassir shunchaki tasdiqlaydi. Ilgari maydon bo'sh
-		// turardi va "Sanalgan naqd pul summasini kiriting" xatosi kassani
-		// yopishga qo'ymasdi: bo'sh smenani yopib bo'lmasdi.
+		// MAYDON HAR DOIM BO'SH — `0` faqat PLACEHOLDER sifatida ko'rinadi.
 		//
-		// Savdo BO'LGAN bo'lsa maydon ataylab BO'SH qoladi. Tayyor turgan 0
-		// ko'r sanoqning ma'nosini yo'qotardi — kassir sanamasdan ikki marta
-		// tasdiqlab yuborishi mumkin bo'lardi.
-		const preset = cint(data.total_invoices) ? "" : "0";
+		// Ilgari savdosiz smenada maydonga tayyor `0` yozib qo'yilardi.
+		// Kassir uning ustiga summa yozganda nol oldinda qolib ketardi va
+		// kiritishga xalal berardi. Endi maydon bo'sh: kassir nima yozsa,
+		// faqat o'shani ko'radi.
+		//
+		// Savdo BO'LGAN smenada bo'sh maydon ko'r sanoq uchun ham shart —
+		// tayyor raqam kassirni sanamasdan tasdiqlashga undardi.
+		//
+		// SAVDO BO'LMAGAN SMENA: sanaydigan chek yo'q, shuning uchun bo'sh
+		// maydon 0 deb qabul qilinadi (pastdagi `allowEmpty`) — aks holda
+		// bo'sh smenani yopib bo'lmay qolardi.
+		const allowEmpty = !cint(data.total_invoices);
+
+		const stepText =
+			this.countAttempt > 2
+				? __("Qayta sanoq ({0})", [this.countAttempt])
+				: second
+				? __("Ikkinchi sanoq")
+				: __("Birinchi sanoq");
 
 		this.el.modalBody.innerHTML = `
 			<div class="rc-count__head">
@@ -1558,9 +1588,7 @@ ozturk.cashier.Screen = class CashierScreen {
 				<span class="rc-step ${second ? "rc-step--done" : "rc-step--active"}">1</span>
 				<span class="rc-steps__line"></span>
 				<span class="rc-step ${second ? "rc-step--active" : ""}">2</span>
-				<span class="rc-steps__text">${esc(
-					second ? __("Ikkinchi sanoq") : __("Birinchi sanoq")
-				)}</span>
+				<span class="rc-steps__text">${esc(stepText)}</span>
 			</div>
 
 			<div class="rc-pay__label">${esc(
@@ -1574,8 +1602,7 @@ ozturk.cashier.Screen = class CashierScreen {
 					(mode) => `<div class="rc-count__row">
 						<span>${esc(mode)}</span>
 						<input class="rc-pay__input rc-count-input" type="text" inputmode="numeric"
-							value="${esc(preset === "" ? "" : groupAmount(preset))}"
-							placeholder="0" data-mode="${esc(mode)}"
+							value="" placeholder="0" data-mode="${esc(mode)}"
 							aria-label="${esc(mode)}">
 					</div>`
 				)
@@ -1654,7 +1681,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			let missing = false;
 
 			$body.find(".rc-count-input").each((_, input) => {
-				if (String(input.value).trim() === "") missing = true;
+				if (String(input.value).trim() === "" && !allowEmpty) missing = true;
 				counted[input.dataset.mode] = parseAmount(input.value);
 			});
 
@@ -1693,17 +1720,29 @@ ozturk.cashier.Screen = class CashierScreen {
 			if (mismatch.length) {
 				frappe.show_alert(
 					{
-						message: __("Ikki sanoq mos kelmadi — qaytadan sanang"),
-						indicator: "red",
+						message: __("Sanoqlar mos kelmadi — yana bir marta sanang"),
+						indicator: "orange",
 					},
 					7
 				);
-				// Boshidan: summalar KO'RSATILMAYDI, sanoq qayta boshlanadi.
-				this.renderCountStep(data, null);
+				// SANOQ BOSHIDAN BOSHLANMAYDI.
+				//
+				// Ilgari bu yerda sanoq bo'sh asos bilan qaytadan chizilardi
+				// va hozirgina kiritilgan TO'G'RI raqam ham bekor bo'lardi:
+				// kassir uni yana IKKI marta kiritishga majbur edi. Endi
+				// oxirgi kiritish yangi taqqoslash asosi bo'ladi — keyingi
+				// kiritish shu bilan solishtiriladi, ya'ni ketma-ket ikkita
+				// mos raqam yetarli.
+				//
+				// Ko'r sanoq buzilmaydi: maydonlar baribir BO'SH chiziladi va
+				// keyingi kiritishdan oldin 60 soniyalik sanoq yana ketadi.
+				this.renderCountStep(data, counted);
 				$(this.el.modalBody)
 					.find(".rc-pay__error")
 					.text(
-						__("Ikki marta kiritilgan summa bir xil bo'lishi kerak. Qaytadan sanang.")
+						__(
+							"Oldingi sanoq bilan mos kelmadi. Pulni qayta sanang va summani kiriting."
+						)
 					);
 				return;
 			}
@@ -2173,7 +2212,13 @@ function groupAmount(text) {
 
 	const digits = raw.replace(/[^\d.]/g, "");
 	const dot = digits.indexOf(".");
-	const whole = dot === -1 ? digits : digits.slice(0, dot);
+	// BOSHIDAGI NOLLAR OLIB TASHLANADI.
+	//
+	// Maydon ba'zan tayyor `0` bilan chiziladi (bo'sh smena, kassa ochish).
+	// Kassir uning USTIGA yozganda `0` joyida qolib `05 000` bo'lardi:
+	// summa to'g'ri hisoblansa ham ekranda xato ko'rinardi va kassirni
+	// chalg'itardi. `0` faqat o'zi yolg'iz qolganda saqlanadi (`0`, `0,50`).
+	const whole = (dot === -1 ? digits : digits.slice(0, dot)).replace(/^0+(?=\d)/, "");
 	const fraction = dot === -1 ? null : digits.slice(dot + 1).replace(/\./g, "").slice(0, 2);
 
 	const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, " ");

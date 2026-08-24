@@ -764,6 +764,57 @@ class TestShiftManagement(FrappeTestCase):
         # Ikkala kiritish solishtirilishi shart.
         self.assertIn("mismatch", page.script)
 
+    def test_mismatch_keeps_last_count_as_new_baseline(self):
+        """Mos kelmagan sanoq oxirgi raqamni SAQLAB qoladi.
+
+        Ilgari mos kelmasa hammasi bekor bo'lardi. Kassir 200 000 deb xato
+        sanab, keyin TO'G'RI 180 000 ni kiritsa, o'sha to'g'ri raqam ham
+        tashlab yuborilardi va uni yana IKKI marta kiritishga to'g'ri
+        kelardi (jami 4 kiritish, 2 marta 60 soniya kutish).
+
+        Endi oxirgi kiritish yangi taqqoslash asosi bo'ladi — KETMA-KET
+        ikkita mos raqam yetarli:
+
+            200 000 -> 180 000 -> 180 000 (yopiladi)
+        """
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+
+        block = page.script[page.script.index("if (mismatch.length)") :]
+        block = block[: block.index("return;")]
+
+        self.assertIn(
+            "renderCountStep(data, counted)",
+            block,
+            "mos kelmaganda oxirgi sanoq yangi taqqoslash asosi bo'lishi kerak",
+        )
+        self.assertNotIn(
+            "renderCountStep(data, null)",
+            block,
+            "mos kelmaganda sanoq BOSHIDAN boshlanmasligi kerak",
+        )
+
+    def test_recount_still_waits_for_the_countdown(self):
+        """Qayta urinishda ham 60 soniyalik sanoq saqlanadi.
+
+        Ko'r sanoqning ma'nosi shunda: har bir raqam HAQIQIY sanashdan
+        keyin kiritiladi. Sanoqsiz kassir bir xil raqamni ketma-ket ikki
+        marta yozib yuborardi va nazorat ishlamay qolardi.
+
+        Mos kelmagandan keyin `first` BO'SH EMAS holda qayta chiziladi,
+        ya'ni `second` rost bo'ladi va sanoq shoxi yana ishga tushadi.
+        """
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+
+        step = page.script[page.script.index("renderCountStep(data, first)") :]
+        block = step[: step.index("setModalLocked(locked)")]
+
+        # Sanoq `second` (ya'ni `first !== null`) shoxida ishga tushadi.
+        self.assertIn("const second = first !== null;", block)
+        self.assertIn("if (second) {", block)
+        self.assertIn("countdownTimer = setInterval", block)
+
     def test_modal_handlers_are_detached_before_rebinding(self):
         """Oyna qayta chizilganda ESKI hodisa ishlovchilari yechilishi shart.
 

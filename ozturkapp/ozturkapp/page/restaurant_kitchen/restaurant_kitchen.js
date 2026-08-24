@@ -103,10 +103,27 @@ ozturk.kitchen.Screen = class KitchenScreen {
 				"ozturkapp.ozturkapp.api.kitchen.get_kitchen_context"
 			);
 
-			const preferred = this.readPreference("station");
+			if (this.ctx.restricted_station && !this.ctx.my_station) {
+				// Xodimga hech qanday stansiya biriktirilmagan — bo'sh
+				// ro'yxat o'rniga sababi tushunarli bo'lsin (server ham
+				// baribir `[]` qaytaradi, lekin sabab ko'rinmasdi).
+				this.el.bootError.textContent = __(
+					"Sizga oshxona stansiyasi biriktirilmagan. Administratorga murojaat qiling."
+				);
+				this.setState("error");
+				return;
+			}
+
 			const stations = this.ctx.stations || [];
-			this.station =
-				(stations.find((s) => s.name === preferred) || {}).name || null;
+			if (this.ctx.restricted_station) {
+				// Oddiy oshxona xodimi stansiya almashtira olmaydi —
+				// serverda ham majburlanadi (`api/kitchen.py`).
+				this.station = this.ctx.my_station;
+			} else {
+				const preferred = this.readPreference("station");
+				this.station =
+					(stations.find((s) => s.name === preferred) || {}).name || null;
+			}
 
 			this.el.branch.textContent = this.ctx.branch || "";
 			this.el.user.textContent = this.ctx.full_name || this.ctx.user || "";
@@ -294,6 +311,19 @@ ozturk.kitchen.Screen = class KitchenScreen {
 
 	renderStations() {
 		const stations = this.ctx.stations || [];
+
+		if (this.ctx.restricted_station) {
+			// Faqat o'ziga biriktirilgan stansiya nomi ko'rsatiladi —
+			// almashtirish tugmalari yo'q (server ham ruxsat bermaydi).
+			const mine = stations.find((s) => s.name === this.station);
+			this.el.stations.innerHTML = mine
+				? `<span class="kds-station kds-station--locked" aria-pressed="true">${esc(
+						mine.production || mine.name
+				  )}</span>`
+				: "";
+			return;
+		}
+
 		if (!stations.length) {
 			this.el.stations.innerHTML = "";
 			return;

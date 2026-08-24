@@ -74,6 +74,7 @@
 .kds-station[aria-pressed="true"] {
 	background: var(--kds-accent); border-color: var(--kds-accent); color: #fff;
 }
+.kds-station--locked { cursor: default; }
 
 .kds-topbar__session {
 	display: flex; align-items: center; gap: 14px;

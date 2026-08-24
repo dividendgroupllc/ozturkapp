@@ -160,10 +160,43 @@ SELF_SERVICE_FIELD = {
 }
 
 
+#: Foydalanuvchini bitta oshxona stansiyasiga biriktirish.
+#:
+#: NEGA KERAK
+#: ==========
+#: Stansiya tanlash avval FAQAT brauzer sozlamasi edi (localStorage),
+#: standart holat esa "barcha stansiyalar" — bitta oshpaz (masalan
+#: faqat non pishiruvchi) BOSHQA stansiya taomlarini ham (shu jumladan
+#: bar) ko'rib turardi. Bu maydon SERVERDA majburlanadi
+#: (`api/kitchen.py:_sees_all_stations`) — oddiy oshxona xodimi
+#: (faqat `URY Kitchen` roli) FAQAT shu maydonda ko'rsatilgan
+#: stansiyani ko'radi va o'zgartira oladi. Menejer/Administrator
+#: cheklanmaydi.
+KITCHEN_STATION_FIELD = {
+    "User": [
+        {
+            "fieldname": "custom_kitchen_station",
+            "label": "Oshxona stansiyasi",
+            "fieldtype": "Link",
+            "options": "URY Production Unit",
+            "insert_after": "roles",
+            "description": (
+                "Oshxona ekranida (KDS) bu foydalanuvchi FAQAT shu stansiyaga "
+                "tegishli taomlarni ko'radi. Menejer/Administrator rollariga "
+                "bu cheklov qo'llanmaydi — ular barcha stansiyani ko'radi."
+            ),
+        }
+    ]
+}
+
+
 def create_fields():
     create_custom_fields(KITCHEN_FIELDS, ignore_validate=True)
     create_custom_fields(SELF_SERVICE_FIELD, ignore_validate=True)
-    print("✅ Oshxona custom fieldlari tayyor (URY KOT Items, URY Production Unit)")
+    create_custom_fields(KITCHEN_STATION_FIELD, ignore_validate=True)
+    print(
+        "✅ Oshxona custom fieldlari tayyor (URY KOT Items, URY Production Unit, User)"
+    )
 
 
 def create_role():

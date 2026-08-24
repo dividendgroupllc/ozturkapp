@@ -54,6 +54,17 @@ def require_kitchen():
         )
 
 
+#: Bu rollardan biriga ega foydalanuvchi BARCHA stansiyalarni ko'radi.
+#: Oddiy oshxona xodimi (faqat `URY Kitchen`) o'ziga biriktirilgan
+#: stansiyaga cheklanadi (`User.custom_kitchen_station`) — bitta oshpazga
+#: hamma stansiya (masalan bar) taomi birdek kelib qolmasligi uchun.
+STATION_UNRESTRICTED_ROLES = ("URY Manager", "System Manager")
+
+
+def _sees_all_stations() -> bool:
+    return bool(set(frappe.get_roles()).intersection(STATION_UNRESTRICTED_ROLES))
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Kontekst
 # ═══════════════════════════════════════════════════════════════════
@@ -68,7 +79,7 @@ def get_kitchen_context():
     # ko'rinmaydi — ularni ofitsant mobil ilovadan yopadi. Ro'yxatdan ham
     # olib tashlanadi, aks holda oshpaz uni tanlab, hech qachon
     # tayyorlamaydigan ichimliklarni ko'rib turardi.
-    stations = [
+    all_stations = [
         st
         for st in frappe.get_all(
             "URY Production Unit",
@@ -79,11 +90,25 @@ def get_kitchen_context():
         if st.name not in kitchen_status.self_service_stations()
     ]
 
+    restricted = not _sees_all_stations()
+    my_station = kitchen_status.user_station() if restricted else ""
+
+    # Oddiy oshxona xodimi stansiya ALMASHTIRA OLMAYDI — ro'yxatda ham
+    # faqat o'ziga biriktirilgani chiqadi, aks holda ekranda hech qachon
+    # ko'ra olmaydigan boshqa stansiya tugmalari ko'rinib turardi.
+    stations = (
+        [st for st in all_stations if st.name == my_station]
+        if restricted
+        else all_stations
+    )
+
     return {
         "branch": branch,
         "user": frappe.session.user,
         "full_name": frappe.db.get_value("User", frappe.session.user, "full_name"),
         "stations": stations,
+        "restricted_station": restricted,
+        "my_station": my_station,
         "statuses": [
             {"key": s, "label": kitchen_status.label(s)}
             for s in kitchen_status.OPEN_STATUSES
@@ -117,7 +142,15 @@ def get_active_kots(station=None, include_served=0):
         "docstatus": 1,
         "creation": [">", frappe.utils.add_to_date(now_datetime(), hours=-KOT_WINDOW_HOURS)],
     }
-    if station:
+    if not _sees_all_stations():
+        # Mijozdan kelgan `station` parametriga ISHONILMAYDI — oddiy
+        # oshxona xodimi FAQAT o'ziga biriktirilgan stansiyani ko'rishi
+        # kerak, aks holda hammaga hamma stansiya taomi kelib qolardi.
+        my_station = kitchen_status.user_station()
+        if not my_station:
+            return []
+        filters["production"] = my_station
+    elif station:
         filters["production"] = station
     else:
         # Stansiya tanlanmagan = "barcha stansiyalar". Bar KOT'lari bu
@@ -372,6 +405,13 @@ def update_kot_item_status(kot_item, status):
 
     if row.branch != branch:
         raise frappe.PermissionError(_("Bu mahsulot boshqa filialga tegishli"))
+
+    if not _sees_all_stations():
+        my_station = kitchen_status.user_station()
+        if not my_station or row.production != my_station:
+            raise frappe.PermissionError(
+                _("Bu mahsulot sizning stansiyangizga tegishli emas")
+            )
 
     if cint(row.docstatus) != 1:
         frappe.throw(_("KOT bekor qilingan yoki tasdiqlanmagan"))

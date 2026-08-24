@@ -439,6 +439,14 @@
 	font-size: 22px; font-weight: 700; text-align: right;
 	font-variant-numeric: tabular-nums;
 }
+/* Maydon bo'sh turadi, `0` faqat ishora. Qalinligi maydonning o'zi bilan
+   bir xil — eski tayyor `0` qanday ko'rinsa, shunday. Faqat rangi so'niq:
+   kassir uni KIRITILGAN summa deb o'ylab qolmasligi kerak. */
+.rc-pay__input::placeholder,
+.rc-shift-input::placeholder {
+	color: var(--rc-muted); font-weight: 700; opacity: .85;
+}
+
 .rc-pay__quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .rc-quick {
 	flex: 1 1 auto; min-height: 40px; padding: 6px 12px;

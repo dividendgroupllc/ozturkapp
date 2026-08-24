@@ -406,6 +406,177 @@ class TestSelfServiceStation(FrappeTestCase):
         self.assertIsInstance(k.self_service_stations(), set)
 
 
+class TestKitchenStationRestriction(FrappeTestCase):
+    """Har oshpaz FAQAT o'ziga biriktirilgan stansiyani ko'rsin.
+
+    MUAMMO: stansiya avval faqat brauzer sozlamasi edi (localStorage),
+    standart holat "barcha stansiyalar" — bitta oshpazga (masalan faqat
+    non pishiruvchi) boshqa stansiya taomlari ham birdek kelib turardi.
+    `User.custom_kitchen_station` endi SERVERDA majburlanadi.
+    """
+
+    def setUp(self):
+        from ozturkapp.ozturkapp.utils import cashier_permissions
+
+        self.branch = cashier_permissions.resolve_scope().branch
+        self.invoice = frappe.generate_hash(length=10)
+        self.kots = []
+        self.users = []
+
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0, %s, 0, 0)
+            """,
+            (self.invoice, self.branch),
+        )
+
+    def tearDown(self):
+        frappe.set_user("Administrator")
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        frappe.db.delete("POS Invoice", {"name": self.invoice})
+        for user in self.users:
+            frappe.delete_doc("User", user, force=True, ignore_permissions=True)
+
+    # ── Fikstura ──────────────────────────────────────────────────────
+
+    def _kot(self, production, items):
+        """`items` = [(item, status)]."""
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status, production, verified)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, 'New Order', 'Ready For Prepare', %s, 0)
+            """,
+            (kot, self.invoice, self.branch, production),
+        )
+        self.kots.append(kot)
+
+        for idx, (item, status) in enumerate(items, start=1):
+            frappe.db.sql(
+                """
+                insert into `tabURY KOT Items`
+                    (name, creation, modified, owner, modified_by, docstatus,
+                     parent, parenttype, parentfield, idx, item, item_name,
+                     quantity, cancelled_qty, custom_kitchen_status)
+                values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                     %s, 'URY KOT', 'kot_items', %s, %s, %s, 1, 0, %s)
+                """,
+                (frappe.generate_hash(length=10), kot, idx, item, item, status),
+            )
+        return kot
+
+    def _cook(self, station):
+        from ozturkapp.ozturkapp.setup.kitchen_setup import KITCHEN_ROLE
+
+        user = frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": f"kds-station-{frappe.generate_hash(length=6)}@example.com",
+                "first_name": "Oshpaz",
+                "send_welcome_email": 0,
+            }
+        ).insert(ignore_permissions=True)
+        user.add_roles(KITCHEN_ROLE)
+        if station is not None:
+            frappe.db.set_value("User", user.name, "custom_kitchen_station", station)
+        self.users.append(user.name)
+        return user.name
+
+    # ── Testlar ───────────────────────────────────────────────────────
+
+    def test_cook_only_sees_own_station(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        bread = self._kot("Non", [("NON1", "Pending")])
+        grill = self._kot("Grill", [("KEBAB1", "Pending")])
+
+        cook = self._cook("Non")
+        frappe.set_user(cook)
+        try:
+            visible = {row["kot"] for row in kitchen.get_active_kots()}
+        finally:
+            frappe.set_user("Administrator")
+
+        self.assertIn(bread, visible)
+        self.assertNotIn(grill, visible)
+
+    def test_station_param_from_client_is_ignored(self):
+        """Mijoz `station="Grill"` yuborsa ham serverda e'tiborsiz qoladi."""
+        from ozturkapp.ozturkapp.api import kitchen
+
+        grill = self._kot("Grill", [("KEBAB1", "Pending")])
+        cook = self._cook("Non")
+        frappe.set_user(cook)
+        try:
+            visible = {row["kot"] for row in kitchen.get_active_kots(station="Grill")}
+        finally:
+            frappe.set_user("Administrator")
+
+        self.assertNotIn(grill, visible)
+
+    def test_unassigned_cook_sees_nothing(self):
+        """Stansiya biriktirilmagan xodimga BO'SH ro'yxat qaytadi, hammasi emas."""
+        from ozturkapp.ozturkapp.api import kitchen
+
+        self._kot("Non", [("NON1", "Pending")])
+        cook = self._cook(None)
+        frappe.set_user(cook)
+        try:
+            visible = kitchen.get_active_kots()
+        finally:
+            frappe.set_user("Administrator")
+
+        self.assertEqual(visible, [])
+
+    def test_manager_sees_all_stations(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        bread = self._kot("Non", [("NON1", "Pending")])
+        grill = self._kot("Grill", [("KEBAB1", "Pending")])
+
+        frappe.set_user("Administrator")
+        visible = {row["kot"] for row in kitchen.get_active_kots()}
+        self.assertIn(bread, visible)
+        self.assertIn(grill, visible)
+
+    def test_cook_cannot_change_status_of_other_station_item(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        grill = self._kot("Grill", [("KEBAB1", "Pending")])
+        item = frappe.get_all("URY KOT Items", filters={"parent": grill}, pluck="name")[0]
+
+        cook = self._cook("Non")
+        frappe.set_user(cook)
+        try:
+            with self.assertRaises(frappe.PermissionError):
+                kitchen.update_kot_item_status(item, "Preparing")
+        finally:
+            frappe.set_user("Administrator")
+
+    def test_custom_field_exists_on_user(self):
+        row = frappe.db.get_value(
+            "Custom Field",
+            {"dt": "User", "fieldname": "custom_kitchen_station"},
+            ["fieldname", "options"],
+            as_dict=True,
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.options, "URY Production Unit")
+
+    def test_missing_column_is_tolerated(self):
+        from ozturkapp.ozturkapp.utils import kitchen_status as k
+
+        self.assertIsInstance(k.user_station("Administrator"), str)
+
+
 class TestRealtimeCarriesInvoice(FrappeTestCase):
     """Mahsulot holati xabari CHEK NOMINI tashishi shart.
 

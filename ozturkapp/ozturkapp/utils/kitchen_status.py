@@ -82,6 +82,24 @@ def self_service_stations() -> set:
         )
     )
 
+
+def user_station(user: str = None) -> str:
+    """Foydalanuvchiga biriktirilgan oshxona stansiyasi (`User.custom_kitchen_station`).
+
+    Maydon `kitchen_setup.create_fields()` da yaratiladi. U hali ishga
+    tushmagan saytda ustun bo'lmaydi — shuning uchun avval tekshiriladi,
+    aks holda SQL xato berardi.
+    """
+    if not frappe.db.has_column("User", "custom_kitchen_station"):
+        return ""
+
+    return (
+        frappe.db.get_value(
+            "User", user or frappe.session.user, "custom_kitchen_station"
+        )
+        or ""
+    )
+
 #: Holatga o'tganda yoziladigan vaqt maydoni.
 TIMESTAMP_FIELD = {
     PREPARING: "custom_started_at",
