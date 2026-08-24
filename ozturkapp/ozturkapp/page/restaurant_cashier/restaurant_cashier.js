@@ -1158,12 +1158,23 @@ ozturk.cashier.Screen = class CashierScreen {
 			}
 			${
 				detail.other_orders && detail.other_orders.length
-					? `<p class="rc-hint">⚠ ${esc(
-							__("Bu stolda yana {0} ta to'lanmagan hisob bor.").replace(
-								"{0}",
-								detail.other_orders.length
-							)
-					  )}</p>`
+					? `<div class="rc-other-orders">
+							<p class="rc-hint">⚠ ${esc(
+								__("Bu stolda yana {0} ta to'lanmagan hisob bor — to'lash uchun tanlang:").replace(
+									"{0}",
+									detail.other_orders.length
+								)
+							)}</p>
+							${detail.other_orders
+								.map(
+									(order) => `<button class="rc-btn rc-other-orders__item" type="button"
+										data-action="open-other-order" data-invoice="${esc(order.invoice)}">
+										<span>${esc(order.invoice)}</span>
+										<span>${esc(this.money(order.amount))}</span>
+									</button>`
+								)
+								.join("")}
+						</div>`
 					: ""
 			}`;
 	}
@@ -1214,6 +1225,7 @@ ozturk.cashier.Screen = class CashierScreen {
 				else if (action === "reprint") this.printReceipt(detail);
 				else if (action === "split-bill") this.openSplitModal(detail);
 				else if (action === "pay") this.openPaymentModal(detail);
+				else if (action === "open-other-order") this.selectOrder(button.dataset.invoice);
 				else if (action === "cancel-order") this.cancelOrder(detail, button);
 				else if (action === "reload") this.refreshAll();
 				else if (action === "release") this.releaseTable(detail);

@@ -483,7 +483,6 @@ def update_kot_item_status(kot_item, status):
             print_ticket = {
                 "item_name": item_label,
                 "quantity": (item_row or {}).get("quantity"),
-                "kot": row.parent,
                 "table": invoice_row.get("restaurant_table") or "",
                 "station": row.production,
                 "printed_at": frappe.utils.now(),

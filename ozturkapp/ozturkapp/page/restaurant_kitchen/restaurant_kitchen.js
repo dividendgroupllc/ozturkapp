@@ -574,7 +574,7 @@ ozturk.kitchen.Screen = class KitchenScreen {
 	 * kichik oynasi qo'lda quriladi.
 	 */
 	printItemTicket(ticket) {
-		const w = window.open("", "_blank", "noopener,width=380,height=520");
+		const w = window.open("", "_blank", "width=380,height=520");
 		if (!w) return; // popup blocklangan — mahsulot holati baribir o'zgargan
 
 		w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -587,7 +587,6 @@ ozturk.kitchen.Screen = class KitchenScreen {
 			<h1>${esc(ticket.item_name || "")} ×${cint(ticket.quantity)}</h1>
 			<p>${esc(ticket.station || "")}</p>
 			${ticket.table ? `<p>${__("Stol")}: ${esc(ticket.table)}</p>` : ""}
-			<p>${esc(ticket.kot || "")}</p>
 			<p>${esc(frappe.datetime.str_to_user(ticket.printed_at))}</p>
 		</body></html>`);
 		w.document.close();

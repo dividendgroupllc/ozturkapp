@@ -312,6 +312,10 @@
 
 .rc-hint { font-size: 11.5px; color: var(--rc-muted); margin-top: 8px; line-height: 1.4; }
 
+/* Hisob bo'lingandan keyin qolgan to'lanmagan cheklar — tanlab to'lash uchun. */
+.rc-other-orders { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.rc-other-orders__item { justify-content: space-between; font-family: monospace; }
+
 /* Ma'lumot nomuvofiqligi — jim bo'sh hisob o'rniga aniq xabar (TZ §8). */
 .rc-issue {
 	margin-top: 14px; padding: 18px 16px;
