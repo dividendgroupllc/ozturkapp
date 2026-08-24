@@ -123,6 +123,7 @@ ozturk.cashier.Screen = class CashierScreen {
 		});
 
 		this.page.set_primary_action(__("Yangilash"), () => this.refreshAll(), "refresh");
+		this.page.set_secondary_action(__("Tarix"), () => this.openHistoryModal(), "list");
 
 		this.timers.push(
 			setInterval(() => this.tickClock(), 1000)
@@ -1754,6 +1755,7 @@ ozturk.cashier.Screen = class CashierScreen {
 					</div>`
 				)
 				.join("")}
+			${this.numpadHtml()}
 
 			<p class="rc-hint">${esc(
 				__("Bank va karta summalarini kiritish shart emas — ular avtomatik hisoblanadi.")
@@ -1821,6 +1823,7 @@ ozturk.cashier.Screen = class CashierScreen {
 		}
 
 		bindAmountInput($body.find(".rc-count-input"));
+		this.bindNumpad($body, $body.find(".rc-count-input"));
 		setTimeout(() => $body.find(".rc-count-input").first().trigger("focus"), 60);
 
 		$body.on("click", '[data-action="submit"]', async (e) => {
@@ -1924,6 +1927,63 @@ ozturk.cashier.Screen = class CashierScreen {
 	}
 
 	// ═══════════════════════════════════════════════════════════
+	//  Ekran klaviaturasi (kassa yopish sanog'i + to'lov summasi)
+	// ═══════════════════════════════════════════════════════════
+	//
+	// Kassa apparatida jismoniy klaviatura bo'lmasligi mumkin. Maydonlar
+	// `inputmode="numeric"` bilan belgilangan — bu odatda brauzerning o'z
+	// klaviaturasini ochadi, lekin kiosk rejimidagi qurilmalarda ishonchli
+	// emas. Shuning uchun sahifaning o'zida katta tugmali klaviatura
+	// chiziladi. Har kassada kerak emas — POS Profile'da yoqilgan
+	// bo'lsagina ko'rinadi (`ctx.enable_virtual_keyboard`).
+
+	numpadHtml() {
+		if (!this.ctx || !this.ctx.enable_virtual_keyboard) return "";
+
+		const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "⌫"];
+		return `<div class="rc-numpad">
+			${keys
+				.map(
+					(key) => `<button class="rc-numpad__key${
+						key === "⌫" ? " rc-numpad__key--del" : ""
+					}" type="button" data-key="${esc(key)}">${esc(key)}</button>`
+				)
+				.join("")}
+		</div>`;
+	}
+
+	/**
+	 * Tugma bosilganda FOKUSDAGI (yoki oxirgi fokuslangan) maydonga raqam
+	 * qo'shiladi. `input` hodisasi qo'lda chaqiriladi — shu bilan
+	 * `bindAmountInput()`dagi guruhlash/qayta hisoblash o'zgarishsiz ishlaydi.
+	 */
+	bindNumpad($body, $inputs) {
+		if (!this.ctx || !this.ctx.enable_virtual_keyboard) return;
+
+		let active = $inputs.get(0);
+		$inputs.on("focus", (e) => {
+			active = e.currentTarget;
+		});
+
+		$body.on("click", ".rc-numpad__key", (e) => {
+			const el = active || $inputs.get(0);
+			if (!el) return;
+
+			const key = e.currentTarget.dataset.key;
+			if (key === "⌫") {
+				el.value = el.value.slice(0, -1);
+			} else if (key === ",") {
+				if (!/[.,]/.test(el.value)) el.value += ",";
+			} else {
+				el.value += key;
+			}
+
+			el.focus();
+			$(el).trigger("input");
+		});
+	}
+
+	// ═══════════════════════════════════════════════════════════
 	//  To'lov oynasi (TZ §22)
 	// ═══════════════════════════════════════════════════════════
 
@@ -1974,6 +2034,7 @@ ozturk.cashier.Screen = class CashierScreen {
 				value="${esc(groupAmount(due))}"
 				aria-label="${esc(__("Qabul qilingan summa"))}">
 			<div class="rc-pay__quick"></div>
+			${this.numpadHtml()}
 
 			<div class="rc-pay__change"><span>${esc(
 				__("Qaytim")
@@ -2028,6 +2089,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			recalc();
 		});
 		bindAmountInput($input, recalc);
+		this.bindNumpad($body, $input);
 		$body.on("click", '[data-action="confirm"]', async (e) => {
 			const mode = $body.find('.rc-mode[aria-pressed="true"]').data("mode");
 			const amount = parseAmount($input.val());
@@ -2079,7 +2141,255 @@ ozturk.cashier.Screen = class CashierScreen {
 		this.countdownTimer = null;
 		this.el.overlay.hidden = true;
 		this.$root.find(".rc-modal__close").show();
+		this.$root.find(".rc-modal").removeClass("rc-modal--wide");
 		$(this.el.modalBody).off().empty();
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	//  Kassa tarixi — to'langan cheklar (FAQAT O'QISH)
+	// ═══════════════════════════════════════════════════════════
+
+	/**
+	 * Kassa tarixi — o'tgan davrda to'langan cheklar ro'yxati.
+	 *
+	 * Bu oyna HECH NARSA YARATMAYDI yoki O'ZGARTIRMAYDI — faqat
+	 * `order.get_paid_orders()` orqali mavjud cheklarni o'qib ko'rsatadi
+	 * va kerak bo'lsa qayta chop etishga imkon beradi.
+	 */
+	async openHistoryModal() {
+		const today = frappe.datetime.get_today();
+
+		this.el.modalBody.innerHTML = `
+			<div class="rc-history__filters">
+				<input class="rc-history__date" type="date" data-field="from" value="${esc(
+					today
+				)}" aria-label="${esc(__("Sanadan"))}">
+				<input class="rc-history__date" type="date" data-field="to" value="${esc(
+					today
+				)}" aria-label="${esc(__("Sanagacha"))}">
+				<select class="rc-history__select" data-field="table" aria-label="${esc(
+					__("Stol")
+				)}">
+					<option value="">${esc(__("Barcha stollar"))}</option>
+				</select>
+				<select class="rc-history__select" data-field="waiter" aria-label="${esc(
+					__("Ofitsiant")
+				)}">
+					<option value="">${esc(__("Barcha ofitsiantlar"))}</option>
+				</select>
+			</div>
+			<div class="rc-history__summary"></div>
+			<div class="rc-history__list"></div>
+			<div class="rc-history__detail"></div>`;
+
+		const $body = $(this.el.modalBody).off();
+		const $list = $body.find(".rc-history__list");
+		const $summary = $body.find(".rc-history__summary");
+		const $filters = $body.find(".rc-history__filters");
+		// `hidden` atributi ISHLATILMAYDI: Desk CSS'ida `[hidden]{display:none
+		// !important}` bor — bu jQuery'ning `.show()`sini yutib yuboradi va
+		// tafsilot bo'limi to'ldirilgan holda ham ko'rinmay qolardi.
+		const $detail = $body.find(".rc-history__detail").hide();
+
+		const load = async () => {
+			$list.html(`<div class="rc-hint">${esc(__("Yuklanmoqda…"))}</div>`);
+			$summary.empty();
+
+			const from = $body.find('[data-field="from"]').val();
+			const to = $body.find('[data-field="to"]').val();
+			const table = $body.find('[data-field="table"]').val();
+			const waiter = $body.find('[data-field="waiter"]').val();
+
+			try {
+				const rows = await this.call(
+					"ozturkapp.ozturkapp.api.order.get_paid_orders",
+					{
+						date_from: from,
+						date_to: to,
+						table: table || undefined,
+						waiter: waiter || undefined,
+					}
+				);
+				this.renderHistoryList(rows, $list, $summary);
+			} catch (error) {
+				$list.html(`<div class="rc-hint">${esc(this.errorText(error))}</div>`);
+			}
+		};
+
+		const showList = () => {
+			$detail.hide().empty();
+			$filters.show();
+			$summary.show();
+			$list.show();
+		};
+
+		const showDetail = async (invoice) => {
+			$filters.hide();
+			$summary.hide();
+			$list.hide();
+			$detail
+				.html(`<div class="rc-hint">${esc(__("Yuklanmoqda…"))}</div>`)
+				.show();
+
+			try {
+				const bill = await this.call(
+					"ozturkapp.ozturkapp.api.order.get_order_bill_preview",
+					{ order: invoice }
+				);
+				this.renderHistoryDetail(bill, $detail);
+			} catch (error) {
+				$detail.html(
+					`<button class="rc-btn" type="button" data-action="history-back">← ${esc(
+						__("Orqaga")
+					)}</button><div class="rc-hint">${esc(this.errorText(error))}</div>`
+				);
+			}
+		};
+
+		$body.on("change", ".rc-history__date, .rc-history__select", load);
+
+		$body.on("click", '[data-action="reprint-history"]', (e) => {
+			e.stopPropagation();
+			this.printReceipt({ bill: { invoice: e.currentTarget.dataset.invoice } });
+		});
+
+		$body.on("click", ".rc-history__row", (e) => {
+			showDetail(e.currentTarget.dataset.invoice);
+		});
+
+		$body.on("click", '[data-action="history-back"]', showList);
+
+		this.$root.find(".rc-modal").addClass("rc-modal--wide");
+		this.showModal(__("Kassa tarixi"));
+
+		try {
+			const options = await this.call(
+				"ozturkapp.ozturkapp.api.order.get_paid_order_filter_options"
+			);
+			const $table = $body.find('[data-field="table"]');
+			(options.tables || []).forEach((t) =>
+				$table.append(`<option value="${esc(t)}">${esc(t)}</option>`)
+			);
+			const $waiter = $body.find('[data-field="waiter"]');
+			(options.waiters || []).forEach((w) =>
+				$waiter.append(
+					`<option value="${esc(w.value)}">${esc(w.label)}</option>`
+				)
+			);
+		} catch (error) {
+			// Filtr ro'yxati yuklanmasa ham ro'yxatning o'zi ishlayveradi.
+		}
+
+		load();
+	}
+
+	renderHistoryList(rows, $list, $summary) {
+		if (!rows.length) {
+			$list.html(
+				`<div class="rc-hint">${esc(
+					__("Bu davrda to'langan chek topilmadi.")
+				)}</div>`
+			);
+			return;
+		}
+
+		const total = rows.reduce((sum, r) => sum + flt(r.amount), 0);
+		$summary.html(
+			`<span>${cint(rows.length)} ${esc(__("ta chek"))}</span><span>${esc(
+				this.money(total)
+			)}</span>`
+		);
+
+		$list.html(
+			rows
+				.map((r) => {
+					const modes = (r.payments || [])
+						.map((p) => esc(p.mode_of_payment))
+						.join(", ");
+					return `<div class="rc-history__row" data-invoice="${esc(r.invoice)}">
+						<div class="rc-history__main">
+							<div class="rc-history__invoice">${esc(r.invoice)}</div>
+							<div class="rc-history__meta">${esc(r.date)} ${esc(r.time)} · ${esc(
+						r.table || r.order_type || ""
+					)} · ${esc(r.customer_name || "")}</div>
+							<div class="rc-history__meta">${esc(__("Kassir"))}: ${esc(
+						r.cashier_name || "—"
+					)}${modes ? " · " + modes : ""}</div>
+						</div>
+						<div class="rc-history__side">
+							<div class="rc-history__amount">${esc(this.money(r.amount))}</div>
+							<button class="rc-btn" type="button" data-action="reprint-history"
+								data-invoice="${esc(r.invoice)}">${esc(__("Chop etish"))}</button>
+						</div>
+					</div>`;
+				})
+				.join("")
+		);
+	}
+
+	/** Kassa tarixidagi bitta chekning to'liq tarkibi — FAQAT O'QISH. */
+	renderHistoryDetail(bill, $detail) {
+		const items = (bill.items || [])
+			.map(
+				(item) => `<div class="rc-item">
+					<div>
+						<div class="rc-item__name">${esc(item.item_name || item.item_code)}</div>
+						<div class="rc-item__qty">${fmtQty(item.qty)} × ${esc(
+					this.money(item.rate)
+				)}</div>
+					</div>
+					<div class="rc-item__amount">${esc(this.money(item.amount))}</div>
+				</div>`
+			)
+			.join("");
+
+		const taxes = (bill.taxes || [])
+			.map(
+				(tax) => `<div class="rc-total ${
+					tax.is_service_charge ? "rc-total--service" : ""
+				}">
+					<span>${esc(tax.description)}${
+					tax.rate ? ` (${fmtQty(tax.rate)}%)` : ""
+				}</span>
+					<span>${esc(this.money(tax.amount))}</span>
+				</div>`
+			)
+			.join("");
+
+		const invoice = bill.invoice || bill.order;
+
+		$detail.html(`
+			<button class="rc-btn" type="button" data-action="history-back">← ${esc(
+				__("Orqaga")
+			)}</button>
+			<div class="rc-facts" style="margin-top:12px">
+				<div class="rc-fact"><div class="rc-fact__label">${esc(
+					__("Buyurtma")
+				)}</div><div class="rc-fact__value">${esc(invoice)}</div></div>
+				<div class="rc-fact"><div class="rc-fact__label">${esc(
+					__("Ofitsant")
+				)}</div><div class="rc-fact__value">${esc(bill.waiter_name || "—")}</div></div>
+				<div class="rc-fact"><div class="rc-fact__label">${esc(
+					__("Mijoz")
+				)}</div><div class="rc-fact__value">${esc(bill.customer_name || "—")}</div></div>
+				<div class="rc-fact"><div class="rc-fact__label">${esc(
+					__("Kassir")
+				)}</div><div class="rc-fact__value">${esc(bill.cashier_name || "—")}</div></div>
+			</div>
+			<div class="rc-items" style="margin-top:10px">${items}</div>
+			<div class="rc-totals">
+				<div class="rc-total"><span>${esc(
+					__("Oraliq summa")
+				)}</span><span>${esc(this.money(bill.subtotal))}</span></div>
+				${taxes}
+				<div class="rc-total rc-total--grand"><span>${esc(
+					__("Jami")
+				)}</span><span>${esc(this.money(bill.rounded_total))}</span></div>
+			</div>
+			<div class="rc-actions">
+				<button class="rc-btn rc-btn--primary" type="button" data-action="reprint-history"
+					data-invoice="${esc(invoice)}">${esc(__("Chop etish"))}</button>
+			</div>`);
 	}
 
 	// ═══════════════════════════════════════════════════════════

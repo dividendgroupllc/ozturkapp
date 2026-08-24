@@ -419,6 +419,38 @@
 }
 .rc-modal__close:hover { background: var(--rc-sunken); }
 .rc-modal__body { padding: 18px; }
+.rc-modal--wide { max-width: 760px; }
+
+/* ═══ Kassa tarixi ══════════════════════════════════════════════ */
+
+.rc-history__filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.rc-history__date, .rc-history__select {
+	min-height: 42px; padding: 8px 12px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text); font-size: 13px;
+}
+.rc-history__date { flex: 1 1 140px; }
+.rc-history__select { flex: 1 1 180px; }
+
+.rc-history__summary {
+	display: flex; justify-content: space-between;
+	padding: 4px 2px 12px; font-size: 13px; font-weight: 700; color: var(--rc-muted);
+}
+
+.rc-history__list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.rc-history__row {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	padding: 10px 12px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface);
+	cursor: pointer;
+}
+.rc-history__row:hover { background: var(--rc-sunken); }
+.rc-history__detail { margin-top: 4px; }
+.rc-history__invoice { font-weight: 700; font-size: 13.5px; font-family: monospace; }
+.rc-history__meta { font-size: 11.5px; color: var(--rc-muted); margin-top: 2px; }
+.rc-history__side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.rc-history__amount { font-weight: 700; font-size: 14px; white-space: nowrap; }
 
 .rc-pay__due { text-align: center; margin-bottom: 16px; }
 .rc-pay__due-label { font-size: 11px; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .05em; }
@@ -458,6 +490,20 @@
 	background: var(--rc-sunken); color: var(--rc-text);
 	font-size: 13px; font-weight: 600; cursor: pointer;
 }
+/* Ekran klaviaturasi — POS Profile'da yoqilgan bo'lsagina chiziladi. */
+.rc-numpad {
+	display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+	margin-top: 10px;
+}
+.rc-numpad__key {
+	min-height: 52px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: 20px; font-weight: 700; cursor: pointer;
+}
+.rc-numpad__key:active { filter: brightness(.92); }
+.rc-numpad__key--del { color: var(--rc-occupied); }
+
 .rc-pay__change { display: flex; justify-content: space-between; margin-top: 12px;
 	font-size: 15px; font-weight: 700; }
 .rc-pay__change--short { color: var(--rc-occupied); }

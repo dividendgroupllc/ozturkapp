@@ -21,7 +21,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from ozturkapp.ozturkapp.setup import bill_split_setup
+from ozturkapp.ozturkapp.setup import bill_split_setup, virtual_keyboard_setup
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import EVENT_FLOOR, EVENT_ORDER
 from ozturkapp.ozturkapp.utils.kitchen_realtime import EVENT_ITEM
@@ -72,6 +72,9 @@ def get_cashier_context():
         or "POS Invoice",
         # «Hisobni bo'lish» tugmasi — POS Profile'da yoqilgan bo'lsagina ko'rinadi.
         "enable_bill_split": bill_split_setup.is_enabled(scope.pos_profile),
+        # Kassani yopish va to'lov summasi maydonlarida ekran klaviaturasi —
+        # POS Profile'da yoqilgan bo'lsagina ko'rinadi.
+        "enable_virtual_keyboard": virtual_keyboard_setup.is_enabled(scope.pos_profile),
         "permissions": {
             "can_bill": _can_bill(scope.pos_profile),
             "is_supervisor": cashier_permissions.has_supervisor_role(),

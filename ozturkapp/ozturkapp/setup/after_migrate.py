@@ -30,6 +30,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.waiter_setup import setup as setup_waiter
 	from ozturkapp.ozturkapp.setup.ury_permissions import create_permissions
 	from ozturkapp.ozturkapp.setup.bill_split_setup import setup as setup_bill_split
+	from ozturkapp.ozturkapp.setup.virtual_keyboard_setup import setup as setup_virtual_keyboard
 
 	tasks = [
 		create_fields,
@@ -56,6 +57,8 @@ def run():
 		setup_receipt_format,
 		# Kassada hisobni taqsimlash — POS Profile darajasidagi yoqish/o'chirish.
 		setup_bill_split,
+		# Kassa yopish/to'lov ekranidagi virtual klaviatura — yoqish/o'chirish.
+		setup_virtual_keyboard,
 	]
 	for fn in tasks:
 		try:

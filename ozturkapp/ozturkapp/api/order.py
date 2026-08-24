@@ -105,6 +105,114 @@ def get_active_orders(room=None, status=None, limit=100):
 
 
 @frappe.whitelist()
+def get_paid_order_filter_options():
+    """Kassa tarixi filtrlari uchun — filialda haqiqatan uchragan stol va
+    ofitsiantlar ro'yxati (bo'sh/ishlatilmagan variantlarsiz)."""
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+
+    rows = frappe.get_all(
+        "POS Invoice",
+        filters={"branch": scope.branch, "docstatus": 1},
+        fields=["restaurant_table", "waiter"],
+    )
+
+    tables = sorted({r.restaurant_table for r in rows if r.restaurant_table})
+
+    waiters = [
+        {"value": w, "label": cashier_billing._user_label(w)}
+        for w in sorted({r.waiter for r in rows if r.waiter})
+    ]
+    waiters.sort(key=lambda w: w["label"])
+
+    return {"tables": tables, "waiters": waiters}
+
+
+@frappe.whitelist()
+def get_paid_orders(date_from=None, date_to=None, search=None, table=None, waiter=None, limit=100):
+    """Kassa tarixi — bergiliy davrda to'langan cheklar ro'yxati.
+
+    Ko'rish uchun (masalan qayta chop etish) — hech narsa yaratmaydi yoki
+    o'zgartirmaydi.
+
+    Args:
+        date_from, date_to: `YYYY-MM-DD`. Bo'sh bo'lsa — bugungi kun.
+        search: chek raqami bo'yicha qidiruv (faqat raqam).
+        table: aniq stol bo'yicha filtr.
+        waiter: aniq ofitsiant (foydalanuvchi) bo'yicha filtr.
+        limit: qatorlar soni.
+    """
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+
+    today = frappe.utils.today()
+    date_from = date_from or today
+    date_to = date_to or today
+
+    filters = {
+        "branch": scope.branch,
+        "docstatus": 1,
+        "posting_date": ["between", [date_from, date_to]],
+    }
+    if table:
+        filters["restaurant_table"] = table
+    if waiter:
+        filters["waiter"] = waiter
+
+    or_filters = None
+    if search:
+        like = f"%{search}%"
+        or_filters = {
+            "name": ["like", like],
+            "restaurant_table": ["like", like],
+            "customer_name": ["like", like],
+        }
+
+    rows = frappe.get_all(
+        "POS Invoice",
+        filters=filters,
+        or_filters=or_filters,
+        fields=[
+            "name", "restaurant_table", "custom_merged_tables", "customer_name",
+            "waiter", "cashier", "posting_date", "posting_time",
+            "rounded_total", "grand_total", "order_type",
+        ],
+        order_by="posting_date desc, posting_time desc",
+        limit_page_length=cint(limit) or 100,
+    )
+    if not rows:
+        return []
+
+    payments = frappe.get_all(
+        "Sales Invoice Payment",
+        filters={"parent": ["in", [r.name for r in rows]], "parenttype": "POS Invoice"},
+        fields=["parent", "mode_of_payment", "amount"],
+    )
+    payments_by_invoice = {}
+    for p in payments:
+        payments_by_invoice.setdefault(p.parent, []).append(
+            {"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount)}
+        )
+
+    return [
+        {
+            "invoice": r.name,
+            "table": r.restaurant_table,
+            "merged_tables": r.custom_merged_tables,
+            "customer_name": r.customer_name,
+            "waiter_name": cashier_billing._user_label(r.waiter),
+            "cashier_name": cashier_billing._user_label(r.cashier),
+            "order_type": r.order_type,
+            "date": str(r.posting_date or ""),
+            "time": str(r.posting_time or "")[:8],
+            "amount": flt(r.rounded_total) or flt(r.grand_total),
+            "payments": payments_by_invoice.get(r.name, []),
+        }
+        for r in rows
+    ]
+
+
+@frappe.whitelist()
 def get_order_counts(room=None):
     """Yuqoridagi ro'yxat uchun sanoqlar — badge'lar bir xil to'plamdan olinsin."""
     orders = get_active_orders(room=room, limit=10000)

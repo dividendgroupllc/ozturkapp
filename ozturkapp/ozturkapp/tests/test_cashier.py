@@ -655,6 +655,164 @@ class TestActiveOrderAndBillPreview(FrappeTestCase):
             self.assertNotIn(forbidden, source)
 
 
+class TestPaidOrderHistory(FrappeTestCase):
+    """Kassa tarixi — o'tgan davrda to'langan cheklar ro'yxati (FAQAT O'QISH)."""
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.table = _free_table(self.scope.branch)
+        if not self.table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+        self.invoices = []
+
+    def tearDown(self):
+        for name in self.invoices:
+            frappe.db.delete(
+                "Sales Invoice Payment", {"parent": name, "parenttype": "POS Invoice"}
+            )
+            frappe.db.delete("POS Invoice", {"name": name})
+
+    def _paid(
+        self, posting_date, amount=100000, customer_name="Test mijoz", mode="Cash",
+        table=None, waiter=None,
+    ):
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, invoice_printed, custom_cancelled,
+                 customer_name, cashier, waiter, posting_date, posting_time,
+                 grand_total, rounded_total, paid_amount)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, 1, 0, %s, 'Administrator', %s, %s, '12:00:00',
+                 %s, %s, %s)
+            """,
+            (
+                name, table or self.table, self.scope.branch, customer_name,
+                waiter, posting_date, amount, amount, amount,
+            ),
+        )
+        frappe.db.sql(
+            """
+            insert into `tabSales Invoice Payment`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 parent, parenttype, parentfield, idx, mode_of_payment, amount)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, 'POS Invoice', 'payments', 1, %s, %s)
+            """,
+            (frappe.generate_hash(length=10), name, mode, amount),
+        )
+        self.invoices.append(name)
+        return name
+
+    def test_only_paid_orders_in_range_are_returned(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        today = frappe.utils.today()
+        yesterday = frappe.utils.add_days(today, -1)
+
+        today_inv = self._paid(today)
+        old_inv = self._paid(yesterday)
+
+        rows = get_paid_orders(date_from=today, date_to=today)
+        names = {r["invoice"] for r in rows}
+        self.assertIn(today_inv, names)
+        self.assertNotIn(old_inv, names)
+
+    def test_includes_payment_modes_and_amount(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        today = frappe.utils.today()
+        inv = self._paid(today, amount=55000, mode="Cash")
+
+        rows = get_paid_orders(date_from=today, date_to=today)
+        row = next(r for r in rows if r["invoice"] == inv)
+        self.assertEqual(row["amount"], 55000)
+        self.assertEqual([p["mode_of_payment"] for p in row["payments"]], ["Cash"])
+
+    def test_search_filters_by_invoice(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        today = frappe.utils.today()
+        inv = self._paid(today)
+        other = self._paid(today)
+
+        rows = get_paid_orders(date_from=today, date_to=today, search=inv)
+        names = {r["invoice"] for r in rows}
+        self.assertIn(inv, names)
+        self.assertNotIn(other, names)
+
+    def test_table_filter(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        today = frappe.utils.today()
+        here = self._paid(today, table=self.table)
+        elsewhere = self._paid(today, table="Test-Table-Boshqa")
+
+        rows = get_paid_orders(date_from=today, date_to=today, table=self.table)
+        names = {r["invoice"] for r in rows}
+        self.assertIn(here, names)
+        self.assertNotIn(elsewhere, names)
+
+    def test_waiter_filter(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        today = frappe.utils.today()
+        this_waiter = self._paid(today, waiter="waiter-a@example.com")
+        other_waiter = self._paid(today, waiter="waiter-b@example.com")
+
+        rows = get_paid_orders(date_from=today, date_to=today, waiter="waiter-a@example.com")
+        names = {r["invoice"] for r in rows}
+        self.assertIn(this_waiter, names)
+        self.assertNotIn(other_waiter, names)
+
+    def test_filter_options_list_actual_tables_and_waiters(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        today = frappe.utils.today()
+        self._paid(today, table="Test-Table-Options", waiter="waiter-c@example.com")
+
+        options = get_paid_order_filter_options()
+        self.assertIn("Test-Table-Options", options["tables"])
+        self.assertIn(
+            "waiter-c@example.com", [w["value"] for w in options["waiters"]]
+        )
+
+    def test_never_mutates(self):
+        """`get_paid_orders` / `get_paid_order_filter_options` — faqat o'qish."""
+        import inspect
+
+        from ozturkapp.ozturkapp.api.order import (
+            get_paid_order_filter_options,
+            get_paid_orders,
+        )
+
+        for fn in (get_paid_orders, get_paid_order_filter_options):
+            source = inspect.getsource(fn)
+            for forbidden in (".save(", ".submit(", ".insert(", "db_set", "set_value"):
+                self.assertNotIn(forbidden, source)
+
+    def test_requires_cashier_role(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        user = frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": "history-test-nobody@example.com",
+                "first_name": "Ruxsatsiz",
+                "send_welcome_email": 0,
+            }
+        ).insert(ignore_permissions=True)
+        frappe.set_user(user.name)
+        try:
+            with self.assertRaises(cashier_permissions.CashierPermissionError):
+                get_paid_orders()
+        finally:
+            frappe.set_user("Administrator")
+            frappe.delete_doc("User", user.name, force=True, ignore_permissions=True)
+
+
 class TestCashierCannotEditOrder(FrappeTestCase):
     """TZ §2, §12#11 — kassa sahifasi buyurtma tahrirlash vositasi EMAS."""
 

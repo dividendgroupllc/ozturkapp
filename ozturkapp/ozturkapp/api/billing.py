@@ -160,6 +160,15 @@ def split_bill(invoice, items_to_move, customer=None):
     result = ury_split_bill(invoice, items_to_move, customer=customer)
     new_invoice = result["new_invoice"]
 
+    # URY `split_bill()` xizmat haqini manba chekning `taxes_and_charges`
+    # (shablon havolasi) maydonidan ko'chiradi — lekin bu saytda soliq
+    # qatori chekka TO'G'RIDAN-TO'G'RI (shablon havolasisiz) qo'shiladi,
+    # ya'ni o'sha maydon har doim bo'sh. Natijada yangi chek xizmat
+    # haqisiz qolib ketardi. Shuning uchun ikkalasida ham qo'lda tekshirib,
+    # yetishmasa to'ldiramiz.
+    _ensure_service_charge(invoice, scope.restaurant)
+    _ensure_service_charge(new_invoice, scope.restaurant)
+
     emit_order_change(scope.branch, invoice, "BILL_SPLIT", row.restaurant_table)
     emit_order_change(scope.branch, new_invoice, "BILL_SPLIT", row.restaurant_table)
     emit_floor_change(scope.branch, _tables_of(row), "BILL_SPLIT", invoice)
@@ -315,6 +324,35 @@ def _validate_payments(payments, doc, scope) -> list:
 # ═══════════════════════════════════════════════════════════════════
 #  Yordamchilar
 # ═══════════════════════════════════════════════════════════════════
+
+def _ensure_service_charge(invoice_name: str, restaurant: str):
+    """Split'dan keyingi chekda xizmat haqi yo'q bo'lib qolmasligini ta'minlaydi.
+
+    Faqat qoralama (`docstatus = 0`) chekka tegadi va faqat xizmat haqi
+    qatori haqiqatan ham YO'Q bo'lsa qo'shadi — allaqachon bor bo'lsa
+    hech narsa qilmaydi (idempotent).
+    """
+    config = cashier_billing.get_service_charge_config(restaurant)
+    if not config.get("enabled"):
+        return
+
+    doc = frappe.get_doc("POS Invoice", invoice_name)
+    if doc.docstatus != 0:
+        return
+    if any(t.account_head == config["account"] for t in doc.taxes):
+        return
+
+    doc.append(
+        "taxes",
+        {
+            "charge_type": "On Net Total",
+            "account_head": config["account"],
+            "description": config.get("description") or _("Xizmat haqi"),
+            "rate": config["rate"],
+        },
+    )
+    doc.save(ignore_permissions=True)
+
 
 def _tables_of(row) -> list:
     tables = []
