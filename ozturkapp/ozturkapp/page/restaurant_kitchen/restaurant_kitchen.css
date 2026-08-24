@@ -121,19 +121,16 @@
 .kds-ticket {
 	background: var(--kds-surface);
 	border: 1px solid var(--kds-border);
-	border-top: 5px solid var(--kds-border);
+	border-top: 5px solid var(--kds-pending);
 	border-radius: var(--kds-radius);
 	overflow: hidden;
 	display: flex; flex-direction: column;
 }
-.kds-ticket--Pending   { border-top-color: var(--kds-pending); }
-.kds-ticket--Preparing { border-top-color: var(--kds-preparing); }
-.kds-ticket--Ready     { border-top-color: var(--kds-ready); }
-.kds-ticket--Served    { border-top-color: var(--kds-served); opacity: .7; }
+.kds-ticket--Served    { opacity: .7; }
 .kds-ticket--Cancelled { border-top-color: var(--kds-cancelled); background: var(--kds-cancelled-soft); }
 
-/* Kechikkan buyurtma — diqqatni tortadi (TZ §20). */
-.kds-ticket--late { box-shadow: 0 0 0 2px var(--kds-cancelled); }
+/* Kechikkan buyurtma (15 daqiqadan o'tgan) — ko'k qizilga aylanadi (TZ §20). */
+.kds-ticket--late { border-top-color: var(--kds-cancelled); box-shadow: 0 0 0 2px var(--kds-cancelled); }
 
 .kds-ticket__head { padding: 12px 14px; border-bottom: 1px solid var(--kds-border); }
 .kds-ticket__top {
