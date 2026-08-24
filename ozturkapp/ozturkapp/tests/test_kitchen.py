@@ -14,7 +14,7 @@ import re
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import cint
+from frappe.utils import cint, flt
 
 from ozturkapp.ozturkapp.utils import kitchen_status as ks
 
@@ -575,6 +575,124 @@ class TestKitchenStationRestriction(FrappeTestCase):
         from ozturkapp.ozturkapp.utils import kitchen_status as k
 
         self.assertIsInstance(k.user_station("Administrator"), str)
+
+
+class TestPrintOnReadyTicket(FrappeTestCase):
+    """Stansiya "Tayyor bo'lganda chek chiqarilsin"ni yoqsa — javobda
+    `print_ticket` keladi; o'chirilgan yoki boshqa holatlarda `None`
+    (frontend chop etish oynasini shunda ochmaydi).
+    """
+
+    def setUp(self):
+        from ozturkapp.ozturkapp.utils import cashier_permissions
+
+        self.branch = cashier_permissions.resolve_scope().branch
+        self.invoice = frappe.generate_hash(length=10)
+        self.kots = []
+        self.units = []
+
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 branch, invoice_printed, custom_cancelled)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0, %s, 0, 0)
+            """,
+            (self.invoice, self.branch),
+        )
+
+    def tearDown(self):
+        for kot in self.kots:
+            frappe.db.delete("URY KOT Items", {"parent": kot})
+            frappe.db.delete("URY KOT", {"name": kot})
+        frappe.db.delete("POS Invoice", {"name": self.invoice})
+        for unit in self.units:
+            frappe.delete_doc(
+                "URY Production Unit", unit, force=True, ignore_permissions=True
+            )
+
+    def _unit(self, name, print_on_ready):
+        frappe.get_doc(
+            {
+                "doctype": "URY Production Unit",
+                "production": name,
+                "custom_print_on_ready": 1 if print_on_ready else 0,
+            }
+        ).insert(ignore_permissions=True)
+        self.units.append(name)
+        return name
+
+    def _kot_item(self, production):
+        kot = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 invoice, branch, type, order_status, production, verified)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, %s, 'New Order', 'Ready For Prepare', %s, 0)
+            """,
+            (kot, self.invoice, self.branch, production),
+        )
+        self.kots.append(kot)
+
+        item = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabURY KOT Items`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 parent, parenttype, parentfield, idx, item, item_name,
+                 quantity, cancelled_qty, custom_kitchen_status)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 1,
+                 %s, 'URY KOT', 'kot_items', 1, 'NON1', 'Non', 2, 0, 'Pending')
+            """,
+            (item, kot),
+        )
+        return item
+
+    def test_ticket_included_when_station_enabled(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        unit = self._unit("Non Test Station", print_on_ready=True)
+        item = self._kot_item(unit)
+
+        kitchen.update_kot_item_status(item, "Preparing")
+        result = kitchen.update_kot_item_status(item, "Ready")
+
+        self.assertIsNotNone(result["print_ticket"])
+        self.assertEqual(result["print_ticket"]["item_name"], "Non")
+        self.assertEqual(flt(result["print_ticket"]["quantity"]), 2)
+
+    def test_ticket_absent_when_station_disabled(self):
+        from ozturkapp.ozturkapp.api import kitchen
+
+        unit = self._unit("Grill Test Station", print_on_ready=False)
+        item = self._kot_item(unit)
+
+        kitchen.update_kot_item_status(item, "Preparing")
+        result = kitchen.update_kot_item_status(item, "Ready")
+
+        self.assertIsNone(result["print_ticket"])
+
+    def test_ticket_not_triggered_for_other_transitions(self):
+        """Faqat "Ready"ga o'tganda — "Preparing"da chek chiqmasligi kerak."""
+        from ozturkapp.ozturkapp.api import kitchen
+
+        unit = self._unit("Non Test Station 2", print_on_ready=True)
+        item = self._kot_item(unit)
+
+        result = kitchen.update_kot_item_status(item, "Preparing")
+        self.assertIsNone(result["print_ticket"])
+
+    def test_custom_field_exists_on_production_unit(self):
+        row = frappe.db.get_value(
+            "Custom Field",
+            {"dt": "URY Production Unit", "fieldname": "custom_print_on_ready"},
+            ["fieldname", "fieldtype"],
+            as_dict=True,
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.fieldtype, "Check")
 
 
 class TestRealtimeCarriesInvoice(FrappeTestCase):

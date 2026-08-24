@@ -231,6 +231,7 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
 
     items = [
         {
+            "name": row.name,
             "idx": row.idx,
             "item_code": row.item_code,
             "item_name": row.item_name,

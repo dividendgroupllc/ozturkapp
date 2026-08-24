@@ -29,6 +29,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.service_charge import setup as setup_service_charge
 	from ozturkapp.ozturkapp.setup.waiter_setup import setup as setup_waiter
 	from ozturkapp.ozturkapp.setup.ury_permissions import create_permissions
+	from ozturkapp.ozturkapp.setup.bill_split_setup import setup as setup_bill_split
 
 	tasks = [
 		create_fields,
@@ -53,6 +54,8 @@ def run():
 		setup_waiter,
 		# Mijoz cheki — o'zbekcha format.
 		setup_receipt_format,
+		# Kassada hisobni taqsimlash — POS Profile darajasidagi yoqish/o'chirish.
+		setup_bill_split,
 	]
 	for fn in tasks:
 		try:

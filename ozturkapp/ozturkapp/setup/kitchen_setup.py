@@ -176,14 +176,35 @@ KITCHEN_STATION_FIELD = {
     "User": [
         {
             "fieldname": "custom_kitchen_station",
-            "label": "Oshxona stansiyasi",
+            "label": "Ury Production Unit",
             "fieldtype": "Link",
             "options": "URY Production Unit",
             "insert_after": "roles",
+        }
+    ]
+}
+
+
+#: Stansiya darajasida — "Tayyor" bosilganda mahsulot cheki avtomatik
+#: chop etilsinmi.
+#:
+#: NEGA STANSIYA DARAJASIDA
+#: ========================
+#: `custom_self_service` kabi — bir joyda yoqilsa yetarli, har bir taomga
+#: alohida tegish shart emas. Har bir stansiya (masalan "Non") printerini
+#: mustaqil yoqib/o'chirib sozlaydi (TZ-tashqi talab).
+PRINT_ON_READY_FIELD = {
+    "URY Production Unit": [
+        {
+            "fieldname": "custom_print_on_ready",
+            "label": "Tayyor bo'lganda chek chiqarilsin",
+            "fieldtype": "Check",
+            "default": "0",
+            "insert_after": "custom_self_service",
             "description": (
-                "Oshxona ekranida (KDS) bu foydalanuvchi FAQAT shu stansiyaga "
-                "tegishli taomlarni ko'radi. Menejer/Administrator rollariga "
-                "bu cheklov qo'llanmaydi — ular barcha stansiyani ko'radi."
+                "Yoqilsa: bu stansiyada oshpaz mahsulotni «Tayyor» deb "
+                "belgilaganda, brauzerda mahsulot ma'lumoti bilan chop "
+                "etish oynasi avtomatik ochiladi."
             ),
         }
     ]
@@ -193,6 +214,7 @@ KITCHEN_STATION_FIELD = {
 def create_fields():
     create_custom_fields(KITCHEN_FIELDS, ignore_validate=True)
     create_custom_fields(SELF_SERVICE_FIELD, ignore_validate=True)
+    create_custom_fields(PRINT_ON_READY_FIELD, ignore_validate=True)
     create_custom_fields(KITCHEN_STATION_FIELD, ignore_validate=True)
     print(
         "✅ Oshxona custom fieldlari tayyor (URY KOT Items, URY Production Unit, User)"

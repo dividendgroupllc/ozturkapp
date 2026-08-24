@@ -455,21 +455,39 @@ def update_kot_item_status(kot_item, status):
     # Faqat `Ready` da: "Tayyorlanmoqda" yoki "Berildi" ofitsantdan
     # HECH NARSA talab qilmaydi, ularga xabar bersak — u shovqinga
     # aylanadi va haqiqiy xabar ham e'tibordan qoladi.
+    print_ticket = None
+
     if target == kitchen_status.READY:
         item_row = frappe.db.get_value(
-            "URY KOT Items", kot_item, ["item", "item_name"], as_dict=True
+            "URY KOT Items", kot_item, ["item", "item_name", "quantity"], as_dict=True
         )
         invoice_row = frappe.db.get_value(
             "POS Invoice", row.invoice, ["restaurant_table", "waiter"], as_dict=True
         ) or frappe._dict()
+        item_label = (item_row or {}).get("item_name") or (item_row or {}).get("item") or ""
         notifications.item_ready(
             branch,
             row.invoice,
-            (item_row or {}).get("item_name") or (item_row or {}).get("item") or "",
+            item_label,
             invoice_row.get("restaurant_table"),
             invoice_row.get("waiter"),
             row.production,
         )
+
+        # Stansiya "Tayyor bo'lganda chek chiqarilsin"ni yoqqan bo'lsa —
+        # mijoz (JS) shu ma'lumot bilan chop etish oynasini ochadi.
+        # Serverda emas: printer sozlamasi TALAB QILINMAYDI, brauzer
+        # istalgan ulangan printerga chiqara oladi (`restaurant_cashier.js`
+        # dagi `printReceipt()` bilan bir xil falsafa).
+        if kitchen_status.print_on_ready(row.production):
+            print_ticket = {
+                "item_name": item_label,
+                "quantity": (item_row or {}).get("quantity"),
+                "kot": row.parent,
+                "table": invoice_row.get("restaurant_table") or "",
+                "station": row.production,
+                "printed_at": frappe.utils.now(),
+            }
 
     return {
         "kot_item": kot_item,
@@ -478,6 +496,7 @@ def update_kot_item_status(kot_item, status):
         "status_label": kitchen_status.label(target),
         "next": kitchen_status.next_action(target),
         "can_waiter_cancel": kitchen_status.can_waiter_cancel(target),
+        "print_ticket": print_ticket,
     }
 
 

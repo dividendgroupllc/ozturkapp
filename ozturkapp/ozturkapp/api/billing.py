@@ -42,6 +42,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from ozturkapp.ozturkapp.setup import bill_split_setup
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change, emit_order_change
 
@@ -109,6 +110,66 @@ def open_bill(invoice):
     )
 
     return get_bill(invoice)
+
+
+@frappe.whitelist()
+def split_bill(invoice, items_to_move, customer=None):
+    """Hisobni taqsimlash — tanlangan mahsulotlarni yangi, bog'liq chekka ko'chiradi.
+
+    HAQIQIY ISH URY'NIKI
+    =====================
+    Mahsulotni ko'chirish, soliq/xizmat haqini ikkala chekda ham qayta
+    hisoblash — bularning barchasini `ury.ury.doctype.ury_order.ury_order
+    .split_bill()` bajaradi (u allaqachon mavjud va sinalgan). Bu yerda
+    FAQAT kassa ko'lami (filial/POS Profile), smena va POS Profile'dagi
+    yoqish/o'chirish bayrog'i tekshiriladi (TZ §17 — frontend'ga ishonmaymiz).
+
+    Args:
+        invoice: manba `POS Invoice` nomi (`docstatus = 0` bo'lishi shart).
+        items_to_move: `[{"name": <POS Invoice Item qatori>, "qty": <son>}, ...]`
+            — har bir qatordan necha dona ko'chirilishi. To'liq miqdor
+            ko'chirilsa qator butunlay manba chekdan chiqadi.
+        customer: ixtiyoriy — yangi chekka boshqa mijoz biriktirish.
+
+    Returns:
+        dict: source_invoice, new_invoice, source_bill, new_bill (ikkalasi
+            ham to'liq `build_bill()` ko'rinishida — frontend qayta
+            so'ramasdan darhol ko'rsata oladi).
+    """
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+    cashier_permissions.assert_can_bill(scope.pos_profile)
+    cashier_permissions.assert_shift_open(scope)
+
+    row = cashier_permissions.assert_invoice_in_scope(invoice, scope, docstatus=0)
+
+    if cint(row.custom_cancelled):
+        frappe.throw(_("Bekor qilingan buyurtma uchun hisobni bo'lib bo'lmaydi"))
+
+    if not bill_split_setup.is_enabled(scope.pos_profile):
+        frappe.throw(
+            _(
+                "Hisobni taqsimlash bu kassa uchun yoqilmagan. "
+                "POS Profile sozlamalaridan yoqing."
+            ),
+            title=_("Ruxsat yo'q"),
+        )
+
+    from ury.ury.doctype.ury_order.ury_order import split_bill as ury_split_bill
+
+    result = ury_split_bill(invoice, items_to_move, customer=customer)
+    new_invoice = result["new_invoice"]
+
+    emit_order_change(scope.branch, invoice, "BILL_SPLIT", row.restaurant_table)
+    emit_order_change(scope.branch, new_invoice, "BILL_SPLIT", row.restaurant_table)
+    emit_floor_change(scope.branch, _tables_of(row), "BILL_SPLIT", invoice)
+
+    return {
+        "source_invoice": result["source_invoice"],
+        "new_invoice": new_invoice,
+        "source_bill": get_bill(result["source_invoice"]),
+        "new_bill": get_bill(new_invoice),
+    }
 
 
 @frappe.whitelist()

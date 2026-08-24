@@ -100,6 +100,22 @@ def user_station(user: str = None) -> str:
         or ""
     )
 
+
+def print_on_ready(station: str) -> bool:
+    """Stansiya "Tayyor"da chek chiqarishni yoqqanmi (`custom_print_on_ready`).
+
+    Maydon `kitchen_setup.create_fields()` da yaratiladi. Hali ishga
+    tushmagan saytda ustun bo'lmaydi.
+    """
+    if not station:
+        return False
+    if not frappe.db.has_column("URY Production Unit", "custom_print_on_ready"):
+        return False
+
+    return bool(
+        cint(frappe.db.get_value("URY Production Unit", station, "custom_print_on_ready"))
+    )
+
 #: Holatga o'tganda yoziladigan vaqt maydoni.
 TIMESTAMP_FIELD = {
     PREPARING: "custom_started_at",

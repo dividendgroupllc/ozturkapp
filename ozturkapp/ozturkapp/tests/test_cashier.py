@@ -1302,7 +1302,12 @@ class TestSellingRequiresOpenShift(FrappeTestCase):
 
         from ozturkapp.ozturkapp.api import billing, waiter
 
-        for fn in (billing.open_bill, billing.submit_payment, waiter.submit_order):
+        for fn in (
+            billing.open_bill,
+            billing.submit_payment,
+            billing.split_bill,
+            waiter.submit_order,
+        ):
             with self.subTest(fn=fn.__name__):
                 self.assertIn("assert_shift_open", inspect.getsource(fn))
 
@@ -1315,6 +1320,178 @@ class TestSellingRequiresOpenShift(FrappeTestCase):
         source = inspect.getsource(cashier_permissions.assert_shift_open)
         self.assertIn("naqd pul", source)
         self.assertIn("Kassani ochish", source)
+
+
+class TestBillSplit(FrappeTestCase):
+    """Kassada hisobni taqsimlash (bill split) — POS Profile darajasida yoqish/o'chirish.
+
+    Mahsulotni ko'chirish, soliq/xizmat haqini ikkala chekda ham qayta
+    hisoblash — bularning barchasini `ury.ury.doctype.ury_order.ury_order
+    .split_bill()` bajaradi (allaqachon mavjud, sinalgan). Bu yerda faqat
+    ozturkapp qo'shgan qatlam (ko'lam, smena, POS Profile bayrog'i)
+    sinaladi — pul hisob-kitobi URY'niki, qayta tekshirilmaydi.
+    """
+
+    def setUp(self):
+        self.scope = cashier_permissions.resolve_scope()
+        self.table = _free_table(self.scope.branch)
+        if not self.table:
+            self.skipTest("Ochiq cheksiz URY Table yo'q")
+        self.invoices = []
+
+        # Bu testlar smena holatiga bog'liq bo'lmasligi kerak — real
+        # POS Opening Entry yaratish o'rniga tekshiruvni vaqtincha
+        # chetlab o'tamiz (`TestOrderCancellation._as_cashier` bilan bir xil usul).
+        self._real_shift_check = cashier_permissions.assert_shift_open
+        cashier_permissions.assert_shift_open = lambda scope=None: None
+
+        self._original_toggle = frappe.db.get_value(
+            "POS Profile", self.scope.pos_profile, "custom_enable_bill_split"
+        )
+
+    def tearDown(self):
+        cashier_permissions.assert_shift_open = self._real_shift_check
+        frappe.db.set_value(
+            "POS Profile",
+            self.scope.pos_profile,
+            "custom_enable_bill_split",
+            self._original_toggle,
+            update_modified=False,
+        )
+        for name in self.invoices:
+            frappe.db.delete("POS Invoice", {"name": name})
+        frappe.db.set_value(
+            "URY Table", self.table, "occupied", 0, update_modified=False
+        )
+
+    def _draft(self, cancelled=0):
+        """Qoralama chek qatori — to'liq hujjat kerak emas (yengil usul)."""
+        name = frappe.generate_hash(length=10)
+        frappe.db.sql(
+            """
+            insert into `tabPOS Invoice`
+                (name, creation, modified, owner, modified_by, docstatus,
+                 restaurant_table, branch, pos_profile, invoice_printed,
+                 custom_cancelled, grand_total, rounded_total)
+            values (%s, now(), now(), 'Administrator', 'Administrator', 0,
+                 %s, %s, %s, 0, %s, 100, 100)
+            """,
+            (name, self.table, self.scope.branch, self.scope.pos_profile, cancelled),
+        )
+        self.invoices.append(name)
+        return name
+
+    def _set_toggle(self, enabled):
+        frappe.db.set_value(
+            "POS Profile",
+            self.scope.pos_profile,
+            "custom_enable_bill_split",
+            1 if enabled else 0,
+            update_modified=False,
+        )
+
+    # ── POS Profile bayrog'i ────────────────────────────────────────────
+
+    def test_toggle_is_respected(self):
+        from ozturkapp.ozturkapp.setup import bill_split_setup
+
+        self._set_toggle(False)
+        self.assertFalse(bill_split_setup.is_enabled(self.scope.pos_profile))
+
+        self._set_toggle(True)
+        self.assertTrue(bill_split_setup.is_enabled(self.scope.pos_profile))
+
+    def test_missing_column_is_tolerated(self):
+        from ozturkapp.ozturkapp.setup import bill_split_setup
+
+        self.assertFalse(bill_split_setup.is_enabled(""))
+
+    def test_custom_field_exists_on_pos_profile(self):
+        row = frappe.db.get_value(
+            "Custom Field",
+            {"dt": "POS Profile", "fieldname": "custom_enable_bill_split"},
+            ["fieldname", "fieldtype"],
+            as_dict=True,
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.fieldtype, "Check")
+
+    def test_context_exposes_the_toggle(self):
+        self._set_toggle(True)
+        self.assertTrue(cashier_api.get_cashier_context()["enable_bill_split"])
+
+        self._set_toggle(False)
+        self.assertFalse(cashier_api.get_cashier_context()["enable_bill_split"])
+
+    # ── Ruxsat qatlami ───────────────────────────────────────────────────
+
+    def test_split_blocked_when_profile_disables_it(self):
+        from ozturkapp.ozturkapp.api import billing
+
+        self._set_toggle(False)
+        invoice = self._draft()
+
+        with self.assertRaises(frappe.ValidationError):
+            billing.split_bill(invoice, [])
+
+    def test_split_blocked_for_cancelled_order(self):
+        from ozturkapp.ozturkapp.api import billing
+
+        self._set_toggle(True)
+        invoice = self._draft(cancelled=1)
+
+        with self.assertRaises(frappe.ValidationError):
+            billing.split_bill(invoice, [])
+
+    def test_split_reaches_ury_when_enabled(self):
+        """To'g'ri sozlanganda so'rov URY'ning HAQIQIY funksiyasiga yetadi.
+
+        Mahsulot yo'qligi sababli URY o'zining "kamida bitta mahsulot
+        tanlang" xatosini beradi — bu shu bosqichgacha yetib kelgani va
+        gate'lardan boshqa hech narsa to'xtatmaganini isbotlaydi.
+        """
+        from ozturkapp.ozturkapp.api import billing
+
+        self._set_toggle(True)
+        invoice = self._draft()
+
+        with self.assertRaises(frappe.ValidationError):
+            billing.split_bill(invoice, [])
+
+    def test_delegates_to_ury_does_not_reimplement(self):
+        """Mahsulot ko'chirish mantig'ini QAYTA YOZMAYDI — URY'ga topshiradi."""
+        import inspect
+
+        from ozturkapp.ozturkapp.api import billing
+
+        source = inspect.getsource(billing.split_bill)
+        self.assertIn("ury.ury.doctype.ury_order.ury_order", source)
+        for forbidden in (
+            "doc.remove(",
+            "new_invoice.insert(",
+            "calculate_taxes_and_totals",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    # ── `build_bill` qator manzili ────────────────────────────────────
+
+    def test_bill_items_expose_row_name_for_addressing(self):
+        """`build_bill` mahsulot qatorining `name`sini ham qaytarishi kerak —
+        aks holda frontend qaysi qatorni ko'chirishni URY'ga ayta olmaydi."""
+        row = frappe._dict(
+            name="ROW-1", idx=1, item_code="X", item_name="X",
+            qty=2, uom="Nos", rate=1000, amount=2000,
+        )
+        doc = frappe._dict(
+            doctype="POS Invoice", name="TEST", docstatus=0,
+            creation=None, modified=None, customer="X", currency="UZS",
+            net_total=2000, total=2000, grand_total=2000, rounded_total=2000,
+            total_taxes_and_charges=0,
+            items=[row], taxes=[],
+            precision=lambda field: 2,
+        )
+        bill = cashier_billing.build_bill(doc, include_kitchen=False)
+        self.assertEqual(bill["items"][0]["name"], "ROW-1")
 
 
 class TestOpeningIsCashOnly(FrappeTestCase):

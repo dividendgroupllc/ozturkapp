@@ -540,10 +540,11 @@ ozturk.kitchen.Screen = class KitchenScreen {
 		button.disabled = true;
 
 		try {
-			await this.call("ozturkapp.ozturkapp.api.kitchen.update_kot_item_status", {
-				kot_item: item,
-				status: next,
-			});
+			const result = await this.call(
+				"ozturkapp.ozturkapp.api.kitchen.update_kot_item_status",
+				{ kot_item: item, status: next }
+			);
+			if (result && result.print_ticket) this.printItemTicket(result.print_ticket);
 			// Muvaffaqiyat: server holatini o'qib olamiz (mahalliy taxmin emas).
 			await this.reloadKot(kot);
 		} catch (error) {
@@ -559,6 +560,39 @@ ozturk.kitchen.Screen = class KitchenScreen {
 			button.disabled = false;
 			await this.reloadKot(kot);
 		}
+	}
+
+	/**
+	 * Mahsulot "Tayyor" bo'lganda — stansiya buni yoqqan bo'lsa (`URY
+	 * Production Unit.custom_print_on_ready`), brauzerning chop etish
+	 * oynasi ochiladi.
+	 *
+	 * `restaurant_cashier.js`dagi `printReceipt()` bilan bir xil falsafa:
+	 * hech qanday printer sozlamasi TALAB QILINMAYDI, brauzer istalgan
+	 * ulangan printerga chiqara oladi. Mahsulot alohida `URY KOT Items`
+	 * qatori bo'lgani uchun (standart Print Format'i yo'q) o'zining
+	 * kichik oynasi qo'lda quriladi.
+	 */
+	printItemTicket(ticket) {
+		const w = window.open("", "_blank", "noopener,width=380,height=520");
+		if (!w) return; // popup blocklangan — mahsulot holati baribir o'zgargan
+
+		w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+			<title>${esc(ticket.item_name || "")}</title>
+			<style>
+				body { font-family: monospace; padding: 18px; text-align: center; }
+				h1 { font-size: 20px; margin: 0 0 10px; }
+				p { margin: 4px 0; font-size: 14px; }
+			</style></head><body>
+			<h1>${esc(ticket.item_name || "")} ×${cint(ticket.quantity)}</h1>
+			<p>${esc(ticket.station || "")}</p>
+			${ticket.table ? `<p>${__("Stol")}: ${esc(ticket.table)}</p>` : ""}
+			<p>${esc(ticket.kot || "")}</p>
+			<p>${esc(frappe.datetime.str_to_user(ticket.printed_at))}</p>
+		</body></html>`);
+		w.document.close();
+		w.focus();
+		w.print();
 	}
 
 	// ═══════════════════════════════════════════════════════════
