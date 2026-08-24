@@ -616,10 +616,12 @@ ozturk.kitchen.Screen = class KitchenScreen {
 				node.textContent = fmtDuration(seconds);
 
 				if (node.classList.contains("kds-elapsed")) {
-					node.classList.toggle(
-						"kds-elapsed--late",
-						seconds > KitchenScreen.LATE_MINUTES * 60
-					);
+					const ticket = node.closest(".kds-ticket");
+					const late =
+						seconds > KitchenScreen.LATE_MINUTES * 60 &&
+						!(ticket && ticket.classList.contains("kds-ticket--Served"));
+					node.classList.toggle("kds-elapsed--late", late);
+					if (ticket) ticket.classList.toggle("kds-ticket--late", late);
 				}
 			});
 	}
