@@ -485,8 +485,22 @@ def update_kot_item_status(kot_item, status):
                 "quantity": (item_row or {}).get("quantity"),
                 "table": invoice_row.get("restaurant_table") or "",
                 "station": row.production,
+                "waiter": _user_label(invoice_row.get("waiter")),
                 "printed_at": frappe.utils.now(),
             }
+            # Stansiyaga tarmoq printeri biriktirilgan bo'lsa — chek
+            # SERVER navbati orqali chiqadi (`utils/print_queue.py`),
+            # planshetga `print_ticket` QAYTARILMAYDI (ikki marta chiqmasin).
+            # Printer yo'q bo'lsa eski yo'l: brauzer chop etish oynasi.
+            try:
+                from ozturkapp.ozturkapp.utils import print_queue
+
+                if print_queue.enqueue_item_ticket(
+                    print_ticket, branch, row.production, kot=row.parent
+                ):
+                    print_ticket = None
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "kitchen: print_queue.enqueue_item_ticket")
 
     return {
         "kot_item": kot_item,
@@ -497,6 +511,13 @@ def update_kot_item_status(kot_item, status):
         "can_waiter_cancel": kitchen_status.can_waiter_cancel(target),
         "print_ticket": print_ticket,
     }
+
+
+def _user_label(user):
+    """User -> to'liq ism (chek uchun). Bo'sh bo'lsa None."""
+    if not user:
+        return None
+    return frappe.db.get_value("User", user, "full_name") or user
 
 
 def _sync_kot_order_status(kot: str):

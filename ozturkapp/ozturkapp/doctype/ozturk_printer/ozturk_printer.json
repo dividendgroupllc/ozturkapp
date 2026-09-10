@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:printer_name",
+ "creation": "2026-09-10 10:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "printer_name",
+  "enabled",
+  "branch",
+  "column_break_role",
+  "role",
+  "production_unit",
+  "section_break_network",
+  "ip_address",
+  "port",
+  "column_break_paper",
+  "paper_width",
+  "codepage",
+  "codepage_number",
+  "cut_paper",
+  "section_break_header",
+  "header_line_1",
+  "header_line_2",
+  "footer_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "printer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Printer nomi",
+   "reqd": 1,
+   "unique": 1,
+   "description": "Masalan: Kassa, Oshxona 1, Oshxona 2"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Yoqilgan"
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Filial",
+   "options": "Branch",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_role",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Kassa",
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Vazifasi",
+   "options": "Kassa\nOshxona",
+   "reqd": 1,
+   "description": "Kassa — mijoz cheki. Oshxona — KOT va \"taom tayyor\" cheklari."
+  },
+  {
+   "depends_on": "eval:doc.role=='Oshxona'",
+   "fieldname": "production_unit",
+   "fieldtype": "Link",
+   "label": "Stansiya (URY Production Unit)",
+   "mandatory_depends_on": "eval:doc.role=='Oshxona'",
+   "options": "URY Production Unit"
+  },
+  {
+   "fieldname": "section_break_network",
+   "fieldtype": "Section Break",
+   "label": "Tarmoq"
+  },
+  {
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "IP manzil",
+   "reqd": 1
+  },
+  {
+   "default": "9100",
+   "fieldname": "port",
+   "fieldtype": "Int",
+   "label": "Port",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_paper",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "80",
+   "fieldname": "paper_width",
+   "fieldtype": "Select",
+   "label": "Qog'oz eni (mm)",
+   "options": "80\n58",
+   "reqd": 1
+  },
+  {
+   "default": "cp866",
+   "fieldname": "codepage",
+   "fieldtype": "Select",
+   "label": "Kodlash",
+   "options": "cp866\ncp1251\ncp437",
+   "reqd": 1,
+   "description": "Kirill uchun cp866 (ko'p printerlarda standart)."
+  },
+  {
+   "default": "17",
+   "fieldname": "codepage_number",
+   "fieldtype": "Int",
+   "label": "ESC/POS kod jadvali raqami",
+   "description": "ESC t n. Odatda: cp866=17, cp1251=73, cp437=0. Printer hujjatiga qarang."
+  },
+  {
+   "default": "1",
+   "fieldname": "cut_paper",
+   "fieldtype": "Check",
+   "label": "Chekni kesish"
+  },
+  {
+   "fieldname": "section_break_header",
+   "fieldtype": "Section Break",
+   "label": "Chek sarlavhasi (faqat Kassa)"
+  },
+  {
+   "fieldname": "header_line_1",
+   "fieldtype": "Data",
+   "label": "Sarlavha 1-qator",
+   "description": "Bo'sh bo'lsa restoran nomi chiqadi."
+  },
+  {
+   "fieldname": "header_line_2",
+   "fieldtype": "Data",
+   "label": "Sarlavha 2-qator",
+   "description": "Manzil yoki telefon."
+  },
+  {
+   "default": "Tashrifingiz uchun rahmat!",
+   "fieldname": "footer_text",
+   "fieldtype": "Data",
+   "label": "Pastki matn"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-10 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Ozturk Printer",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
+   "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1
+  },
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
+   "read": 1, "report": 1, "role": "URY Manager", "share": 1, "write": 1
+  },
+  {"read": 1, "role": "URY Cashier"},
+  {"read": 1, "role": "URY Kitchen"},
+  {"read": 1, "role": "Print Agent"}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "printer_name",
+ "track_changes": 1
+}

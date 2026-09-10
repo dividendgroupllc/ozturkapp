@@ -287,6 +287,14 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
         "grand_total": flt(doc.grand_total),
         "rounded_total": flt(doc.rounded_total) or flt(doc.grand_total),
         "paid_amount": flt(doc.get("paid_amount")),
+        "change_amount": flt(doc.get("change_amount")),
+        "payments": [
+            {
+                "mode_of_payment": row.mode_of_payment,
+                "amount": flt(row.amount),
+            }
+            for row in doc.get("payments") or []
+        ],
         "currency": doc.currency or (scope or {}).get("currency"),
     }
 

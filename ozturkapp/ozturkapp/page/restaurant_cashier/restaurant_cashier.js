@@ -72,6 +72,8 @@ ozturk.cashier.Screen = class CashierScreen {
 		this.statusFilter = "ALL";
 		this.orderFilter = "all";
 		this.selectedTable = null;
+		this.layoutEditMode = false;
+		this.floorScale = 1;
 
 		this.selectedInvoice = null;
 
@@ -104,6 +106,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			live: this.$root.find(".rc-live")[0],
 			warnings: this.$root.find(".rc-warnings")[0],
 			filters: this.$root.find(".rc-filters")[0],
+			floorToolbar: this.$root.find(".rc-floor__toolbar")[0],
 			canvas: this.$root.find(".rc-floor__canvas")[0],
 			floorScroll: this.$root.find(".rc-floor__scroll")[0],
 			floorEmpty: this.$root.find(".rc-floor__empty")[0],
@@ -165,6 +168,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			this.renderTopbar();
 			this.renderWarnings();
 			this.renderRooms();
+			this.renderFloorToolbar();
 			this.renderOrderTabs();
 			this.subscribe();
 
@@ -648,7 +652,12 @@ ozturk.cashier.Screen = class CashierScreen {
 				this.room = e.currentTarget.dataset.room || null;
 				this.writePreference("room", this.room || "");
 				this.clearSelection();
+				// Boshqa zalga o'tilganda tahrirlash rejimi ham yopiladi —
+				// "Barcha zallar"da koordinata boshqacha hisoblanadi (TZ §4),
+				// shu bilan sudrash matematikasi noto'g'ri bo'lib qolardi.
+				this.layoutEditMode = false;
 				this.renderRooms();
+				this.renderFloorToolbar();
 				this.refreshAll();
 			});
 	}
@@ -691,6 +700,46 @@ ozturk.cashier.Screen = class CashierScreen {
 	//  Zal rejasi (TZ §4, §20)
 	// ═══════════════════════════════════════════════════════════
 
+	/**
+	 * "Joylashuvni tahrirlash" — stollarni bosib-sudrab ko'chirish rejimi.
+	 *
+	 * "Barcha zallar" ko'rinishida o'chirilgan turadi: u yerda stollar
+	 * zal blokiga qarab QO'SHIMCHA vertikal siljish bilan chiziladi
+	 * (`table_status.apply_layout(stack_rooms=True)`), ya'ni ekrandagi
+	 * piksel — saqlanadigan `layout_y` bilan bir xil EMAS. Aniq bitta zal
+	 * tanlanganda esa bu siljish yo'q — sudrab qo'yilgan joy TO'G'RIDAN-
+	 * TO'G'RI serverga yuboriladi.
+	 */
+	renderFloorToolbar() {
+		if (!this.el.floorToolbar) return;
+
+		const disabled = !this.room;
+		this.el.floorToolbar.innerHTML = `
+			<button type="button" class="rc-btn rc-btn--sm ${
+				this.layoutEditMode ? "rc-btn--primary" : ""
+			}" data-action="toggle-layout-edit" ${disabled ? "disabled" : ""}
+				title="${
+					disabled
+						? esc(__("Joylashuvni o'zgartirish uchun avval aniq zalni tanlang"))
+						: ""
+				}">
+				✥ ${esc(
+					this.layoutEditMode
+						? __("Tahrirlashni tugatish")
+						: __("Joylashuvni tahrirlash")
+				)}
+			</button>`;
+
+		$(this.el.floorToolbar)
+			.off("click")
+			.on("click", '[data-action="toggle-layout-edit"]', () => {
+				this.layoutEditMode = !this.layoutEditMode;
+				if (this.layoutEditMode) this.clearSelection();
+				this.renderFloorToolbar();
+				this.renderFloor();
+			});
+	}
+
 	renderFloor() {
 		const tables = (this.floor || {}).tables || [];
 		this.el.floorEmpty.hidden = tables.length > 0;
@@ -703,6 +752,7 @@ ozturk.cashier.Screen = class CashierScreen {
 		const extent = this.floor.extent || { width: 0, height: 0 };
 		this.el.canvas.style.width = `${extent.width}px`;
 		this.el.canvas.style.height = `${extent.height}px`;
+		this.el.canvas.classList.toggle("rc-floor__canvas--edit", this.layoutEditMode);
 
 		// "Barcha zallar" ko'rinishida har bir zal alohida blok — server
 		// ularni ustma-ust tushmaydigan qilib joylashtirgan va chegaralarini
@@ -716,7 +766,14 @@ ozturk.cashier.Screen = class CashierScreen {
 
 		$(this.el.canvas)
 			.off("click")
-			.on("click", ".rc-table", (e) => this.selectTable(e.currentTarget.dataset.table));
+			.on("click", ".rc-table", (e) => {
+				if (this.layoutEditMode) return; // shu rejimda bosish ko'chirish uchun
+				this.selectTable(e.currentTarget.dataset.table);
+			});
+
+		$(this.el.canvas)
+			.off("pointerdown")
+			.on("pointerdown", ".rc-table", (e) => this.startTableDrag(e));
 	}
 
 	/** Zal blokining sarlavhasi va ajratuvchi chizig'i.
@@ -801,6 +858,83 @@ ozturk.cashier.Screen = class CashierScreen {
 		const scale = Math.min(1, available / extent.width);
 		this.el.canvas.style.transform = `scale(${scale})`;
 		this.el.floorScroll.style.height = `${extent.height * scale + 40}px`;
+		this.floorScale = scale || 1;
+	}
+
+	/**
+	 * Stolni bosib-sudrab ko'chirish — faqat `layoutEditMode`da ishlaydi.
+	 *
+	 * Sichqoncha/barmoq siljishi tuval `scale(...)` bilan kichraytirilgan
+	 * bo'lishi mumkin (`fitFloor`), shuning uchun piksel farqi ekrandagi
+	 * (ekrandan mustaqil) koordinataga aylantirilishi uchun shu koeffitsientga
+	 * bo'linadi — aks holda katta zallarda stol sichqonchadan orqada qolib
+	 * ketardi.
+	 */
+	startTableDrag(e) {
+		if (!this.layoutEditMode) return;
+		e.preventDefault();
+
+		const el = e.currentTarget;
+		const table = el.dataset.table;
+		const scale = this.floorScale || 1;
+
+		const startX = e.clientX;
+		const startY = e.clientY;
+		const startLeft = parseFloat(el.style.left) || 0;
+		const startTop = parseFloat(el.style.top) || 0;
+		let moved = false;
+
+		el.setPointerCapture(e.pointerId);
+		el.classList.add("rc-table--dragging");
+
+		const onMove = (ev) => {
+			const dx = (ev.clientX - startX) / scale;
+			const dy = (ev.clientY - startY) / scale;
+			if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moved = true;
+
+			el.style.left = `${Math.max(0, startLeft + dx)}px`;
+			el.style.top = `${Math.max(0, startTop + dy)}px`;
+		};
+
+		const onUp = async () => {
+			el.removeEventListener("pointermove", onMove);
+			el.removeEventListener("pointerup", onUp);
+			el.removeEventListener("pointercancel", onUp);
+			el.classList.remove("rc-table--dragging");
+
+			if (!moved) return; // oddiy bosish — joy o'zgarmadi
+
+			const x = parseFloat(el.style.left) || 0;
+			const y = parseFloat(el.style.top) || 0;
+			const width = parseFloat(el.style.width) || 0;
+			const height = parseFloat(el.style.height) || 0;
+
+			try {
+				await this.call("ozturkapp.ozturkapp.api.table.update_table_layout", {
+					table,
+					x,
+					y,
+					width,
+					height,
+				});
+
+				// Keshdagi holatni ham yangilaymiz — realtime signal
+				// kelguncha zal rejasi eskirgan ko'rinmasin.
+				const cached = (this.floor.tables || []).find((t) => t.name === table);
+				if (cached) {
+					cached.layout_x = x;
+					cached.layout_y = y;
+					cached.layout = { ...(cached.layout || {}), x, y, auto: false };
+				}
+			} catch (error) {
+				frappe.show_alert({ message: this.errorText(error), indicator: "red" }, 7);
+				this.renderFloor(); // xatoda eski joyga qaytaramiz
+			}
+		};
+
+		el.addEventListener("pointermove", onMove);
+		el.addEventListener("pointerup", onUp);
+		el.addEventListener("pointercancel", onUp);
 	}
 
 	// ═══════════════════════════════════════════════════════════
@@ -1099,7 +1233,7 @@ ozturk.cashier.Screen = class CashierScreen {
 			<div class="rc-items">${items}</div>
 
 			<div class="rc-totals">
-				<div class="rc-total"><span>${esc(__("Oraliq summa"))}</span><span>${esc(
+				<div class="rc-total"><span>${esc(__("Umumiy"))}</span><span>${esc(
 			this.money(bill.subtotal)
 		)}</span></div>
 				${
@@ -1604,10 +1738,35 @@ ozturk.cashier.Screen = class CashierScreen {
 	 * URY'ning QZ/network printer oqimiga TEGILMAYDI — u oshxona cheki
 	 * (KOT) uchun va o'z holicha ishlashda davom etadi.
 	 */
-	printReceipt(detail) {
+	async printReceipt(detail) {
 		const invoice = (detail.bill || {}).invoice;
 		if (!invoice) return;
 
+		// 1) TARMOQ PRINTERI (server navbati, monoblokdagi agent orqali).
+		//    Filialga `Ozturk Printer` (Kassa) biriktirilgan bo'lsa chek
+		//    brauzersiz, to'g'ridan-to'g'ri chek printeriga chiqadi.
+		//    Printer sozlanmagan bo'lsa (`reason: no_printer`) — pastdagi
+		//    eski brauzer yo'li ishlaydi.
+		try {
+			const result = await this.call("ozturkapp.ozturkapp.api.printing.print_bill", {
+				invoice,
+			});
+			if (result && result.queued) {
+				frappe.show_alert({
+					message: result.agent_online
+						? __("Chek printerga yuborildi")
+						: __("Chek navbatga qo'yildi — print-agent hozir oflayn"),
+					indicator: result.agent_online ? "green" : "orange",
+				});
+				return;
+			}
+		} catch (error) {
+			// Server chop etish ishlamasa — brauzer yo'liga tushamiz, kassir
+			// chek bera olishi kerak.
+			console.warn("print_bill failed, falling back to browser print", error);
+		}
+
+		// 2) BRAUZER (zaxira yo'l).
 		const params = new URLSearchParams({
 			doctype: "POS Invoice",
 			name: invoice,
@@ -2383,6 +2542,27 @@ ozturk.cashier.Screen = class CashierScreen {
 
 		const invoice = bill.invoice || bill.order;
 
+		const payments = bill.payments || [];
+		const paymentTypes = payments.length
+			? payments.map((p) => p.mode_of_payment).join(", ")
+			: "—";
+
+		const paymentDetails = payments.length
+			? `<div class="rc-payment-details">
+					<div class="rc-payment-details__title">${esc(
+						__("To'lov tafsilotlari")
+					)}</div>
+					${payments
+						.map(
+							(p) => `<div class="rc-total rc-total--payment">
+								<span>${esc(p.mode_of_payment)}</span>
+								<span>${esc(this.money(p.amount))}</span>
+							</div>`
+						)
+						.join("")}
+				</div>`
+			: "";
+
 		$detail.html(`
 			<button class="rc-btn" type="button" data-action="history-back">← ${esc(
 				__("Orqaga")
@@ -2395,8 +2575,8 @@ ozturk.cashier.Screen = class CashierScreen {
 					__("Ofitsant")
 				)}</div><div class="rc-fact__value">${esc(bill.waiter_name || "—")}</div></div>
 				<div class="rc-fact"><div class="rc-fact__label">${esc(
-					__("Mijoz")
-				)}</div><div class="rc-fact__value">${esc(bill.customer_name || "—")}</div></div>
+					__("To'lov turi")
+				)}</div><div class="rc-fact__value">${esc(paymentTypes)}</div></div>
 				<div class="rc-fact"><div class="rc-fact__label">${esc(
 					__("Kassir")
 				)}</div><div class="rc-fact__value">${esc(bill.cashier_name || "—")}</div></div>
@@ -2404,12 +2584,18 @@ ozturk.cashier.Screen = class CashierScreen {
 			<div class="rc-items" style="margin-top:10px">${items}</div>
 			<div class="rc-totals">
 				<div class="rc-total"><span>${esc(
-					__("Oraliq summa")
+					__("Umumiy")
 				)}</span><span>${esc(this.money(bill.subtotal))}</span></div>
 				${taxes}
+			</div>
+			${paymentDetails}
+			<div class="rc-totals">
 				<div class="rc-total rc-total--grand"><span>${esc(
 					__("Jami")
 				)}</span><span>${esc(this.money(bill.rounded_total))}</span></div>
+				<div class="rc-total rc-total--change"><span>${esc(
+					__("Qaytim")
+				)}</span><span>${esc(this.money(bill.change_amount))}</span></div>
 			</div>
 			<div class="rc-actions">
 				<button class="rc-btn rc-btn--primary" type="button" data-action="reprint-history"
@@ -2470,7 +2656,6 @@ ozturk.cashier.Screen = class CashierScreen {
 						<span class="rc-order__amount">${esc(this.money(order.amount))}</span>
 					</div>
 					<div class="rc-order__meta">
-						${esc(order.invoice)}<br>
 						${esc(order.waiter_name || "—")} · ${cint(order.elapsed_minutes)} ${esc(__("daq"))}
 						${order.customer_name ? ` · ${esc(order.customer_name)}` : ""}
 					</div>

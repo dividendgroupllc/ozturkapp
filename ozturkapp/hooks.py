@@ -91,6 +91,10 @@ scheduler_events = {
 		"ozturkapp.ozturkapp.utils.bom_valuation.sync_all",
 	],
 	"cron": {
+		# Chop etish navbati: agent javob bermay qolgan topshiriqlarni qaytarish.
+		"* * * * *": [
+			"ozturkapp.ozturkapp.utils.print_queue.recover_stale"
+		],
 		# Har 5 daqiqada tekshiriladi, lekin qaysi filial haqiqatan
 		# hisoblanishi `interval_minutes` va sikl kaliti bilan belgilanadi —
 		# bu yerdagi qadam faqat aniqlik chegarasi.

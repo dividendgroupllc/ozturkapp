@@ -31,6 +31,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.ury_permissions import create_permissions
 	from ozturkapp.ozturkapp.setup.bill_split_setup import setup as setup_bill_split
 	from ozturkapp.ozturkapp.setup.virtual_keyboard_setup import setup as setup_virtual_keyboard
+	from ozturkapp.ozturkapp.setup.print_setup import setup as setup_printing
 
 	tasks = [
 		create_fields,
@@ -59,6 +60,8 @@ def run():
 		setup_bill_split,
 		# Kassa yopish/to'lov ekranidagi virtual klaviatura — yoqish/o'chirish.
 		setup_virtual_keyboard,
+		# Chop etish navbati — `Print Agent` roli va agent foydalanuvchisi.
+		setup_printing,
 	]
 	for fn in tasks:
 		try:

@@ -158,8 +158,22 @@
 	min-height: 420px;
 	overflow: hidden;
 }
+.rc-floor__toolbar {
+	display: flex; justify-content: flex-end;
+	padding: 8px 10px; border-bottom: 1px solid var(--rc-border);
+}
 .rc-floor__scroll { overflow: auto; padding: 20px; height: 100%; }
 .rc-floor__canvas { position: relative; transform-origin: 0 0; }
+
+/* Tahrirlash rejimi — stollar sudralishi mumkin (TZ-tashqi, drag-and-drop). */
+.rc-floor__canvas--edit .rc-table { cursor: grab; touch-action: none; }
+.rc-floor__canvas--edit .rc-table:active,
+.rc-table--dragging {
+	cursor: grabbing;
+	transition: none;
+	box-shadow: 0 8px 22px rgba(0,0,0,.18);
+	z-index: 5;
+}
 
 /* Zal bloki — faqat "Barcha zallar" ko'rinishida (TZ §4).
  *
@@ -287,10 +301,25 @@
 .rc-totals { margin-top: 12px; font-size: 13px; }
 .rc-total { display: flex; justify-content: space-between; padding: 4px 0; }
 .rc-total--service { color: var(--rc-reserved); font-weight: 600; }
+
+.rc-payment-details { margin-top: 12px; font-size: 13px; }
+.rc-payment-details__title {
+	margin-top: 6px; padding-top: 10px;
+	border-top: 2px solid var(--rc-border);
+	font-size: 11px; font-weight: 700; color: var(--rc-muted);
+	text-transform: uppercase; letter-spacing: .04em;
+	margin-bottom: 4px;
+}
+.rc-total--payment { color: var(--rc-muted); }
 .rc-total--grand {
 	margin-top: 6px; padding-top: 10px;
 	border-top: 2px solid var(--rc-border);
 	font-size: 18px; font-weight: 700;
+}
+.rc-total--change {
+	margin-top: 6px; padding-top: 10px;
+	border-top: 1px dashed var(--rc-border);
+	color: var(--rc-available); font-weight: 700;
 }
 
 .rc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
@@ -309,6 +338,7 @@
 .rc-btn--pay     { background: var(--rc-available); border-color: var(--rc-available); color: #fff; font-size: 16px; min-height: 54px; }
 .rc-btn--danger  { color: var(--rc-occupied); border-color: var(--rc-occupied); }
 .rc-btn--busy    { pointer-events: none; opacity: .6; }
+.rc-btn--sm      { min-height: 32px; padding: 5px 12px; font-size: 12.5px; }
 
 .rc-hint { font-size: 11.5px; color: var(--rc-muted); margin-top: 8px; line-height: 1.4; }
 

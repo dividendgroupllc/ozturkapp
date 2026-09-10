@@ -116,6 +116,16 @@ def on_kot_submit(doc, method=None):
         doc.get("production"), doc.get("invoice"),
     )
 
+    # YANGI BUYURTMA -> OSHXONA PRINTERI (tarmoq printeri, agent orqali).
+    # Stansiyaga `Ozturk Printer` biriktirilmagan bo'lsa hech narsa
+    # bo'lmaydi. Xato bo'lsa ham KOT oqimi TO'XTAMAYDI — Error Log'ga yoziladi.
+    try:
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        print_queue.enqueue_kot(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "kitchen_realtime: print_queue.enqueue_kot")
+
     # YANGI BUYURTMA -> OSHXONAGA xabar.
     #
     # Bildirishnoma AYNAN shu yerda, `waiter.submit_order()` da EMAS:

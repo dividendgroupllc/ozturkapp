@@ -1,0 +1,10 @@
+{
+  "site_url": "https://ozturk.erpcontrol.uz",
+  "api_key": "KALIT",
+  "api_secret": "SEKRET",
+  "branch": "O'zTurk Maksim Gorkiy",
+  "agent_name": "kassa-monoblok",
+  "poll_interval_sec": 2,
+  "heartbeat_interval_sec": 20,
+  "printer_timeout_sec": 5
+}

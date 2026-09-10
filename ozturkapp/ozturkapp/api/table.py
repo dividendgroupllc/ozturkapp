@@ -17,7 +17,7 @@ frontend darajasidagi bloklash ishonchsiz.
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, flt
 
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change
@@ -192,6 +192,35 @@ def _resolve_table_state(table: str, scope) -> dict:
 # ═══════════════════════════════════════════════════════════════════
 #  Yozish
 # ═══════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def update_table_layout(table, x, y, width=None, height=None):
+    """Zal rejasida stolni surib qo'yish (drag-and-drop) — joyini saqlaydi.
+
+    Har qanday kassir o'zgartira oladi — bu sotuvga taalluqli emas, faqat
+    zal rejasining ko'rinishi, shuning uchun menejer huquqi talab qilinmaydi.
+
+    `width`/`height` ixtiyoriy: birinchi marta ko'chirilayotgan (hali
+    hech qachon joylashtirilmagan) stol uchun ham yuboriladi — aks holda
+    to'rttala `layout_*` maydon nolga teng qolib, stol yana avtomatik
+    to'rga qaytib ketardi (`table_status.is_positioned`).
+    """
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+    cashier_permissions.assert_table_in_scope(table, scope)
+
+    values = {"layout_x": flt(x), "layout_y": flt(y)}
+    if width is not None:
+        values["layout_width"] = flt(width) or table_status.DEFAULT_TABLE_WIDTH
+    if height is not None:
+        values["layout_height"] = flt(height) or table_status.DEFAULT_TABLE_HEIGHT
+
+    frappe.db.set_value("URY Table", table, values, update_modified=False)
+
+    emit_floor_change(scope.branch, [table], "TABLE_LAYOUT_UPDATED")
+
+    return {"table": table, **values}
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  Bron — kassir bo'sh stolni bron qiladi / bronni yechadi
