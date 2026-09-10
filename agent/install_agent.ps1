@@ -19,8 +19,8 @@ $Target = "C:\OzturkPrintAgent"
 $Src = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 if ($Uninstall) {
-    schtasks /End /TN $TaskName 2>$null | Out-Null
-    schtasks /Delete /TN $TaskName /F 2>$null | Out-Null
+    cmd /c "schtasks /End /TN `"$TaskName`" >nul 2>&1"
+    cmd /c "schtasks /Delete /TN `"$TaskName`" /F >nul 2>&1"
     Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*OzturkPrintAgent.ps1*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     Write-Host "O'chirildi: vazifa '$TaskName'. Papka qoldirildi: $Target"
     exit 0
@@ -39,7 +39,7 @@ if (-not (Test-Path (Join-Path $Target "config.json"))) {
 
 $action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Target\OzturkPrintAgent.ps1`""
 
-schtasks /Delete /TN $TaskName /F 2>$null | Out-Null
+cmd /c "schtasks /Delete /TN `"$TaskName`" /F >nul 2>&1"
 schtasks /Create /TN $TaskName /SC ONSTART /RU "SYSTEM" /RL HIGHEST /F /TR $action | Out-Null
 
 # Qo'shimcha sozlamalar (yiqilsa qayta ishga tushirish, vaqt chegarasi yo'q)
@@ -52,5 +52,9 @@ Set-ScheduledTask -TaskName $TaskName -Settings $settings | Out-Null
 schtasks /Run /TN $TaskName | Out-Null
 Start-Sleep -Seconds 3
 Write-Host "O'rnatildi. Holat:"
-schtasks /Query /TN $TaskName /FO LIST | Select-String "TaskName|Status|Next Run"
+$t = Get-ScheduledTask -TaskName $TaskName
+$i = Get-ScheduledTaskInfo -TaskName $TaskName
+Write-Host ("  Vazifa    : {0}" -f $t.TaskName)
+Write-Host ("  Holat     : {0}" -f $t.State)
+Write-Host ("  Oxirgi run: {0} (kod {1})" -f $i.LastRunTime, $i.LastTaskResult)
 Write-Host "Log: $Target\agent.log"

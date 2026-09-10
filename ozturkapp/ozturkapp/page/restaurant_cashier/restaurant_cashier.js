@@ -1742,31 +1742,73 @@ ozturk.cashier.Screen = class CashierScreen {
 		const invoice = (detail.bill || {}).invoice;
 		if (!invoice) return;
 
-		// 1) TARMOQ PRINTERI (server navbati, monoblokdagi agent orqali).
-		//    Filialga `Ozturk Printer` (Kassa) biriktirilgan bo'lsa chek
-		//    brauzersiz, to'g'ridan-to'g'ri chek printeriga chiqadi.
-		//    Printer sozlanmagan bo'lsa (`reason: no_printer`) — pastdagi
-		//    eski brauzer yo'li ishlaydi.
+		// Chek TARMOQ PRINTERIGA chiqadi — server navbati va monoblokdagi
+		// agent orqali, xuddi oshxonadagi "Tayyor" tugmasi kabi. Kassir
+		// tugmani bosadi, chek printerdan chiqadi; brauzer oynasi O'ZI
+		// OCHILMAYDI.
+		let queued = null;
+		let failure = null;
+
 		try {
-			const result = await this.call("ozturkapp.ozturkapp.api.printing.print_bill", {
-				invoice,
+			// `this.call()` ATAYLAB ishlatilmaydi: u faqat `r.message` ni
+			// qaytaradi va serverning `r.exc` xatosini yutib yuboradi. Bu
+			// yerda nosozlik SABABI kerak, aks holda u yana yashirin qoladi.
+			const response = await frappe.call({
+				method: "ozturkapp.ozturkapp.api.printing.print_bill",
+				args: { invoice },
+				freeze: false,
+				silent: true,
 			});
-			if (result && result.queued) {
-				frappe.show_alert({
-					message: result.agent_online
-						? __("Chek printerga yuborildi")
-						: __("Chek navbatga qo'yildi — print-agent hozir oflayn"),
-					indicator: result.agent_online ? "green" : "orange",
-				});
-				return;
+			const result = (response && response.message) || null;
+
+			if (response && response.exc) {
+				failure = this.errorText(response);
+			} else if (result && result.queued) {
+				queued = result;
+			} else if (result && result.reason === "no_printer") {
+				failure = __("Filialga kassa printeri biriktirilmagan (Ozturk Printer).");
+			} else {
+				failure = __("Server chekni navbatga qo'ymadi (bo'sh javob).");
 			}
 		} catch (error) {
-			// Server chop etish ishlamasa — brauzer yo'liga tushamiz, kassir
-			// chek bera olishi kerak.
-			console.warn("print_bill failed, falling back to browser print", error);
+			failure = this.errorText(error);
 		}
 
-		// 2) BRAUZER (zaxira yo'l).
+		if (queued) {
+			frappe.show_alert({
+				message: queued.agent_online
+					? __("Chek printerga yuborildi")
+					: __("Chek navbatga qo'yildi — print-agent hozir oflayn"),
+				indicator: queued.agent_online ? "green" : "orange",
+			});
+			return;
+		}
+
+		// Bu yerga tushdik — chek printerga BORMADI. Ilgari kod shu joyda
+		// jimgina brauzer oynasini ochardi: kassir nosozlikni sezmasdi,
+		// Error Log bo'sh qolardi va sabab hech qayerda ko'rinmasdi.
+		// Endi sabab ekranda; brauzer yo'li faqat kassir O'ZI tanlasa.
+		const dialog = frappe.msgprint({
+			title: __("Chek printerga chiqmadi"),
+			indicator: "red",
+			message: failure || __("Noma'lum xato"),
+			primary_action: {
+				label: __("Brauzer orqali chop etish"),
+				action: () => {
+					if (dialog && dialog.hide) dialog.hide();
+					this.openBrowserPrint(invoice);
+				},
+			},
+		});
+	}
+
+	/**
+	 * Zaxira yo'l — brauzerning chop etish oynasi.
+	 *
+	 * FAQAT kassir o'zi tanlaganda chaqiriladi (`printReceipt` xato
+	 * dialogidagi tugma). Avtomatik ochilmaydi.
+	 */
+	openBrowserPrint(invoice) {
 		const params = new URLSearchParams({
 			doctype: "POS Invoice",
 			name: invoice,

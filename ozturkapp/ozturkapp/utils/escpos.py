@@ -421,44 +421,60 @@ def build_kot(kot: dict, printer) -> bytes:
 
     `kot` = {"station", "kot", "order_number", "table", "waiter", "time",
              "type", "comments", "items": [{"item_name", "qty", "comment"}]}
+
+    O'NG TEKISLASH
+    ==============
+    Oshxona printerining CHAP chekkasi bo'yalib chiqadi (apparat nuqsoni),
+    shuning uchun butun chek O'NGGA yopishtiriladi (`ESC a 2`). To'liq
+    kenglikdagi ajratgich ishlatilmaydi — u chap chekkani ham to'ldirib,
+    bo'yalgan zonaga tushardi; o'rniga o'ngga yopishgan qisqa ajratgich.
     """
     r = _receipt_for(printer)
+    align = "right"
+    sep = "=" * min(24, r.columns)
+
     station = kot.get("station") or "OSHXONA"
-    r.text(station.upper(), align="center", bold=True, size="double")
+    r.text(station.upper(), align=align, bold=True, size="double")
     if kot.get("type") and kot["type"] not in ("Order", "New Order"):
-        r.text(str(kot["type"]).upper(), align="center", bold=True)
+        r.text(str(kot["type"]).upper(), align=align, bold=True)
     r.feed(1)
-    r.pair(f"Buyurtma: {kot.get('order_number') or kot.get('kot') or ''}", fmt_dt(kot.get("time")))
+    r.text(f"Buyurtma: {kot.get('order_number') or kot.get('kot') or ''}", align=align)
+    r.text(fmt_dt(kot.get("time")), align=align)
     if kot.get("table"):
-        r.text(f"STOL: {kot['table']}", bold=True, size="tall")
+        r.text(f"STOL: {kot['table']}", align=align, bold=True, size="tall")
     if kot.get("waiter"):
-        r.line(f"Ofitsiant: {kot['waiter']}")
-    r.rule("=")
+        r.text(f"Ofitsiant: {kot['waiter']}", align=align)
+    r.text(sep, align=align)
     for item in kot.get("items") or []:
         qty = fmt_qty(item.get("qty"))
-        r.text(f"{qty} x {item.get('item_name') or ''}", bold=True, size="tall")
+        r.text(f"{qty} x {item.get('item_name') or ''}", align=align, bold=True, size="tall")
         if item.get("comment"):
-            r.line(f"    * {item['comment']}")
-    r.rule("=")
+            r.text(f"* {item['comment']}", align=align)
+    r.text(sep, align=align)
     if kot.get("comments"):
-        r.line(f"Izoh: {kot['comments']}")
+        r.text(f"Izoh: {kot['comments']}", align=align)
     return r.finish()
 
 
 def build_item_ticket(ticket: dict, printer) -> bytes:
-    """"Taom tayyor" cheki — bitta mahsulot uchun (oshxona planshetidan)."""
+    """"Taom tayyor" cheki — bitta mahsulot uchun (oshxona planshetidan).
+
+    Xuddi KOT kabi O'NGGA yopishtiriladi — bir xil oshxona printeri, bir
+    xil chap-chekka nuqsoni.
+    """
     r = _receipt_for(printer)
-    r.text("TAYYOR", align="center", bold=True, size="double")
+    align = "right"
+    r.text("TAYYOR", align=align, bold=True, size="double")
     r.feed(1)
     r.text(f"{fmt_qty(ticket.get('quantity'))} x {ticket.get('item_name') or ''}",
-           align="center", bold=True, size="tall")
+           align=align, bold=True, size="tall")
     if ticket.get("table"):
-        r.text(f"Stol: {ticket['table']}", align="center", size="tall")
+        r.text(f"Stol: {ticket['table']}", align=align, size="tall")
     if ticket.get("station"):
-        r.text(str(ticket["station"]), align="center")
+        r.text(str(ticket["station"]), align=align)
     if ticket.get("waiter"):
-        r.text(f"Ofitsiant: {ticket['waiter']}", align="center")
-    r.text(fmt_dt(ticket.get("printed_at")), align="center")
+        r.text(f"Ofitsiant: {ticket['waiter']}", align=align)
+    r.text(fmt_dt(ticket.get("printed_at")), align=align)
     return r.finish()
 
 

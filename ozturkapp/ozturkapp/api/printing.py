@@ -10,7 +10,9 @@
     get_status()          -> agent onlaynmi, navbatda nechta, printerlar
 
 Printer sozlanmagan bo'lsa `print_bill` `{"queued": null, "reason": "no_printer"}`
-qaytaradi va sahifa eski brauzer-chop etishga tushadi.
+qaytaradi. Sahifa bunda brauzer oynasini O'ZI OCHMAYDI — sababni kassirga
+ko'rsatadi va brauzer yo'lini faqat kassir tanlasa ishlatadi
+(`restaurant_cashier.js: printReceipt`).
 """
 
 import frappe
@@ -26,7 +28,17 @@ def _resolve_branch_for_user():
 
 @frappe.whitelist()
 def print_bill(invoice):
-    """Mijoz chekini navbatga qo'yish (giveBill, reprint, split)."""
+    """Mijoz chekini navbatga qo'yish (giveBill, reprint, split).
+
+    HAR BIR CHAQIRUV LOGGA YOZILADI (`logs/ozturk_print.log`). Sababi:
+    kassa sahifasi nosozlikni jimgina yutib yuborgan holat bo'lgan —
+    chek chiqmasdi, Error Log esa bo'sh qolardi va so'rov serverga
+    yetib kelgan-kelmagani ham noma'lum edi. Log shu savolga javob
+    beradi: yozuv bor bo'lsa muammo serverda, yo'q bo'lsa — brauzerda.
+    """
+    logger = frappe.logger("ozturk_print")
+    logger.info("print_bill: invoice=%s user=%s", invoice, frappe.session.user)
+
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
     # docstatus tekshirilmaydi: to'langan (submit) chekni ham qayta chop etish mumkin.
@@ -34,8 +46,10 @@ def print_bill(invoice):
 
     job = print_queue.enqueue_bill(invoice, scope)
     if not job:
+        logger.warning("print_bill: kassa printeri topilmadi (filial=%s)", scope.branch)
         return {"queued": None, "reason": "no_printer"}
     agent = print_queue.agent_status(scope.branch)
+    logger.info("print_bill: %s -> %s (agent_online=%s)", invoice, job, agent["online"])
     return {"queued": job, "agent_online": agent["online"]}
 
 

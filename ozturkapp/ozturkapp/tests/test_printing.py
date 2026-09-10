@@ -33,15 +33,31 @@ def _decode_escpos(raw: bytes, start: str = "cp866") -> str:
     if c857 is not None:
         num2cp[c857] = "cp857"
     out, cp, i = [], start, 0
-    while i < len(raw):
-        if raw[i] == 0x1B and i + 2 < len(raw) and raw[i + 1] == ord("t"):
-            cp = num2cp.get(raw[i + 2], cp)
-            i += 3
+    n = len(raw)
+    while i < n:
+        b = raw[i]
+        if b == 0x1B and i + 1 < n:  # ESC
+            nxt = raw[i + 1]
+            if nxt == ord("t") and i + 2 < n:      # ESC t n — kod jadvali
+                cp = num2cp.get(raw[i + 2], cp)
+                i += 3
+            elif nxt == ord("@"):                   # ESC @ — init (2 bayt)
+                i += 2
+            elif nxt in (ord("a"), ord("E"), ord("!")) and i + 2 < n:  # ESC a/E/! n
+                i += 3
+            else:
+                i += 2
             continue
-        if raw[i] in (0x1B, 0x1D):  # boshqa ESC/GS buyruqlari — o'tkazib yuboramiz
-            i += 3 if raw[i] == 0x1B else 4
+        if b == 0x1D and i + 1 < n:  # GS
+            nxt = raw[i + 1]
+            if nxt == ord("!") and i + 2 < n:       # GS ! n — o'lcham
+                i += 3
+            elif nxt in (ord("V"), ord("L")) and i + 3 < n:  # GS V m n / GS L nL nH
+                i += 4
+            else:
+                i += 3
             continue
-        out.append(bytes([raw[i]]).decode(cp, errors="replace"))
+        out.append(bytes([b]).decode(cp, errors="replace"))
         i += 1
     return "".join(out)
 
@@ -89,6 +105,34 @@ class TestEscpos(FrappeTestCase):
     def test_wrap_long_words(self):
         self.assertEqual(escpos.Receipt.wrap("abcdefghij", 4), ["abcd", "efgh", "ij"])
         self.assertEqual(escpos.Receipt.wrap("aa bb cc", 5), ["aa bb", "cc"])
+
+    def test_kot_is_right_aligned(self):
+        # Oshxona printerining chap chekkasi bo'yaladi — KOT o'ngga yopishishi kerak.
+        printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
+        kot = {
+            "station": "Oshxona", "order_number": "7", "table": "5", "waiter": "Ali",
+            "time": "2026-09-10 13:20:00", "type": "New Order",
+            "items": [{"item_name": "Lag'mon", "qty": 2, "comment": "achchiq"}],
+        }
+        raw = escpos.build_kot(kot, printer)
+        # Har bir qator o'ngga tekislangan (ESC a 2), markazlash (ESC a 1) yo'q
+        self.assertGreater(raw.count(b"\x1ba\x02"), 0)
+        self.assertEqual(raw.count(b"\x1ba\x01"), 0)
+        # To'liq kenglikdagi ajratgich yo'q (u chap bo'yalgan zonaga tushardi)
+        self.assertNotIn(b"=" * 48, raw)
+        txt = _decode_escpos(raw)
+        self.assertIn("Lag'mon", txt)
+        self.assertIn("STOL: 5", txt)
+
+    def test_item_ticket_is_right_aligned(self):
+        printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
+        raw = escpos.build_item_ticket(
+            {"item_name": "Choy", "quantity": 1, "table": "3", "station": "Bar",
+             "printed_at": "2026-09-10 13:25:00"},
+            printer,
+        )
+        self.assertGreater(raw.count(b"\x1ba\x02"), 0)
+        self.assertEqual(raw.count(b"\x1ba\x01"), 0)
 
     def test_build_bill_58mm(self):
         printer = {"paper_width": "58", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
