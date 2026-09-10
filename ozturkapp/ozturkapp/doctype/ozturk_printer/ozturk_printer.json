@@ -20,6 +20,7 @@
   "paper_width",
   "codepage",
   "codepage_number",
+  "allow_codepage_switch",
   "cut_paper",
   "section_break_header",
   "header_line_1",
@@ -123,6 +124,13 @@
    "description": "ESC t n. Odatda: cp866=17, cp1251=73, cp437=0. Printer hujjatiga qarang."
   },
   {
+   "fieldname": "allow_codepage_switch",
+   "fieldtype": "Check",
+   "label": "Kod jadvalini almashtirish (ESC t)",
+   "default": "0",
+   "description": "Asosiy jadvalga sig'magan harf uchun chek ichida boshqa kod jadvaliga o'tiladi (turkcha Ö -> cp437). BARCHA printerlar buni qo'llamaydi: qo'llamagani almashuvni e'tiborsiz qoldiradi va harf o'rniga axlat bosadi (Ö -> Щ). O'chirilganda harflar lotin asosiga tushiriladi (Ö -> O) — xunukroq, lekin DOIM o'qiladi. Yoqishdan oldin printerda sinab ko'ring."
+  },
+  {
    "default": "1",
    "fieldname": "cut_paper",
    "fieldtype": "Check",
@@ -162,16 +170,41 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
-   "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
   },
   {
-   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1,
-   "read": 1, "report": 1, "role": "URY Manager", "share": 1, "write": 1
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "URY Manager",
+   "share": 1,
+   "write": 1
   },
-  {"read": 1, "role": "URY Cashier"},
-  {"read": 1, "role": "URY Kitchen"},
-  {"read": 1, "role": "Print Agent"}
+  {
+   "read": 1,
+   "role": "URY Cashier"
+  },
+  {
+   "read": 1,
+   "role": "URY Kitchen"
+  },
+  {
+   "read": 1,
+   "role": "Print Agent"
+  }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",

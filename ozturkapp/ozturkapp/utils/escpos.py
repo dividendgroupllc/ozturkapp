@@ -93,13 +93,18 @@ def codepage_number(codepage: str):
     return CODEPAGE_NUMBERS.get(codepage)
 
 
-def _pick_codepage(ch: str, active: str, primary: str):
+def _pick_codepage(ch: str, active: str, primary: str, allow_switch: bool = True):
     """Harfni kodlay oladigan jadval.
 
     Avval JORIY jadval sinaladi — shunda ketma-ket turkcha harflar uchun
     har safar `ESC t n` yuborilmaydi. Keyin asosiy, keyin zaxiralar.
+
+    `allow_switch=False` bo'lsa FAQAT asosiy jadval sinaladi. Diqqat: uni
+    butunlay o'tkazib yuborish MUMKIN EMAS — aks holda oddiy ASCII harf
+    ham jadvalsiz qolib `?` ga aylanadi (`ÖzTürk` -> `O??u??`).
     """
-    for cp in (active, primary, *FALLBACK_CODEPAGES):
+    candidates = (active, primary, *FALLBACK_CODEPAGES) if allow_switch else (primary,)
+    for cp in candidates:
         if cp != primary and codepage_number(cp) is None:
             continue        # raqami noma'lum jadvalga o'tib bo'lmaydi
         try:
@@ -118,7 +123,8 @@ def normalize(text) -> str:
     return s
 
 
-def encode_text(text: str, codepage: str, codepage_number_: int | None = None) -> bytes:
+def encode_text(text: str, codepage: str, codepage_number_: int | None = None,
+                allow_switch: bool = True) -> bytes:
     """Matnni kod jadvaliga o'tkazish; sig'magan harf uchun jadval almashadi.
 
     Butun satrni bir yo'la kodlashga urinamiz (tez yo'l — 99% hollarda
@@ -144,7 +150,7 @@ def encode_text(text: str, codepage: str, codepage_number_: int | None = None) -
     out = bytearray()
     active = codepage
     for ch in text:
-        cp = _pick_codepage(ch, active, codepage)
+        cp = _pick_codepage(ch, active, codepage, allow_switch)
         if cp is None:
             alt = _TRANSLIT.get(ch)
             if alt is None:
@@ -192,11 +198,12 @@ class Receipt:
     """Chek quruvchi — matnli qatorlarni ESC/POS baytlarga yig'adi."""
 
     def __init__(self, columns: int = 48, codepage: str = "cp866", codepage_number: int = 17,
-                 cut: bool = True):
+                 cut: bool = True, allow_switch: bool = True):
         self.columns = cint(columns) or 48
         self.codepage = (codepage or "cp866").lower()
         self.codepage_number = cint(codepage_number)
         self.cut = bool(cut)
+        self.allow_switch = bool(allow_switch)
         self._buf = bytearray()
         self._buf += ESC + b"@"                                 # init
         self._buf += ESC + b"t" + bytes([self.codepage_number & 0xFF])  # kod jadvali
@@ -204,7 +211,7 @@ class Receipt:
 
     # ── past daraja ────────────────────────────────────────────
     def _enc(self, text: str) -> bytes:
-        return encode_text(text, self.codepage, self.codepage_number)
+        return encode_text(text, self.codepage, self.codepage_number, self.allow_switch)
 
     def raw(self, data: bytes):
         self._buf += data
@@ -336,6 +343,12 @@ def _receipt_for(printer) -> Receipt:
         codepage=get("codepage") or "cp866",
         codepage_number=get("codepage_number") if get("codepage_number") is not None else 17,
         cut=bool(cint(get("cut_paper", 1))),
+        # ATAYLAB o'chiq (`default: 0`). Almashuvni qo'llamaydigan printer
+        # `ESC t n` ni e'tiborsiz qoldiradi va harf o'rniga axlat bosadi
+        # (Ö -> Щ, chunki 0x99 cp866 da Щ). Transliteratsiya xunukroq,
+        # lekin har qanday printerda o'qiladi. Printerda sinab ko'rgach
+        # `Ozturk Printer` da yoqiladi.
+        allow_switch=bool(cint(get("allow_codepage_switch", 0))),
     )
 
 
@@ -422,15 +435,14 @@ def build_kot(kot: dict, printer) -> bytes:
     `kot` = {"station", "kot", "order_number", "table", "waiter", "time",
              "type", "comments", "items": [{"item_name", "qty", "comment"}]}
 
-    O'NG TEKISLASH
-    ==============
-    Oshxona printerining CHAP chekkasi bo'yalib chiqadi (apparat nuqsoni),
-    shuning uchun butun chek O'NGGA yopishtiriladi (`ESC a 2`). To'liq
-    kenglikdagi ajratgich ishlatilmaydi — u chap chekkani ham to'ldirib,
-    bo'yalgan zonaga tushardi; o'rniga o'ngga yopishgan qisqa ajratgich.
+    MARKAZLASH
+    ==========
+    Butun chek MARKAZDA chiqadi (`ESC a 1`) — oshxona xodimi uchun o'qishga
+    qulay va chap/o'ng chekkalarga yopishmaydi. Ajratgich ham qisqa va
+    markazlangan.
     """
     r = _receipt_for(printer)
-    align = "right"
+    align = "center"
     sep = "=" * min(24, r.columns)
 
     station = kot.get("station") or "OSHXONA"
@@ -459,11 +471,10 @@ def build_kot(kot: dict, printer) -> bytes:
 def build_item_ticket(ticket: dict, printer) -> bytes:
     """"Taom tayyor" cheki — bitta mahsulot uchun (oshxona planshetidan).
 
-    Xuddi KOT kabi O'NGGA yopishtiriladi — bir xil oshxona printeri, bir
-    xil chap-chekka nuqsoni.
+    Xuddi KOT kabi MARKAZDA chiqadi.
     """
     r = _receipt_for(printer)
-    align = "right"
+    align = "center"
     r.text("TAYYOR", align=align, bold=True, size="double")
     r.feed(1)
     r.text(f"{fmt_qty(ticket.get('quantity'))} x {ticket.get('item_name') or ''}",

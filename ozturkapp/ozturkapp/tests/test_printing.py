@@ -85,6 +85,38 @@ class TestEscpos(FrappeTestCase):
         # O'zbek/tipografik apostrof ASCII '.' ga normallashadi (jadval kerak emas)
         self.assertEqual(escpos.encode_text("sho‘rva", "cp866"), b"sho'rva")
 
+    def test_encode_no_switch_falls_back_to_latin(self):
+        """`allow_switch=False` — jadval almashmaydi, harflar LOTINGA tushadi.
+
+        Barcha printerlar `ESC t n` ni chek ichida qo'llamaydi: qo'llamagani
+        almashuvni e'tiborsiz qoldiradi va `Ö` o'rniga `Щ` bosadi (0x99 cp866
+        da Щ). Shu holat uchun transliteratsiya YAGONA ishonchli yo'l.
+
+        Diqqat: asosiy jadval baribir sinalishi shart — bir marta uni
+        o'tkazib yuborish oddiy ASCII harflarni ham `?` ga aylantirgan edi
+        (`ÖzTürk` -> `O??u??`).
+        """
+        out = escpos.encode_text("ÖzTürk DÖNER", "cp866", 17, allow_switch=False)
+        self.assertEqual(out, b"OzTurk DONER")
+        self.assertNotIn(b"\x1bt", out)          # hech qanday almashuv yo'q
+        # Kirill asosiy jadvalda — almashuvsiz ham to'g'ri chiqadi.
+        self.assertEqual(
+            escpos.encode_text("Нахт", "cp866", 17, allow_switch=False),
+            "Нахт".encode("cp866"),
+        )
+
+    def test_receipt_defaults_to_no_codepage_switch(self):
+        """`Ozturk Printer` da yoqilmagan bo'lsa — almashuv O'CHIQ.
+
+        Xavfsiz standart: yangi printer qo'shilganda u sinovdan o'tmagan
+        bo'ladi, shuning uchun avval o'qiladigan (lotin) variant ishlaydi.
+        """
+        printer = {"paper_width": "80", "codepage": "cp866",
+                   "codepage_number": 17, "cut_paper": 1}
+        self.assertFalse(escpos._receipt_for(printer).allow_switch)
+        printer["allow_codepage_switch"] = 1
+        self.assertTrue(escpos._receipt_for(printer).allow_switch)
+
     def test_encode_pure_ascii_fast_path(self):
         # ASCII matn hech qanday ESC almashuvisiz, to'g'ridan-to'g'ri
         self.assertEqual(escpos.encode_text("Jami: 150 000", "cp866"), b"Jami: 150 000")
@@ -106,8 +138,8 @@ class TestEscpos(FrappeTestCase):
         self.assertEqual(escpos.Receipt.wrap("abcdefghij", 4), ["abcd", "efgh", "ij"])
         self.assertEqual(escpos.Receipt.wrap("aa bb cc", 5), ["aa bb", "cc"])
 
-    def test_kot_is_right_aligned(self):
-        # Oshxona printerining chap chekkasi bo'yaladi — KOT o'ngga yopishishi kerak.
+    def test_kot_is_centered(self):
+        # Oshxona cheki MARKAZDA chiqishi kerak (o'ng/chap chekkaga yopishmasin).
         printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
         kot = {
             "station": "Oshxona", "order_number": "7", "table": "5", "waiter": "Ali",
@@ -115,24 +147,22 @@ class TestEscpos(FrappeTestCase):
             "items": [{"item_name": "Lag'mon", "qty": 2, "comment": "achchiq"}],
         }
         raw = escpos.build_kot(kot, printer)
-        # Har bir qator o'ngga tekislangan (ESC a 2), markazlash (ESC a 1) yo'q
-        self.assertGreater(raw.count(b"\x1ba\x02"), 0)
-        self.assertEqual(raw.count(b"\x1ba\x01"), 0)
-        # To'liq kenglikdagi ajratgich yo'q (u chap bo'yalgan zonaga tushardi)
-        self.assertNotIn(b"=" * 48, raw)
+        # Har bir qator markazlangan (ESC a 1), o'ng (ESC a 2) yo'q
+        self.assertGreater(raw.count(b"\x1ba\x01"), 0)
+        self.assertEqual(raw.count(b"\x1ba\x02"), 0)
         txt = _decode_escpos(raw)
         self.assertIn("Lag'mon", txt)
         self.assertIn("STOL: 5", txt)
 
-    def test_item_ticket_is_right_aligned(self):
+    def test_item_ticket_is_centered(self):
         printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
         raw = escpos.build_item_ticket(
             {"item_name": "Choy", "quantity": 1, "table": "3", "station": "Bar",
              "printed_at": "2026-09-10 13:25:00"},
             printer,
         )
-        self.assertGreater(raw.count(b"\x1ba\x02"), 0)
-        self.assertEqual(raw.count(b"\x1ba\x01"), 0)
+        self.assertGreater(raw.count(b"\x1ba\x01"), 0)
+        self.assertEqual(raw.count(b"\x1ba\x02"), 0)
 
     def test_build_bill_58mm(self):
         printer = {"paper_width": "58", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
