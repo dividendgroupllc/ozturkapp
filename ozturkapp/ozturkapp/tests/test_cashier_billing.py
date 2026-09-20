@@ -186,8 +186,22 @@ class BillingCase(FrappeTestCase):
         )
         self._flush_caches()
 
-    def _invoice(self, lines=((3, 10000), (3, 10000)), table=None, printed=False):
-        """Xizmat haqi qatorli, to'lanmagan chek (`(miqdor, narx)` juftliklari)."""
+    def _invoice(
+        self,
+        lines=((3, 10000), (3, 10000)),
+        table=None,
+        printed=False,
+        order_type="Dine In",
+        via_template=False,
+    ):
+        """Xizmat haqi qatorli, to'lanmagan chek (`(miqdor, narx)` juftliklari).
+
+        Xizmat haqi faqat `Dine In` da qoladi: `Take Away` va `Delivery` cheklaridan
+        `remove_service_charge_for_takeaway` uni olib tashlaydi.
+
+        `via_template=True` — qator qo'lda qo'shilmaydi, faqat shablon nomi qo'yiladi
+        (URY `get_order_invoice` shunday qiladi; qatorni ERPNext o'zi qo'shadi).
+        """
         doc = frappe.new_doc("POS Invoice")
         doc.update(
             {
@@ -196,7 +210,7 @@ class BillingCase(FrappeTestCase):
                 "company": self.scope.company,
                 "branch": self.scope.branch,
                 "restaurant": self.scope.restaurant,
-                "order_type": "Dine In" if table else "Take Away",
+                "order_type": order_type,
                 "restaurant_table": table,
             }
         )
@@ -206,7 +220,9 @@ class BillingCase(FrappeTestCase):
                 {"item_code": code, "qty": qty, "rate": rate, "warehouse": self.scope.warehouse},
             )
         doc.append("payments", {"mode_of_payment": self.cash, "amount": 0})
-        if self.service["enabled"]:
+        if via_template:
+            doc.taxes_and_charges = self.service["template"]
+        elif self.service["enabled"]:
             doc.append(
                 "taxes",
                 {
@@ -1302,7 +1318,7 @@ class TestBuildBillExtensions(BillingCase):
         self.assertFalse(bill["is_return"])
         self.assertIsNone(bill["return_against"])
         self.assertFalse(bill["reprint_needed"])
-        self.assertEqual(bill["order_type"], "Take Away")
+        self.assertEqual(bill["order_type"], "Dine In")
         self.assertEqual(bill["payable"], self._payable(doc.name))
 
     def test_existing_keys_are_unchanged(self):
@@ -1353,6 +1369,134 @@ class TestBuildBillExtensions(BillingCase):
 
 
 # ═══════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════
+#  Xizmat haqi faqat zalda (Dine In)
+# ═══════════════════════════════════════════════════════════════════
+
+class TestServiceChargeScope(BillingCase):
+    """Olib ketish va yetkazib berishda ofitsant yo'q — xizmat haqi olinmaydi."""
+
+    def setUp(self):
+        super().setUp()
+        if not self.service["enabled"]:
+            self.skipTest("Xizmat haqi sozlanmagan")
+
+    def _service_row(self, doc):
+        return self._tax(doc, self.service["account"])
+
+    def test_dine_in_keeps_the_service_charge(self):
+        for via_template in (False, True):
+            doc = self._invoice(order_type="Dine In", via_template=via_template)
+
+            row = self._service_row(doc)
+            self.assertIsNotNone(row, f"via_template={via_template}")
+            self.assertEqual(flt(row.tax_amount), flt(doc.net_total) * flt(self.service["rate"]) / 100)
+            self.assertGreater(flt(doc.grand_total), flt(doc.net_total))
+
+    def test_take_away_and_delivery_have_no_service_charge(self):
+        for order_type in ("Take Away", "Delivery"):
+            for via_template in (False, True):
+                doc = self._invoice(order_type=order_type, via_template=via_template)
+
+                label = f"{order_type}, via_template={via_template}"
+                self.assertIsNone(self._service_row(doc), label)
+                self.assertEqual(flt(doc.total_taxes_and_charges), 0, label)
+                self.assertEqual(flt(doc.grand_total), flt(doc.net_total), label)
+
+    def test_template_is_cleared_when_it_only_held_the_service_charge(self):
+        # Aks holda bo'sh jadval keyingi saqlashda shablon qatorini qaytarib qo'shardi.
+        doc = self._invoice(order_type="Take Away", via_template=True)
+
+        self.assertFalse(doc.taxes_and_charges)
+
+        doc.save()
+        self.assertIsNone(self._service_row(frappe.get_doc("POS Invoice", doc.name)))
+
+    def test_resaving_an_existing_dine_in_invoice_keeps_the_service_charge(self):
+        doc = self._invoice(order_type="Dine In", via_template=True)
+        expected = flt(doc.grand_total)
+
+        doc.save()
+
+        saved = frappe.get_doc("POS Invoice", doc.name)
+        self.assertIsNotNone(self._service_row(saved))
+        self.assertEqual(flt(saved.grand_total), expected)
+
+    def test_an_open_invoice_that_already_had_the_row_loses_it_on_next_save(self):
+        # Tuzatishdan OLDIN yaratilgan ochiq chek.
+        doc = self._invoice(order_type="Dine In")
+        self.assertIsNotNone(self._service_row(doc))
+        frappe.db.set_value("POS Invoice", doc.name, "order_type", "Take Away")
+
+        reopened = frappe.get_doc("POS Invoice", doc.name)
+        reopened.save()
+
+        saved = frappe.get_doc("POS Invoice", doc.name)
+        self.assertIsNone(self._service_row(saved))
+        self.assertEqual(flt(saved.grand_total), flt(saved.net_total))
+
+    def test_other_tax_rows_survive(self):
+        doc = self._invoice(order_type="Take Away")
+        doc.append(
+            "taxes",
+            {
+                "charge_type": "Actual",
+                "account_head": cashier_billing.tips_account(self.scope.company),
+                "description": "Boshqa qator",
+                "tax_amount": 1000,
+            },
+        )
+        doc.append(
+            "taxes",
+            {
+                "charge_type": "On Net Total",
+                "account_head": self.service["account"],
+                "description": self.service["description"],
+                "rate": self.service["rate"],
+            },
+        )
+
+        doc.save()
+
+        saved = frappe.get_doc("POS Invoice", doc.name)
+        self.assertIsNone(self._service_row(saved))
+        self.assertEqual([row.description for row in saved.taxes], ["Boshqa qator"])
+        self.assertEqual(flt(saved.grand_total), flt(saved.net_total) + 1000)
+
+    def test_a_take_away_invoice_is_paid_in_full_and_submitted(self):
+        doc = self._invoice(order_type="Take Away", via_template=True)
+        payable = self._payable(doc.name)
+        self.assertEqual(payable, flt(doc.net_total))
+
+        self._pay(doc.name)
+
+        paid = frappe.get_doc("POS Invoice", doc.name)
+        self.assertEqual(paid.docstatus, 1)
+        self.assertEqual(flt(paid.paid_amount), payable)
+        self.assertIsNone(self._service_row(paid))
+
+    def test_nothing_is_removed_when_the_service_charge_is_not_configured(self):
+        doc = self._invoice(order_type="Take Away", via_template=False)
+        self.assertIsNone(self._service_row(doc))  # tayyorgarlik: odatda olib tashlanadi
+
+        with mock.patch.object(
+            cashier_billing, "get_service_charge_config", return_value={"enabled": False}
+        ):
+            doc.append(
+                "taxes",
+                {
+                    "charge_type": "On Net Total",
+                    "account_head": self.service["account"],
+                    "description": self.service["description"],
+                    "rate": self.service["rate"],
+                },
+            )
+            doc.save()
+
+        self.assertIsNotNone(self._service_row(frappe.get_doc("POS Invoice", doc.name)))
+
+
 #  Ruxsat: har bir endpoint server tomonida himoyalangan
 # ═══════════════════════════════════════════════════════════════════
 

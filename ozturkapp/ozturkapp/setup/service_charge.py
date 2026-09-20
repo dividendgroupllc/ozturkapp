@@ -21,6 +21,12 @@
 Foiz FAQAT SHU YERDA (shablon qatorida) turadi. Kodda ham, frontend'da ham
 takrorlanmaydi — TZ §8 talabi shu.
 
+KIMDAN OLINADI: faqat zaldagi (`Dine In`) buyurtmalardan. `Take Away` va
+`Delivery` da ofitsant xizmat qilmaydi, shuning uchun xizmat haqi olinmaydi.
+URY shablonni har qanday buyurtma turiga qo'yadi; POS Invoice `before_validate`
+hook'i (`cashier_billing.remove_service_charge_for_takeaway`) xizmat haqi
+qatorini olib tashlaydi, shablondagi boshqa soliqlarga tegmaydi.
+
 Ishga tushirish::
 
     bench --site ozturk.local execute \

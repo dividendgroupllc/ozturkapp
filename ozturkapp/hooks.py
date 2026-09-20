@@ -39,6 +39,9 @@ doc_events = {
 		# chegirma va bekor qilish qoidalari generic REST orqali chetlab o'tilmasin.
 		# Faqat oddiy kassirga qo'llanadi (utils/cashier_billing.py).
 		"validate": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_changes",
+		# Olib ketish (Take Away) va yetkazib berishda (Delivery) xizmat haqi
+		# olinmaydi — ofitsant xizmat qilmaydi. `validate` dan OLDIN ishlaydi.
+		"before_validate": "ozturkapp.ozturkapp.utils.cashier_billing.remove_service_charge_for_takeaway",
 		"before_update_after_submit": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_audit",
 		"before_cancel": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_cancel",
 	},

@@ -43,6 +43,9 @@ SERVICE_CHARGE_ACCOUNT_NAME = "Service Charge"
 SERVICE_CHARGE_TEMPLATE_TITLE = "Restaurant Service Charge"
 DEFAULT_SERVICE_CHARGE_RATE = 12.0
 
+#: Xizmat haqi OLINMAYDIGAN buyurtma turlari — ularga ofitsant xizmat qilmaydi.
+SERVICE_CHARGE_FREE_ORDER_TYPES = ("Take Away", "Delivery")
+
 #: Choychaqa (tip) soliq qatori: hisob nomi (setup yaratadi) va qator tavsifi.
 TIPS_ACCOUNT_NAME = "Tips Payable"
 TIPS_DESCRIPTION = "Choychaqa"
@@ -126,6 +129,46 @@ def _find_service_charge_row(template: str, account: str = None):
             return row
 
     return None
+
+
+def remove_service_charge_for_takeaway(doc, method=None):
+    """POS Invoice `before_validate`: olib ketish va yetkazib berishda xizmat haqi olinmaydi.
+
+    Xizmat haqi (12%) ofitsant xizmati uchun olinadi. `Take Away` va
+    `Delivery` buyurtmalariga ofitsant xizmat qilmaydi. Lekin URY shablonni
+    HAR QANDAY buyurtma turiga qo'yadi (`get_order_invoice`), shuning uchun
+    xizmat haqi bu buyurtmalarga ham tushib qolardi.
+
+    `before_validate` — ERPNext jami summani hisoblashdan OLDIN, shu sabab
+    qayta hisoblash kerak emas va to'lov tekshiruvlari yakuniy summa bilan ishlaydi.
+    Faqat xizmat haqi qatori olib tashlanadi; shablondagi boshqa soliqlarga tegilmaydi.
+    """
+    if doc.get("order_type") not in SERVICE_CHARGE_FREE_ORDER_TYPES:
+        return
+
+    restaurant = doc.get("restaurant") or frappe.db.get_value(
+        "URY Restaurant", {"branch": doc.get("branch")}, "name"
+    )
+    config = get_service_charge_config(restaurant) if restaurant else {}
+    if not config.get("enabled"):
+        return
+
+    # Yangi chekda ERPNext shablon qatorlarini `validate` ichida o'zi qo'shadi
+    # (`set_taxes`). Qatorlarni hozir o'zimiz qo'shib olamiz — aks holda
+    # olib tashlaganimizdan keyin ular qaytib keladi.
+    if doc.is_new() and not doc.get("taxes") and doc.get("taxes_and_charges"):
+        doc.append_taxes_from_master()
+
+    rows = doc.get("taxes") or []
+    kept = [row for row in rows if row.account_head != config["account"]]
+    if len(kept) == len(rows):
+        return
+
+    doc.set("taxes", kept)
+    if not kept:
+        # Shablonda boshqa qator yo'q: shablon nomini ham olib tashlaymiz,
+        # aks holda bo'sh jadval `set_taxes` uchun "to'ldirilmagan" bo'lib ko'rinadi.
+        doc.taxes_and_charges = None
 
 
 # ═══════════════════════════════════════════════════════════════════
