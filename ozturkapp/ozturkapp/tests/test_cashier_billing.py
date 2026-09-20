@@ -97,7 +97,9 @@ class BillingCase(FrappeTestCase):
 
         self.items = frappe.get_all(
             "Item",
-            filters={"disabled": 0, "name": ["not like", "RM-%"]},
+            # Xomashyo sotilmaydi. Ilgari `RM-` prefiksi bilan ajratilardi, lekin
+            # kodlar `ITEM-####` bo'lgach prefiks yo'q — belgiga tayanamiz.
+            filters={"disabled": 0, "is_sales_item": 1},
             pluck="name",
             limit=2,
         )
