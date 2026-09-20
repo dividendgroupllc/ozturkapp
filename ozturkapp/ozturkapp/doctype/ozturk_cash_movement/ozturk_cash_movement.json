@@ -1,0 +1,230 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-09-20 10:00:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "pos_opening_entry",
+  "branch",
+  "company",
+  "column_break_main",
+  "kind",
+  "category",
+  "amount",
+  "mode_of_payment",
+  "section_break_reason",
+  "reason",
+  "section_break_people",
+  "user",
+  "approved_by",
+  "column_break_people",
+  "posting_datetime",
+  "section_break_accounting",
+  "cash_account",
+  "counter_account",
+  "column_break_accounting",
+  "journal_entry",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "CM-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Naming Series",
+   "options": "CM-.YYYY.-",
+   "print_hide": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "pos_opening_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Kassa smenasi",
+   "options": "POS Opening Entry",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fetch_from": "pos_opening_entry.branch",
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Filial",
+   "options": "Branch",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "pos_opening_entry.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Kompaniya",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Yo'nalish",
+   "options": "In\nOut",
+   "reqd": 1,
+   "description": "In — kassaga kirim, Out — kassadan chiqim."
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Turi",
+   "options": "Xarajat\nInkassatsiya\nKassaga qo'shish\nBoshqa",
+   "reqd": 1,
+   "description": "Kirim: Kassaga qo'shish yoki Boshqa. Chiqim: Xarajat, Inkassatsiya yoki Boshqa."
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Summa",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Naqd to'lov usuli",
+   "options": "Mode of Payment",
+   "reqd": 1,
+   "description": "Faqat POS Profile'dagi NAQD (Cash) usul."
+  },
+  {
+   "fieldname": "section_break_reason",
+   "fieldtype": "Section Break",
+   "label": "Sabab"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Izoh",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_people",
+   "fieldtype": "Section Break",
+   "label": "Kim va qachon"
+  },
+  {
+   "default": "__user",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Kassir",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Tasdiqlagan menejer",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_people",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Now",
+   "fieldname": "posting_datetime",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Vaqt",
+   "reqd": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_accounting",
+   "fieldtype": "Section Break",
+   "label": "Buxgalteriya"
+  },
+  {
+   "fieldname": "cash_account",
+   "fieldtype": "Link",
+   "label": "Kassa hisobi",
+   "no_copy": 1,
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "counter_account",
+   "fieldtype": "Link",
+   "label": "Qarshi hisob",
+   "no_copy": 1,
+   "options": "Account",
+   "read_only": 1,
+   "description": "Kompaniya sozlamasidagi «Kassa harakati hisobi»."
+  },
+  {
+   "fieldname": "column_break_accounting",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "label": "Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Ozturk Cash Movement",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-09-20 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Ozturk Cash Movement",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1, "cancel": 1, "create": 1, "delete": 1, "email": 1, "export": 1,
+   "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1,
+   "submit": 1, "write": 1
+  },
+  {
+   "amend": 1, "cancel": 1, "create": 1, "email": 1, "export": 1,
+   "print": 1, "read": 1, "report": 1, "role": "URY Manager", "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "kind,category,reason",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

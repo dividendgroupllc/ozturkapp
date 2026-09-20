@@ -1,0 +1,76 @@
+/*
+ * To'lov funksiyalari uslubi: choychaqa, chegirma, qaytarish.
+ *
+ * Selektorlar `.rc-payment-…` bilan boshlanadi; ranglar `--rc-*` o'zgaruvchilardan
+ * (Desk mavzusi bilan dark rejim ham ishlaydi). Bosiladigan hamma element kamida
+ * `--rc-touch` (48px).
+ */
+
+/* ═══ Umumiy ═══════════════════════════════════════════════════ */
+
+.rc-payment-label {
+	display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+	margin: 10px 0 6px;
+	font-size: 12px; font-weight: 700; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--rc-muted);
+}
+
+/* ═══ Choychaqa ════════════════════════════════════════════════ */
+
+.rc-payment-tip { margin-top: 2px; }
+.rc-payment-tip__amount { color: var(--rc-available-ink); font-size: 15px; }
+.rc-payment-tip .rc-chips { gap: 6px; }
+.rc-payment-tip .rc-chip-opt {
+	min-height: 56px; padding: 2px; font-size: 13px; line-height: 1.25;
+	white-space: pre-line;
+}
+.rc-payment-tip .rc-chip-opt[aria-pressed="true"] { font-weight: 800; }
+
+/* ═══ Chegirma ═════════════════════════════════════════════════ */
+
+.rc-payment-discount .rc-chip-opt { min-height: var(--rc-touch); }
+
+/* Panel ma'lumot bloki: matn + amal tugmasi (chegirma xulosasi, eskirgan chek). */
+.rc-payment-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rc-payment-notice__text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.rc-payment-notice__text span { font-size: 13px; color: var(--rc-muted); }
+.rc-payment-notice__btn { flex: 0 0 auto; padding: 4px 14px; font-size: 14px; font-weight: 700; }
+.rc-payment-notice--warn .rc-payment-notice__text { font-weight: 700; color: var(--rc-reserved-text); }
+
+/* ═══ Qaytarish ════════════════════════════════════════════════ */
+
+.rc-payment-refund__tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rc-payment-refund__tools .rc-payment-label { margin: 0; }
+.rc-payment-refund__tools .rc-btn { padding: 4px 14px; font-size: 14px; font-weight: 700; }
+
+.rc-payment-refund__rows { margin-top: 6px; border-top: 1px solid var(--rc-border); }
+.rc-payment-refund__row {
+	display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	min-height: 60px; padding: 6px 0; border-bottom: 1px solid var(--rc-border);
+}
+.rc-payment-refund__row--done { opacity: .55; }
+.rc-payment-refund__what { min-width: 0; }
+.rc-payment-refund__name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.rc-payment-refund__meta { font-size: 12px; color: var(--rc-muted); }
+.rc-payment-refund__gone { flex: 0 0 auto; font-size: 13px; color: var(--rc-muted); }
+.rc-payment-refund__stepper { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.rc-payment-refund__stepper .rc-btn { width: var(--rc-touch); padding: 0; font-size: 24px; font-weight: 800; }
+.rc-payment-refund__qty { min-width: 34px; text-align: center; font-size: 20px; font-weight: 800; }
+
+.rc-payment-refund__modes { display: flex; flex-direction: column; gap: 4px; }
+.rc-payment-refund__mode {
+	display: flex; justify-content: space-between; gap: 10px;
+	padding: 8px 10px; border-radius: var(--rc-radius);
+	background: var(--rc-sunken); font-size: 14px;
+}
+.rc-payment-refund__mode span:first-child { font-weight: 700; }
+.rc-payment-refund__mode--blocked { background: var(--rc-occupied-soft); color: var(--rc-occupied); }
+.rc-payment-refund__warn {
+	margin: 0 0 10px; padding: 10px 12px;
+	border: 1px solid var(--rc-occupied); border-radius: var(--rc-radius);
+	background: var(--rc-occupied-soft); color: var(--rc-occupied);
+	font-size: 14px; font-weight: 600; line-height: 1.4;
+}
+.rc-payment-refund__reason { margin: 12px 0 0; }
+.rc-payment-refund__summary { margin: 0 0 4px; font-size: 14px; font-weight: 700; }
+.rc-payment-refund__summary:empty { display: none; }

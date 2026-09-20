@@ -15,6 +15,7 @@
   "title",
   "ref_doctype",
   "ref_name",
+  "reason",
   "section_break_result",
   "attempts",
   "agent",
@@ -58,7 +59,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Turi",
-   "options": "Bill\nKOT\nKOT Item\nTest",
+   "options": "Bill\nKOT\nKOT Item\nTest\nDrawer\nShift Report",
    "reqd": 1
   },
   {
@@ -96,6 +97,14 @@
    "in_standard_filter": 1,
    "label": "Manba hujjat",
    "options": "ref_doctype",
+   "read_only": 1
+  },
+  {
+   "description": "G'aladon topshirig'i uchun: nima uchun ochilgani (savdosiz ochilish hisobotda ko'rinadi).",
+   "fieldname": "reason",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Sabab",
    "read_only": 1
   },
   {
@@ -139,15 +148,17 @@
    "label": "Payload (ESC/POS, base64)"
   },
   {
+   "description": "Menejer hisoboti (kutilgan summa, farq) shu yerda saqlanadi — kassir uni ko'rmasligi kerak.",
    "fieldname": "payload",
    "fieldtype": "Long Text",
    "label": "Payload",
+   "permlevel": 1,
    "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-09-10 10:00:00.000000",
+ "modified": "2026-09-20 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Ozturkapp",
  "name": "Ozturk Print Job",
@@ -164,7 +175,10 @@
   },
   {"create": 1, "read": 1, "report": 1, "role": "URY Cashier"},
   {"create": 1, "read": 1, "role": "URY Kitchen"},
-  {"read": 1, "role": "Print Agent", "write": 1}
+  {"read": 1, "role": "Print Agent", "write": 1},
+  {"permlevel": 1, "read": 1, "role": "System Manager"},
+  {"permlevel": 1, "read": 1, "role": "URY Manager"},
+  {"permlevel": 1, "read": 1, "role": "Print Agent"}
  ],
  "sort_field": "creation",
  "sort_order": "DESC",

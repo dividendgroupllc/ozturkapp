@@ -1,0 +1,306 @@
+/*
+ * Modal oyna va unda ochiladigan ekranlar: to'lov, tarix, hisobni bo'lish,
+ * kassani ochish/yopish.
+ *
+ * Oyna balandligi ekrandan oshmaydi (`100dvh`); to'lov oynasi 768px da
+ * aylantirishsiz sig'adi — kerak bo'lsa tanasi ichkarida aylanadi, sarlavha
+ * va pastki tugma esa joyida turadi.
+ */
+
+.rc-overlay {
+	position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1050;
+	display: flex; align-items: center; justify-content: center;
+	background: rgba(0, 0, 0, .5); padding: 12px;
+}
+.rc-modal {
+	display: flex; flex-direction: column;
+	width: 100%; max-width: 460px;
+	max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px);
+	background: var(--rc-surface); color: var(--rc-text);
+	border-radius: var(--rc-radius-lg);
+	box-shadow: 0 20px 50px rgba(0,0,0,.28);
+	overflow: hidden;
+}
+.rc-modal--lg { max-width: 780px; }
+.rc-modal--xl { max-width: 980px; }
+.rc-modal__head {
+	flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+	min-height: 56px; padding: 0 8px 0 18px; border-bottom: 1px solid var(--rc-border);
+}
+.rc-modal__title { font-size: 18px; font-weight: 800; margin: 0; }
+.rc-modal__close {
+	width: var(--rc-touch); height: var(--rc-touch); border: 0; border-radius: 10px;
+	background: transparent; font-size: 28px; line-height: 1; cursor: pointer;
+	color: var(--rc-muted);
+}
+.rc-modal__close:hover { background: var(--rc-sunken); }
+.rc-modal__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; }
+
+.rc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+/* Uzun ro'yxatda ham asosiy tugma ko'rinib turadi: pastki qism oyna tanasida qotiriladi
+   (yig'ma padding'ni qoplab, tugma ostidan matn ko'rinmasligi uchun). */
+.rc-split__foot, .rc-history__detail > .rc-actions--row {
+	position: sticky; bottom: -14px; z-index: 2;
+	margin-bottom: -14px; padding-bottom: 14px;
+	background: var(--rc-surface);
+	box-shadow: 0 -10px 8px -8px rgba(0, 0, 0, .22);
+}
+.rc-history__detail > .rc-actions--row { padding-top: 12px; margin-top: 8px; }
+.rc-actions--row { flex-direction: row; }
+.rc-actions--row .rc-btn { flex: 1; }
+.rc-actions .rc-btn { min-height: 56px; font-size: 17px; }
+
+/* Kiritish xatosi (oyna ichida). */
+.rc-pay__error, .rc-split__error {
+	margin-top: 10px; padding: 10px 12px;
+	border: 1px solid var(--rc-occupied); border-radius: var(--rc-radius);
+	background: var(--rc-occupied-soft); color: var(--rc-occupied-ink);
+	font-size: 14px; white-space: pre-wrap;
+}
+.rc-pay__error:empty, .rc-split__error:empty { display: none; }
+
+/* ═══ To'lov oynasi ════════════════════════════════════════════ */
+
+.rc-pay { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+/* Qator balandligi ustun balandligiga teng (`minmax(0, 1fr)`), chap ustun esa
+   ichkarida aylanadi: usullar ro'yxati va qo'shimcha bo'limlar (choychaqa) oyna
+   balandligiga sig'masa raqam paneli va «To'lovni tasdiqlash» joyida qoladi. */
+.rc-pay__cols {
+	display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+	gap: 16px; flex: 1 1 auto; min-height: 0;
+}
+.rc-pay__cols:has(.rc-numpad) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rc-pay__side:empty { display: none; }
+.rc-pay__side { align-self: end; }
+.rc-pay__main { min-width: 0; min-height: 0; overflow-y: auto; padding: 0 2px 2px; }
+
+.rc-pay__due { text-align: center; margin-bottom: 8px; }
+.rc-pay__due-label { font-size: 12px; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .05em; }
+.rc-pay__due-value { font-size: 38px; font-weight: 800; line-height: 1.1; }
+.rc-pay__breakdown { font-size: 13px; color: var(--rc-muted); margin-top: 2px; }
+
+.rc-pay__label {
+	display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+	font-size: 12px; font-weight: 700; text-transform: uppercase;
+	letter-spacing: .05em; color: var(--rc-muted); margin: 10px 0 6px;
+}
+.rc-pay__hint { font-weight: 600; text-transform: none; letter-spacing: 0; }
+
+/* Usullar ro'yxati: chapda usul nomi (bosilsa qoldiq summa yoziladi), o'ngda summa. */
+.rc-pay__rows { display: flex; flex-direction: column; gap: 8px; }
+.rc-pay__row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; }
+.rc-pay__name {
+	min-height: 56px; padding: 8px 12px;
+	border: 2px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 16px; font-weight: 700; text-align: left; cursor: pointer;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rc-pay__row:focus-within .rc-pay__name { border-color: var(--rc-accent); background: var(--rc-accent-soft); }
+
+.rc-pay__input {
+	width: 100%; min-height: 56px; padding: 8px 14px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text);
+	font-size: 26px; font-weight: 800; text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.rc-pay__input:focus, .rc-shift-input:focus { outline: 2px solid var(--rc-accent-ink); outline-offset: -1px; }
+/* Maydon bo'sh turadi, `0` faqat ishora — kassir uni KIRITILGAN summa deb
+   o'ylab qolmasligi uchun rangi so'niq. */
+.rc-pay__input::placeholder, .rc-shift-input::placeholder { color: var(--rc-muted); font-weight: 700; opacity: .85; }
+
+.rc-pay__quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.rc-quick {
+	flex: 1 1 auto; min-height: var(--rc-touch); padding: 6px 12px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: 15px; font-weight: 700; cursor: pointer;
+}
+
+/* Holat qatori: yetishmaydi / to'liq / qaytim (uzun ogohlantirish qatorga sig'ishi uchun `gap`). */
+/* Usullar ko'p bo'lib chap ustun aylansa ham holat qatori pastda qotib turadi. */
+.rc-pay__change {
+	display: flex; justify-content: space-between; gap: 12px;
+	position: sticky; bottom: 0; margin-top: 10px; padding: 8px 0 2px;
+	background: var(--rc-surface); font-size: 17px; font-weight: 800;
+}
+.rc-pay__change-value { white-space: nowrap; }
+.rc-pay__change--short { color: var(--rc-occupied-ink); }
+
+.rc-pay__foot {
+	flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px;
+	margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rc-border);
+}
+.rc-pay__foot .rc-btn { min-height: 62px; font-size: 19px; font-weight: 800; }
+/* Xato tasdiqlash tugmasi tepasida — chap ustun aylansa ham HAR DOIM ko'rinadi. */
+.rc-pay__foot .rc-pay__error { margin-top: 0; }
+.rc-pay__slot:empty { display: none; }
+
+/* Ekran raqam paneli. */
+.rc-numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rc-numpad__key {
+	min-height: 62px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: 24px; font-weight: 800; cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-numpad__key:active { filter: brightness(.88); }
+.rc-numpad__key--del { color: var(--rc-occupied-ink); }
+.rc-numpad__key--ok { background: var(--rc-available-fill); border-color: var(--rc-available-fill); color: #fff; }
+
+/* ═══ Kassa tarixi ═════════════════════════════════════════════ */
+
+.rc-history__filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.rc-history__select {
+	min-height: var(--rc-touch); padding: 8px 12px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text); font-size: 15px;
+	flex: 1 1 190px; min-width: 0;
+}
+/* Smena yozuvi uzun («Ochiq · 2026-08-25 01:40 → hozir · Kassa») — o'z qatorini egallaydi. */
+.rc-history__select--shift { flex: 1 1 100%; }
+.rc-history__shiftnote { flex: 1 1 100%; font-weight: 600; color: var(--rc-text); }
+.rc-history__shiftnote:empty { display: none; }
+
+.rc-history__summary {
+	display: flex; justify-content: space-between;
+	padding: 2px 2px 10px; font-size: 14px; font-weight: 700; color: var(--rc-muted);
+}
+
+.rc-history__list { display: flex; flex-direction: column; gap: 8px; }
+.rc-history__row {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	min-height: 72px; padding: 10px 12px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); cursor: pointer;
+}
+.rc-history__row:hover { background: var(--rc-sunken); }
+.rc-history__detail { margin-top: 4px; }
+.rc-history__bar { display: flex; align-items: center; gap: 12px; }
+.rc-history__bar .rc-btn { flex: 0 0 auto; }
+
+/* Qaytarish cheki: qizil belgi (matn + rang) va chapdagi qizil chiziq. */
+.rc-return-badge {
+	display: inline-block; padding: 3px 9px; border-radius: 5px;
+	background: var(--rc-occupied); color: #fff;
+	font-family: var(--font-stack, system-ui, sans-serif); font-size: 12px; font-weight: 800; letter-spacing: .05em; line-height: 1.2;
+	vertical-align: middle; white-space: nowrap;
+}
+.rc-history__row--return { border-left: 5px solid var(--rc-occupied); }
+.rc-history__origin {
+	display: flex; align-items: center; width: 100%; min-height: var(--rc-touch);
+	margin-top: 10px; padding: 8px 14px;
+	border: 1px solid var(--rc-accent); border-radius: var(--rc-radius);
+	background: var(--rc-accent-soft); color: var(--rc-accent-ink);
+	font-family: monospace; font-size: 15px; font-weight: 700; text-align: left; cursor: pointer;
+}
+.rc-history__invoice { font-weight: 800; font-size: 15px; font-family: monospace; }
+.rc-history__meta { font-size: 13px; color: var(--rc-muted); margin-top: 2px; }
+.rc-history__side { display: flex; align-items: center; gap: 12px; }
+.rc-history__amount { font-weight: 800; font-size: 17px; white-space: nowrap; }
+.rc-history__side .rc-btn { min-height: var(--rc-touch); padding: 8px 16px; }
+
+.rc-payment-details { margin-top: 12px; font-size: 14px; }
+.rc-payment-details__title {
+	margin-top: 6px; padding-top: 10px;
+	border-top: 2px solid var(--rc-border);
+	font-size: 12px; font-weight: 700; color: var(--rc-muted);
+	text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px;
+}
+
+/* ═══ Hisobni taqsimlash (bill split) ══════════════════════════ */
+
+.rc-split__list { display: flex; flex-direction: column; gap: 8px; }
+.rc-split__row {
+	display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	padding: 10px 12px;
+	border: 1px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface);
+}
+.rc-split__row--active { border-color: var(--rc-accent); background: var(--rc-accent-soft); }
+.rc-split__name { font-weight: 600; font-size: 15px; }
+.rc-split__meta { font-size: 13px; color: var(--rc-muted); margin-top: 2px; }
+.rc-split__stepper { display: flex; align-items: center; gap: 10px; }
+.rc-split__step {
+	width: var(--rc-touch); height: var(--rc-touch); padding: 0;
+	border: 1px solid var(--rc-line); border-radius: 50%;
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: 22px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.rc-split__qty { min-width: 26px; text-align: center; font-size: 17px; font-weight: 800; }
+.rc-split__summary { display: flex; justify-content: space-between; margin-top: 12px; font-size: 17px; font-weight: 800; }
+
+/* ═══ Kassani ochish (bloklovchi ekran) ════════════════════════ */
+
+.rc-gate__form { max-width: 760px; margin: 18px auto 0; text-align: left; }
+.rc-gate__cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.rc-gate__cols:has(.rc-numpad) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rc-gate__cols .rc-numpad-slot:empty { display: none; }
+.rc-shift-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.rc-shift-table th {
+	padding: 6px 8px; border-bottom: 1px solid var(--rc-border);
+	font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+	color: var(--rc-muted); text-align: left;
+}
+.rc-shift-table td { padding: 8px; border-bottom: 1px solid var(--rc-border); }
+.rc-shift-table .rc-num { text-align: right; white-space: nowrap; }
+.rc-shift-input {
+	width: 100%; min-height: 56px; padding: 6px 12px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text);
+	font-size: 22px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums;
+}
+
+/* ═══ Kassani yopish — ko'r sanoq ══════════════════════════════ */
+
+.rc-count { display: flex; flex-direction: column; }
+.rc-count__cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.rc-count__cols:has(.rc-numpad) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rc-count__cols .rc-numpad-slot:empty { display: none; }
+.rc-count__cols .rc-numpad-slot { align-self: end; }
+
+.rc-count__head {
+	display: flex; align-items: center; justify-content: space-between;
+	padding: 10px 14px; margin-bottom: 10px;
+	background: var(--rc-sunken); border-radius: var(--rc-radius);
+}
+.rc-count__label { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--rc-muted); }
+.rc-count__value { font-size: 26px; font-weight: 800; line-height: 1; }
+.rc-count__row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.rc-count__row > span { flex: 0 0 34%; font-size: 15px; font-weight: 600; }
+.rc-count__row .rc-count-input { flex: 1 1 auto; }
+
+/* Teskari sanoq — kassir pulni qayta sanaydigan vaqt. */
+.rc-countdown {
+	display: flex; align-items: center; gap: 14px;
+	margin-top: 12px; padding: 10px 14px;
+	background: var(--rc-reserved-soft); border: 1px solid var(--rc-reserved);
+	border-radius: var(--rc-radius);
+}
+.rc-countdown__ring {
+	flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%;
+	display: flex; align-items: center; justify-content: center;
+	border: 3px solid var(--rc-reserved); color: var(--rc-reserved-ink);
+}
+.rc-countdown__num { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rc-countdown__text { font-size: 14px; line-height: 1.4; }
+.rc-countdown--done { background: var(--rc-available-soft); border-color: var(--rc-available); }
+.rc-countdown--done .rc-countdown__ring { border-color: var(--rc-available); color: var(--rc-available-ink); }
+
+/* Ikki bosqichli sanoq ko'rsatkichi. */
+.rc-steps { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.rc-step {
+	width: 28px; height: 28px; border-radius: 50%;
+	display: inline-flex; align-items: center; justify-content: center;
+	border: 2px solid var(--rc-border); color: var(--rc-muted);
+	font-size: 13px; font-weight: 800;
+}
+.rc-step--active { border-color: var(--rc-accent); color: var(--rc-accent-ink); }
+.rc-step--done { border-color: var(--rc-available-fill); background: var(--rc-available-fill); color: #fff; }
+.rc-steps__line { flex: 0 0 26px; height: 2px; background: var(--rc-border); }
+.rc-steps__text {
+	margin-left: 4px; font-size: 13px; font-weight: 700;
+	text-transform: uppercase; letter-spacing: .04em; color: var(--rc-muted);
+}

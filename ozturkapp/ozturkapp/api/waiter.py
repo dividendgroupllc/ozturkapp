@@ -35,12 +35,11 @@ PUL HISOBLANMAYDI (TZ §8/#5)
 12% xizmat haqi ERPNext soliq shablonidan keladi. Ilova faqat KO'RSATADI.
 """
 
-import json
 import uuid
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
+from frappe.utils import cint
 
 from ozturkapp.ozturkapp.setup.waiter_setup import WAITER_ROLE, WAITER_ROLES
 from ozturkapp.ozturkapp.utils import (
@@ -48,9 +47,21 @@ from ozturkapp.ozturkapp.utils import (
     cashier_permissions,
     kitchen_status,
     notifications,
+    order_items,
+    order_transfer,
     table_status,
 )
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change, emit_order_change
+
+# Umumiy buyurtma yordamchilari `utils/order_items.py` da (kassa ham shularga
+# tayanadi). Ofitsant API'ning ichki nomlari saqlab qolindi: testlar va
+# `submit_order` shularga murojaat qiladi.
+_parse_items = order_items.parse_items
+_assert_removals_allowed = order_items.assert_removals_allowed
+_current_shift_user = order_items.current_shift_user
+_existing_pax = order_items.existing_pax
+_default_mode_of_payment = order_items.default_mode_of_payment
+_active_invoice_for_table = order_items.active_invoice_for_table
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -215,12 +226,18 @@ def get_tables(room=None):
                 "shape": t["table_shape"],
                 "status": t["status"],
                 "is_merged": t["is_merged"],
-                "amount": (t["order"] or {}).get("amount", 0),
+                # Taomlar summasi: `amount` xizmat haqi va chegirmani ham
+                # o'z ichiga oladi — ofitsantga ko'rsatilmaydi.
+                "amount": (t["order"] or {}).get("items_total", 0),
                 "order": (t["order"] or {}).get("name"),
                 "waiter": (t["order"] or {}).get("waiter"),
                 "pax": (t["order"] or {}).get("pax", 0),
                 "billed": (t["order"] or {}).get("billed", False),
-                "reservation": t["reservation"],
+                # Ilova faqat vaqtni ko'rsatadi: mehmonning telefoni ofitsantga kerak emas.
+                "reservation": {
+                    key: value for key, value in (t["reservation"] or {}).items() if key != "phone"
+                }
+                or None,
             }
             for t in state["tables"]
         ],
@@ -241,36 +258,7 @@ def get_menu(room=None):
     require_waiter()
     scope = cashier_permissions.resolve_scope()
 
-    from ury.ury_pos.api import getRestaurantMenu
-
-    menu = getRestaurantMenu(scope.pos_profile, room=room or None)
-
-    courses = []
-    seen = set()
-    for item in menu.get("items", []):
-        course = item.get("course")
-        if course and course not in seen:
-            seen.add(course)
-            courses.append(course)
-
-    return {
-        "menu": menu.get("name"),
-        "modified": str(menu.get("modified_time") or ""),
-        "courses": courses,
-        "items": [
-            {
-                "item": i["item"],
-                "item_name": i["item_name"],
-                "rate": flt(i["rate"]),
-                "course": i.get("course"),
-                "image": i.get("item_image"),
-                "special": bool(cint(i.get("special_dish"))),
-            }
-            for i in menu.get("items", [])
-            if not cint(i.get("disabled"))
-        ],
-        "currency": scope.currency,
-    }
+    return order_items.build_menu(scope, room=room)
 
 
 @frappe.whitelist()
@@ -400,35 +388,51 @@ def get_order(table=None, invoice=None):
     return bill
 
 
+#: Ofitsantga beriladigan chek kalitlari — OQ RO'YXAT.
+#:
+#: NEGA OQ RO'YXAT
+#: ===============
+#: `build_bill()` kassir uchun yig'iladi va unga yangi pul maydonlari
+#: qo'shilib turadi (chegirma, choychaqa, to'lanadigan summa, qaytarish...).
+#: Qora ro'yxat bilan har yangi kalit ofitsantga JIMGINA oqib chiqardi.
+#: Oq ro'yxatda esa yangi kalit ataylab qo'shilmaguncha ko'rinmaydi.
+#:
+#: Ilova (`ozturk-waiter`) shulardan foydalanadi: `invoice`, `items`
+#: (qatorlari bilan), `subtotal`, `items_total`, `currency`, `table`,
+#: `waiter_name`, `customer_name`, `pax`, `opened_at`, `order_number`,
+#: `cancellation`, `bill_requested`, `can_edit`, `last_modified_time`.
+WAITER_BILL_KEYS = (
+    "invoice", "docstatus", "paid", "billed", "cancelled",
+    "table", "merged_tables", "room", "order_type",
+    "customer", "customer_name", "mobile_number",
+    "waiter", "waiter_name", "cashier", "cashier_name",
+    "pax", "comments", "order_number", "opened_at", "modified",
+    "items", "item_count", "total_qty", "subtotal", "currency",
+    "kitchen", "cancellation",
+    "bill_requested", "bill_requested_at", "delivery",
+)
+
+
 def _strip_financials(bill: dict) -> dict:
-    """Ofitsantga xizmat haqi va yakuniy summa KO'RSATILMAYDI.
+    """Ofitsantga xizmat haqi, soliq, chegirma, choychaqa va yakuniy summa
+    KO'RSATILMAYDI.
 
     Biznes qoidasi: ofitsant faqat taomlar va ularning summasini ko'radi.
     12% xizmat haqi va u bilan hisoblangan jami — mijoz va kassirning ishi.
 
-    Maydonlar javobdan BUTUNLAY olib tashlanadi (nolga tenglashtirilmaydi),
-    shunda ilova ularni tasodifan ham ko'rsata olmaydi.
+    Faqat `WAITER_BILL_KEYS` dagi kalitlar qoladi; qolgani javobdan
+    BUTUNLAY tushib ketadi (nolga tenglashtirilmaydi), shunda ilova ularni
+    tasodifan ham ko'rsata olmaydi.
     """
-    for field in (
-        "service_charge",
-        "service_charge_rate",
-        "taxes",
-        "total_taxes",
-        "grand_total",
-        "rounded_total",
-    ):
-        bill.pop(field, None)
+    visible = {key: bill[key] for key in WAITER_BILL_KEYS if key in bill}
 
-    # Ofitsant uchun "jami" = taomlar summasi (soliqsiz).
-    bill["items_total"] = bill.get("subtotal", 0)
-    return bill
-
-
-def _active_invoice_for_table(table: str, scope):
-    orders = table_status.get_open_orders(scope.branch)
-    mapping = table_status.map_orders_to_tables(orders)
-    row = mapping.get(table)
-    return row.name if row else None
+    # Ofitsant uchun "jami" = taomlar summasi (soliqsiz VA chegirmasiz).
+    # `subtotal` (`net_total`) chegirmadan keyingi summa: uni qatorlar
+    # yig'indisi bilan solishtirib ofitsant chegirmani bilib olardi.
+    items_total = bill.get("total", bill.get("subtotal", 0))
+    visible["subtotal"] = items_total
+    visible["items_total"] = items_total
+    return visible
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -463,6 +467,8 @@ def submit_order(
     """
     require_waiter()
     scope = cashier_permissions.resolve_scope()
+    client_ref = order_items.clean_client_ref(client_ref)
+    pax = order_items.parse_pax(pax)
     # Kassa smenasi ochilmasa buyurtma ham qabul qilinmaydi — aks holda
     # ofitsant taomlarni tanlab bo'lgach ERPNext ichkarida inglizcha xato
     # bilan yiqiladi (`validate_pos_opening_entry`).
@@ -488,6 +494,25 @@ def submit_order(
         frappe.throw(_("Kamida bitta taom tanlanishi kerak"))
 
     existing = _active_invoice_for_table(table, scope)
+    order_items.assert_on_menu(items, scope, existing)
+    comments = order_items.clean_text(comments, label=_("Buyurtma izohi")) or None
+
+    if not existing:
+        # Ilova `last_modified_time` yuborgan bo'lsa u stolda buyurtma BOR deb
+        # hisoblaydi. Server esa topmadi: buyurtma boshqa stolga ko'chirilgan,
+        # to'langan yoki bekor qilingan. Jimgina YANGI chek ochsak ofitsantning
+        # eski (to'liq) ro'yxati oshxonaga QAYTA ketardi va bekor qilingan
+        # buyurtma "tirilardi".
+        if last_modified_time:
+            frappe.throw(
+                _(
+                    "Bu stoldagi buyurtma o'zgargan (ko'chirilgan, to'langan yoki bekor "
+                    "qilingan). Ilovada stollarni yangilang."
+                ),
+                title=_("Buyurtma o'zgargan"),
+            )
+        order_transfer.claim_table(table, scope.branch)
+        order_transfer.release_stale_cluster(table, scope.branch)
 
     if existing:
         if cint(frappe.db.get_value("POS Invoice", existing, "invoice_printed")):
@@ -517,6 +542,8 @@ def submit_order(
     customer = customer or scope.default_customer
     if not customer:
         frappe.throw(_("Mijoz ko'rsatilmagan va POS Profile'da standart mijoz yo'q"))
+    if customer != scope.default_customer:
+        order_items.assert_customer_usable(customer)
 
     mode_of_payment = _default_mode_of_payment(scope.pos_profile)
 
@@ -570,130 +597,6 @@ def submit_order(
     return get_order(invoice=invoice_name)
 
 
-def _parse_items(items) -> list:
-    """Mijozdan kelgan mahsulot ro'yxatini tozalaydi.
-
-    Narx QABUL QILINMAYDI — u serverda `Item Price` dan olinadi (TZ §12).
-    """
-    if isinstance(items, str):
-        try:
-            items = json.loads(items)
-        except ValueError:
-            frappe.throw(_("Mahsulot ro'yxati noto'g'ri formatda"))
-
-    if not isinstance(items, list):
-        frappe.throw(_("Mahsulot ro'yxati noto'g'ri formatda"))
-
-    cleaned = []
-    for row in items:
-        code = (row or {}).get("item") or (row or {}).get("item_code")
-        qty = cint((row or {}).get("qty"))
-
-        if not code or qty <= 0:
-            continue
-        if not frappe.db.exists("Item", code):
-            frappe.throw(_("Mahsulot topilmadi: {0}").format(code))
-
-        cleaned.append(
-            {
-                "item": code,
-                "item_name": frappe.db.get_value("Item", code, "item_name"),
-                "qty": qty,
-                "comment": (row or {}).get("comment") or "",
-            }
-        )
-    return cleaned
-
-
-def _assert_removals_allowed(invoice: str, incoming: list):
-    """TZ §8 — tayyorlash boshlangan taomni kamaytirish/olib tashlash TAQIQ.
-
-    Oshxona holati YAGONA haqiqat manbai (TZ §8/#4).
-    """
-    current = {}
-    for row in frappe.get_all(
-        "POS Invoice Item",
-        filters={"parent": invoice},
-        fields=["item_code", "qty"],
-    ):
-        current[row.item_code] = current.get(row.item_code, 0) + flt(row.qty)
-
-    wanted = {}
-    for row in incoming:
-        wanted[row["item"]] = wanted.get(row["item"], 0) + flt(row["qty"])
-
-    kitchen = kitchen_status.get_item_statuses_for_invoice(invoice)
-
-    for item_code, old_qty in current.items():
-        new_qty = wanted.get(item_code, 0)
-        removing = old_qty - new_qty
-        if removing <= 0:
-            continue  # qo'shish yoki o'zgarishsiz — ruxsat
-
-        state = kitchen.get(item_code)
-        if not state:
-            continue  # KOT yo'q — oshxona bu taomni umuman ko'rmagan
-
-        # NECHTASI hali boshlanmaganiga qaraymiz, umumiy holatga EMAS.
-        # Bitta taom ikki raundda buyurtma qilingan bo'lishi mumkin:
-        # 1 dona pishmoqda, 1 dona navbatda. Umumiy holat «Kutilmoqda»
-        # bo'lib ko'rinadi, lekin olib tashlash faqat NAVBATDAGISIGA
-        # tegishli (`kitchen_status.get_item_statuses_for_invoice`).
-        pending = flt(state.get("pending_qty") or 0)
-        if removing <= pending:
-            continue
-
-        item_name = frappe.db.get_value("Item", item_code, "item_name") or item_code
-
-        if pending <= 0:
-            frappe.throw(
-                _(
-                    "'{0}' allaqachon oshxonada ({1}) — uni olib tashlash yoki "
-                    "kamaytirish mumkin emas."
-                ).format(item_name, state["label"]),
-                title=_("Bekor qilib bo'lmaydi"),
-            )
-
-        frappe.throw(
-            _(
-                "'{0}' — {1} donasi allaqachon oshxonada. Ko'pi bilan {2} "
-                "donasini olib tashlash mumkin."
-            ).format(item_name, int(old_qty - pending), int(pending)),
-            title=_("Bekor qilib bo'lmaydi"),
-        )
-
-
-def _current_shift_user(scope):
-    """Ochiq smenani kim ochgan (kassir). Smena bo'lmasa `None`."""
-    from ozturkapp.ozturkapp.api.desktop_pos import _get_user_room, _open_opening_entry
-
-    room = ""
-    try:
-        room = _get_user_room(scope.branch)
-    except Exception:
-        pass
-
-    opening = _open_opening_entry(scope.branch, scope.pos_profile, room)
-    return frappe.db.get_value("POS Opening Entry", opening, "user") if opening else None
-
-
-def _existing_pax(invoice) -> int:
-    """Mavjud chekdagi mehmonlar soni (ofitsant uni o'zgartirmaydi)."""
-    if not invoice:
-        return 0
-    return cint(frappe.db.get_value("POS Invoice", invoice, "no_of_pax"))
-
-
-def _default_mode_of_payment(pos_profile: str) -> str:
-    methods = cashier_billing.get_payment_methods(pos_profile)
-    if not methods:
-        frappe.throw(_("POS Profile'da to'lov usuli sozlanmagan"))
-    for m in methods:
-        if m["default"]:
-            return m["mode_of_payment"]
-    return methods[0]["mode_of_payment"]
-
-
 # ═══════════════════════════════════════════════════════════════════
 #  6. Hisob so'rash (TZ §7.8)
 # ═══════════════════════════════════════════════════════════════════
@@ -708,6 +611,8 @@ def request_bill(invoice):
     require_waiter()
     scope = cashier_permissions.resolve_scope()
     row = cashier_permissions.assert_invoice_in_scope(invoice, scope, docstatus=0)
+    if cint(row.custom_cancelled):
+        frappe.throw(_("Bekor qilingan buyurtma uchun hisob so'rab bo'lmaydi"))
 
     if not frappe.db.count("POS Invoice Item", {"parent": invoice}):
         frappe.throw(_("Bo'sh buyurtma uchun hisob so'rab bo'lmaydi"))
@@ -808,14 +713,4 @@ def create_customer(customer_name, mobile_number=None):
 def search_customers(query=None, limit=20):
     require_waiter()
 
-    filters = {}
-    if query:
-        filters = {"customer_name": ["like", f"%{query}%"]}
-
-    return frappe.get_all(
-        "Customer",
-        filters=filters,
-        fields=["name", "customer_name", "mobile_number"],
-        limit_page_length=cint(limit) or 20,
-        order_by="modified desc",
-    )
+    return order_items.search_customers(query, limit)

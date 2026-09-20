@@ -1,0 +1,152 @@
+/*
+ * Zal rejasi (TZ §4, §20).
+ *
+ * Tuval JS'da ENI va BALANDLIGI bo'yicha masshtablanadi (`fitFloor`) va
+ * `--rc-scale` shu masshtabni beradi. Masshtab 0.7..1.15 oralig'ida: stol o'zining
+ * tabiiy o'lchamiga yaqin turadi (katta ekranda «semiz» kattalashmaydi), zich zal esa
+ * 0.7 gacha kichrayadi. Masshtab 1 dan kichik bo'lsa matn o'qilishi uchun tuval
+ * birligidagi o'lcham `1/masshtab` ga kattalashtiriladi — EKRANDA stol nomi kamida
+ * 16px, qolgan matn kamida 12-13px bo'lib qoladi.
+ *
+ * STOL KARTASI TUZILISHI (hamma holat va shakl uchun bir xil)
+ *   yuqori chetda   o'tgan vaqt tabletkasi (band stol)
+ *   o'rtada         nom · holat (belgi + matn) · summa / o'rinlar / bron vaqti · ofitsant
+ *   pastki chetda   belgilar tabletkasi (🔔 hisob so'radi, 🧾 hisob berilgan, ⛓ birlashgan, ×N)
+ * Tabletkalar stol chegarasida turadi (matn oqimiga kirmaydi), shuning uchun aylana va
+ * to'rtburchak stolda bir xil ko'rinadi va matn bilan to'qnashmaydi.
+ */
+.rc-floor__canvas { --rc-inv: calc(1 / var(--rc-scale, 1)); }
+
+.rc-floor__toolbar {
+	flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	margin: 8px 12px 0; padding: 6px 10px;
+	background: var(--rc-accent-soft); border: 1px solid var(--rc-accent); border-radius: var(--rc-radius);
+}
+.rc-floor__mode { font-weight: 700; color: var(--rc-accent-ink); }
+
+/* Zal maydoni: yengil nuqtali to'r — bo'sh joy «tugallanmagan» emas, zal rejasi kabi ko'rinadi. */
+.rc-floor__scroll {
+	flex: 1 1 auto; min-height: 0; overflow: auto;
+	display: flex; align-items: flex-start; padding: 16px;
+	background-image: radial-gradient(var(--rc-border) 1px, transparent 1.2px);
+	background-size: 22px 22px;
+	background-attachment: local;
+}
+/* Zal chapga va yuqoriga tegib turadi — bir tekis chetki bo'shliq (`padding`). */
+.rc-floor__stage { position: relative; flex: none; }
+.rc-floor__canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+/* Tahrirlash rejimi — stollar sudralishi mumkin. */
+.rc-floor__canvas--edit .rc-table { cursor: grab; touch-action: none; }
+.rc-floor__canvas--edit .rc-table:active,
+.rc-table--dragging {
+	cursor: grabbing;
+	transition: none;
+	box-shadow: 0 8px 22px rgba(0,0,0,.18);
+	z-index: 5;
+}
+
+/* Zal bloki — faqat "Barcha zallar" ko'rinishida (TZ §4).
+ *
+ * Sarlavha `.rc-band__header` ichida, ajratilgan bo'shliqda turadi; stollar shu
+ * balandlikka pastga surilgan, shuning uchun nom stol ustiga CHIQMAYDI. Sarlavha va
+ * uning ostidagi chiziq bloklarning TO'LIQ eniga cho'ziladi. Blokning o'zi hodisalarni
+ * ushlamaydi (`pointer-events: none`), aks holda ostidagi stollar bosilmay qolardi.
+ */
+.rc-band { position: absolute; pointer-events: none; }
+.rc-band__header {
+	display: flex; align-items: center; gap: 10px; width: 100%;
+	padding-bottom: 7px; border-bottom: 1px solid var(--rc-border);
+}
+.rc-band__label {
+	display: inline-flex; align-items: center; gap: 8px;
+	font-size: max(13px, calc(13px * var(--rc-inv))); font-weight: 800;
+	text-transform: uppercase; letter-spacing: .08em;
+	color: var(--rc-muted); white-space: nowrap;
+}
+.rc-band__count {
+	padding: 0 8px; border-radius: 999px;
+	background: var(--rc-sunken); color: var(--rc-text);
+	font-size: max(12px, calc(12px * var(--rc-inv))); letter-spacing: 0; line-height: 1.6;
+}
+
+.rc-table {
+	position: absolute;
+	display: flex; flex-direction: column;
+	align-items: center; justify-content: center; gap: 2px;
+	padding: 6px 4px;
+	border: 2.5px solid var(--rc-border);
+	background: var(--rc-surface);
+	color: var(--rc-text);
+	box-shadow: var(--rc-shadow-1);
+	cursor: pointer; text-align: center;
+	container-type: size;
+	transition: transform .1s ease, box-shadow .1s ease;
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-table:hover { transform: translateY(-2px); box-shadow: var(--rc-shadow-2); }
+.rc-table:focus-visible { outline: 3px solid var(--rc-accent-ink); outline-offset: 3px; }
+.rc-table[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--rc-surface), 0 0 0 6px var(--rc-accent); transform: translateY(-2px); }
+
+.rc-table--Square    { border-radius: 14px; }
+.rc-table--Rectangle { border-radius: 14px; }
+.rc-table--Circle    { border-radius: 50%; padding: 4px; }
+
+/* Tus fon: shaffof rang stol ostidagi nuqtali to'rni ko'rsatmasligi uchun avval to'liq fon. */
+.rc-table--AVAILABLE, .rc-table--RESERVED, .rc-table--OCCUPIED { background-color: var(--rc-surface); }
+.rc-table--AVAILABLE { border-color: var(--rc-available); background-image: linear-gradient(var(--rc-available-soft), var(--rc-available-soft)); }
+.rc-table--RESERVED  { border-color: var(--rc-reserved);  background-image: linear-gradient(var(--rc-reserved-soft), var(--rc-reserved-soft)); }
+.rc-table--OCCUPIED  { border-color: var(--rc-occupied);  background-image: linear-gradient(var(--rc-occupied-soft), var(--rc-occupied-soft)); }
+
+/* Hisob so'ralgan stol: qalin chegara (pulsatsiya o'chirilsa ham qoladi) + qo'ng'iroq. */
+.rc-table--bill { border-color: var(--rc-reserved); border-width: 4px; animation: rc-attention 1.8s ease-in-out infinite; }
+/* Tanlangan stolda pulsatsiya to'xtaydi — aks holda u tanlov halqasini bosib ketadi. */
+.rc-table--bill[aria-pressed="true"] { animation: none; }
+
+.rc-table__name { font-size: max(17px, calc(16px * var(--rc-inv))); font-weight: 800; line-height: 1.1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Holat FAQAT rang bilan emas — belgi + qisqa matn bilan (TZ §20). */
+.rc-table__status {
+	display: flex; align-items: center; gap: 4px;
+	font-size: max(12px, calc(12px * var(--rc-inv))); font-weight: 800; letter-spacing: .05em; text-transform: uppercase; line-height: 1.2;
+}
+.rc-table--AVAILABLE .rc-table__status { color: var(--rc-available-ink); }
+.rc-table--RESERVED  .rc-table__status { color: var(--rc-reserved-ink); }
+.rc-table--OCCUPIED  .rc-table__status { color: var(--rc-occupied-ink); }
+
+.rc-table__amount { font-size: max(15px, calc(14px * var(--rc-inv))); font-weight: 800; line-height: 1.2; }
+.rc-table__meta, .rc-table__who {
+	max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	font-size: max(13px, calc(12px * var(--rc-inv))); color: var(--rc-muted); line-height: 1.2;
+}
+/* O'rinlar soni yo'q stol ham boshqalar bilan bir tekis turadi: bo'sh qator o'rni saqlanadi. */
+.rc-table__meta:empty::before { content: "\00a0"; }
+
+/* Chetdagi tabletkalar (o'tgan vaqt / belgilar). */
+.rc-table__age, .rc-table__flags {
+	position: absolute; left: 50%; z-index: 1;
+	display: inline-flex; align-items: center; gap: 4px; max-width: 92%;
+	padding: 0 9px; border: 1px solid var(--rc-border); border-radius: 999px;
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: max(12px, calc(12px * var(--rc-inv))); font-weight: 700; line-height: 1.55; white-space: nowrap;
+	box-shadow: var(--rc-shadow-1);
+}
+.rc-table__age   { top: 0;    transform: translate(-50%, -50%); }
+.rc-table__flags { bottom: 0; transform: translate(-50%, 50%); }
+.rc-table__badge { color: var(--rc-muted); }
+.rc-table--dim { opacity: .22; pointer-events: none; }
+
+/* Zich zalda (masshtab < 0.85) yoki past stolda ofitsant qatori tushib qoladi;
+   juda past stolda o'rinlar soni ham. */
+.rc-floor__canvas--dense .rc-table__who { display: none; }
+@container (max-height: 108px) {
+	.rc-table__who { display: none; }
+}
+@container (max-height: 84px) {
+	.rc-table__meta { display: none; }
+}
+
+.rc-floor__empty {
+	position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column;
+	align-items: center; justify-content: center;
+}

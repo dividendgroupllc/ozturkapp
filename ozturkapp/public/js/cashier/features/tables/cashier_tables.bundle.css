@@ -1,0 +1,100 @@
+/*
+ * Stollar moduli: stol tanlash setkasi, bronlar ro'yxati, mehmonlar soni.
+ * Ranglar yadroning `--rc-*` o'zgaruvchilaridan; bosiladigan element >= 48px.
+ */
+
+/* ═══ Stol tanlash setkasi ═════════════════════════════════════ */
+
+.rc-tt { display: flex; flex-direction: column; gap: 8px; }
+
+/* Zal tugmalari ro'yxat aylanganda ham ko'rinib turadi. */
+.rc-tt__rooms {
+	position: sticky; top: 0; z-index: 1;
+	padding: 2px 0 6px; background: var(--rc-surface);
+}
+
+.rc-tt__grid {
+	display: grid; gap: 8px;
+	grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+}
+.rc-tt__group {
+	grid-column: 1 / -1; padding-top: 4px;
+	font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+	color: var(--rc-muted);
+}
+.rc-tt__empty { grid-column: 1 / -1; margin: 12px 0; text-align: center; color: var(--rc-muted); }
+
+.rc-tt__tile {
+	position: relative; min-width: 0; min-height: 64px; padding: 6px 8px;
+	display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	text-align: center; cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-tt__tile--free     { border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-tt__tile--reserved { border-color: var(--rc-reserved);  background: var(--rc-reserved-soft); }
+.rc-tt__tile--busy     { border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+.rc-tt__tile--merged   { border-color: var(--rc-accent);    background: var(--rc-accent-soft); }
+.rc-tt__tile--primary  { border-style: dashed; background: var(--rc-sunken); }
+.rc-tt__tile:disabled  { opacity: .55; cursor: not-allowed; }
+.rc-tt__tile:focus-visible { outline: 3px solid var(--rc-accent-ink); outline-offset: 2px; }
+
+/* Tanlangan karta: qalin halqa + belgi (rangga tayanmaydi). */
+.rc-tt__tile[aria-pressed="true"] { box-shadow: 0 0 0 4px var(--rc-accent); }
+.rc-tt__tile[aria-pressed="true"]::after {
+	content: "✓"; position: absolute; top: 2px; right: 6px;
+	font-size: 16px; font-weight: 800; color: var(--rc-accent-ink);
+}
+
+.rc-tt__name { max-width: 100%; font-size: 18px; font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.rc-tt__meta {
+	max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	font-size: 13px; line-height: 1.2; color: var(--rc-muted);
+}
+
+.rc-tt__legend { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: var(--rc-muted); }
+
+/* ═══ Bronlar ro'yxati ═════════════════════════════════════════ */
+
+.rc-tres__days { position: sticky; top: 0; z-index: 1; padding-bottom: 6px; background: var(--rc-surface); }
+.rc-tres__summary { margin: 2px 0 8px; font-size: 14px; font-weight: 700; color: var(--rc-muted); }
+.rc-tres__list { display: flex; flex-direction: column; gap: 6px; }
+.rc-tres__state { margin: 24px 0; text-align: center; color: var(--rc-muted); }
+.rc-tres__state--error { color: var(--rc-occupied-ink); white-space: pre-wrap; }
+.rc-tres__label { margin-top: 12px; }
+
+.rc-tres__row {
+	display: grid; align-items: center; gap: 4px 12px;
+	grid-template-columns: 64px minmax(0, 1fr) auto 132px;
+	min-height: 64px; padding: 6px 10px;
+	border: 1px solid var(--rc-border); border-left: 5px solid var(--rc-reserved);
+	border-radius: var(--rc-radius); background: var(--rc-surface);
+}
+.rc-tres__time { display: flex; flex-direction: column; line-height: 1.15; }
+.rc-tres__time strong { font-size: 18px; }
+.rc-tres__time span { font-size: 12px; color: var(--rc-muted); }
+.rc-tres__main { min-width: 0; }
+.rc-tres__who { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rc-tres__table { flex: 0 0 auto; font-size: 17px; font-weight: 800; }
+.rc-tres__guest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
+.rc-tres__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--rc-muted); }
+
+.rc-tres__status {
+	justify-self: end; padding: 3px 9px; border: 1.5px solid var(--rc-border); border-radius: 999px;
+	font-size: 12px; font-weight: 700; white-space: nowrap; color: var(--rc-muted);
+}
+.rc-tres__status--Pending, .rc-tres__status--Confirmed {
+	color: var(--rc-reserved-text); border-color: var(--rc-reserved); background: var(--rc-reserved-soft);
+}
+.rc-tres__status--Seated    { color: var(--rc-available); border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-tres__status--NoShow    { color: var(--rc-occupied);  border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+.rc-tres__cancel { min-height: var(--rc-touch); padding: 6px 10px; font-size: 14px; }
+
+/* ═══ Mehmonlar soni ═══════════════════════════════════════════ */
+
+.rc-tstep { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.rc-tstep__btn { flex: 0 0 auto; width: 56px; min-height: 56px; padding: 0; font-size: 28px; font-weight: 700; }
+.rc-tstep__value { min-width: 48px; text-align: center; font-size: 26px; font-weight: 800; }
+.rc-tstep__hint { font-size: 14px; color: var(--rc-muted); }
+.rc-tstep__hint--warn { color: var(--rc-reserved-ink); font-weight: 700; }

@@ -1,0 +1,211 @@
+/*
+ * Kassa oynasi — asos: o'zgaruvchilar, boot holatlari, umumiy boshqaruv elementlari.
+ *
+ * PRINSIPLAR
+ *   - Sensorli ekran uchun: bosiladigan element eng kami 48px.
+ *   - Holat FAQAT RANG bilan emas — belgi + matn bilan ham (TZ §20).
+ *   - Desk mavzusi (light/dark) CSS o'zgaruvchilari orqali qo'llab-quvvatlanadi.
+ *   - Barcha selektorlar `.rc-` prefiksi bilan — Desk uslublariga tegmaydi.
+ */
+
+.rc-root {
+	--rc-gap: 8px;
+	--rc-radius: 10px;
+	--rc-radius-lg: 14px;
+	--rc-touch: 48px;
+
+	--rc-bg: var(--fg-color, #fff);
+	--rc-surface: var(--card-bg, #fff);
+	--rc-sunken: var(--subtle-fg, #f4f5f6);
+	--rc-border: var(--border-color, #e2e4e7);
+	--rc-text: var(--text-color, #1f272e);
+	--rc-muted: var(--text-muted, #525252);
+	/* Boshqaruv elementi chegarasi (kiritish maydoni, tanlov tugmasi): fon bilan >= 3:1. */
+	--rc-line: #8b8b8b;
+
+	/*
+	 * HOLAT RANGLARI. Har bir rol UCHTA qiymat bilan:
+	 *   asosiy  — chegara, nuqta, to'ldirish (ustidagi oq matn >= 4.5:1, fon bilan >= 3:1)
+	 *   -ink    — shu rangdagi MATN (oq va och tusli fonda >= 4.5:1)
+	 *   -soft   — och tusli fon
+	 * Hisoblangan nisbatlar (oq fon): #15803d 5.0 · #166534 7.1 · #b91c1c 6.5 · #991b1b 8.3 ·
+	 * #b45309 5.0 · #92400e 7.1 · #1d4ed8 6.7.
+	 */
+	--rc-available: #15803d;
+	--rc-available-ink: #166534;
+	--rc-available-soft: rgba(21, 128, 61, .10);
+	--rc-available-fill: #15803d; /* to'ldirilgan tugma (ustida oq matn >= 4.5:1) — qorong'i mavzuda ham shu */
+	--rc-reserved: #b45309;
+	--rc-reserved-ink: #92400e;
+	--rc-reserved-soft: rgba(217, 119, 6, .12);
+	--rc-occupied: #b91c1c;
+	--rc-occupied-ink: #991b1b;
+	--rc-occupied-soft: rgba(185, 28, 28, .08);
+	--rc-accent: #2563eb;
+	--rc-accent-ink: #1d4ed8;
+	--rc-accent-soft: rgba(37, 99, 235, .10);
+
+	--rc-reserved-text: var(--rc-reserved-ink);
+	--rc-bell: var(--rc-reserved-ink);
+
+	--rc-shadow-1: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+	--rc-shadow-2: 0 4px 14px rgba(16, 24, 40, .12);
+	--rc-shadow-3: 0 14px 40px rgba(16, 24, 40, .25);
+
+	color: var(--rc-text);
+	font-variant-numeric: tabular-nums;
+}
+.rc-root *, .rc-root *::before, .rc-root *::after { box-sizing: border-box; }
+.rc-root button { font-family: inherit; }
+/* Tugma matni Desk mavzusidan olinadi. Brauzer standarti (`buttontext` — qora) qorong'i
+   mavzuda qora fonda QORA matn beradi (chip, «Yana» varag'i, kurs tugmalari ko'rinmay qolardi).
+   `:where` — o'ziga xoslik 0: `.rc-btn--primary` kabi aniq ranglar ustidan chiqmaydi. */
+:where(.rc-root) button { color: inherit; }
+
+/* Qorong'i mavzu: fon to'q, shuning uchun matn ranglari ochroq, chegara/to'ldirish ranglari esa
+   fon bilan >= 3:1 bo'lishi uchun bir pog'ona yorqinroq (ustidagi oq matn baribir >= 4.5:1). */
+[data-theme="dark"] .rc-root {
+	--rc-line: #7a7a7a;
+	--rc-available: #16a34a;
+	--rc-available-ink: #4ade80;
+	--rc-available-soft: rgba(74, 222, 128, .12);
+	--rc-reserved: #d97706;
+	--rc-reserved-ink: #fbbf24;
+	--rc-reserved-soft: rgba(251, 191, 36, .13);
+	--rc-occupied: #dc2626;
+	--rc-occupied-ink: #f87171;
+	--rc-occupied-soft: rgba(248, 113, 113, .14);
+	--rc-accent: #2563eb;
+	--rc-accent-ink: #93c5fd;
+	--rc-accent-soft: rgba(96, 165, 250, .16);
+	--rc-shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+	--rc-shadow-2: 0 4px 14px rgba(0, 0, 0, .5);
+	--rc-shadow-3: 0 14px 40px rgba(0, 0, 0, .6);
+}
+
+/* Fokus halqasi FAQAT klaviatura bilan (`:focus-visible`). Sichqoncha/barmoq bosishidan keyin
+   Desk'ning ko'k halqasi tugmada qolib ketmasligi uchun `:focus` uslubi bekor qilinadi. */
+.rc-root button:focus, .rc-root a:focus, .rc-root summary:focus { outline: none; box-shadow: none; }
+.rc-root button:focus-visible, .rc-root a:focus-visible, .rc-root summary:focus-visible {
+	outline: 2px solid var(--rc-accent-ink); outline-offset: 2px; box-shadow: none;
+}
+/* Desk `[hidden]` ni `display: none !important` qiladi — bizning `display: flex`
+   qoidalarimiz ustidan ham o'tishi uchun shu yerda takrorlanadi. */
+.rc-root [hidden] { display: none !important; }
+
+/* ═══ Boot holatlari ═══════════════════════════════════════════ */
+
+.rc-boot { display: none; padding: 64px 24px; text-align: center; }
+.rc-root[data-state="loading"] .rc-boot--loading,
+.rc-root[data-state="error"]   .rc-boot--error,
+.rc-root[data-state="shift"]   .rc-gate { display: block; }
+.rc-app { display: none; }
+.rc-root[data-state="ready"] .rc-app { display: flex; }
+
+.rc-spinner {
+	width: 38px; height: 38px; margin: 0 auto 16px;
+	border: 3px solid var(--rc-border);
+	border-top-color: var(--rc-accent);
+	border-radius: 50%;
+	animation: rc-spin .8s linear infinite;
+}
+@keyframes rc-spin { to { transform: rotate(360deg); } }
+
+.rc-boot__icon { font-size: 40px; }
+.rc-boot__title { margin: 12px 0 6px; font-size: 20px; }
+.rc-boot__message { color: var(--rc-muted); margin-bottom: 18px; white-space: pre-wrap; }
+/* `.rc-btn` — `display: flex`: matnli markazlash unga ta'sir qilmaydi. */
+.rc-boot > .rc-btn { margin-left: auto; margin-right: auto; }
+
+/* ═══ Tugmalar ═════════════════════════════════════════════════ */
+
+.rc-btn {
+	display: flex; align-items: center; justify-content: center; gap: 8px;
+	min-height: var(--rc-touch); padding: 10px 18px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 15px; font-weight: 600; line-height: 1.2; cursor: pointer;
+	box-shadow: var(--rc-shadow-1);
+	transition: filter .12s, background-color .12s;
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-btn:hover:not(:disabled) { filter: brightness(.97); }
+.rc-btn:active:not(:disabled) { filter: brightness(.9); }
+.rc-btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.rc-btn--primary { background: var(--rc-accent); border-color: var(--rc-accent); color: #fff; }
+.rc-btn--pay     { background: var(--rc-available-fill); border-color: var(--rc-available-fill); color: #fff; }
+.rc-btn--danger  { color: var(--rc-occupied-ink); border-color: var(--rc-occupied); }
+.rc-btn--danger-solid { background: var(--rc-occupied); border-color: var(--rc-occupied); color: #fff; }
+.rc-btn--busy    { pointer-events: none; opacity: .6; }
+
+/* ═══ Kiritish maydonlari ══════════════════════════════════════ */
+
+.rc-input {
+	width: 100%; min-height: var(--rc-touch); padding: 10px 14px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-bg); color: var(--rc-text);
+	font-size: 17px; font-family: inherit;
+}
+textarea.rc-input { resize: none; line-height: 1.35; }
+.rc-input:focus { outline: 2px solid var(--rc-accent-ink); outline-offset: -1px; }
+.rc-input--amount { text-align: right; font-size: 22px; font-weight: 700; }
+
+/* ═══ Bo'sh holatlar ═══════════════════════════════════════════ */
+
+.rc-empty { padding: 36px 20px; text-align: center; color: var(--rc-muted); }
+.rc-empty__icon {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 64px; height: 64px; margin-bottom: 4px; border-radius: 50%;
+	background: var(--rc-sunken); font-size: 28px; line-height: 1;
+}
+.rc-empty__title { font-size: 16px; font-weight: 700; margin: 8px 0 4px; color: var(--rc-text); }
+.rc-empty__hint { max-width: 280px; margin: 0 auto; font-size: 14px; line-height: 1.45; }
+.rc-empty--inline { padding: 18px 0; }
+
+.rc-hint { font-size: 13px; color: var(--rc-muted); margin-top: 8px; line-height: 1.4; }
+
+/* ═══ Yordamchi belgilar ═══════════════════════════════════════ */
+
+/* O'tgan vaqt: sarg'ayadi (>60 daq) va qizaradi (>90 daq). */
+.rc-elapsed { font-weight: 600; }
+.rc-elapsed[data-level="warn"]  { color: var(--rc-reserved-ink); }
+.rc-elapsed[data-level="alert"] { color: var(--rc-occupied-ink); font-weight: 800; }
+
+/* «Hisob so'radi» qo'ng'irog'i — doimiy ko'rinadi; e'tibor uchun tebranadi. */
+.rc-bell {
+	display: inline-flex; align-items: center; gap: 3px;
+	color: var(--rc-bell); font-weight: 800; font-size: 13px;
+}
+.rc-bell > span[aria-hidden] { display: inline-block; transform-origin: 50% 0; animation: rc-ring 2.4s ease-in-out infinite; }
+.rc-bell--panel { gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--rc-reserved-soft); border: 1.5px solid var(--rc-reserved); }
+@keyframes rc-ring {
+	0%, 50%, 100% { transform: rotate(0); }
+	5%, 15%, 25% { transform: rotate(14deg); }
+	10%, 20%, 30% { transform: rotate(-14deg); }
+}
+@keyframes rc-attention {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, .55); }
+	50%      { box-shadow: 0 0 0 7px rgba(217, 119, 6, 0); }
+}
+
+.rc-chip {
+	display: inline-flex; align-items: center; gap: 5px;
+	padding: 4px 11px; border-radius: 999px;
+	font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+	border: 1.5px solid; white-space: nowrap;
+}
+.rc-chip--AVAILABLE { color: var(--rc-available-ink); border-color: var(--rc-available); background: var(--rc-available-soft); }
+.rc-chip--RESERVED  { color: var(--rc-reserved-ink);  border-color: var(--rc-reserved);  background: var(--rc-reserved-soft); }
+.rc-chip--OCCUPIED  { color: var(--rc-occupied-ink);  border-color: var(--rc-occupied);  background: var(--rc-occupied-soft); }
+
+.rc-tag {
+	font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+	padding: 3px 8px; border-radius: 6px; background: var(--rc-sunken); color: var(--rc-muted);
+	white-space: nowrap;
+}
+.rc-tag--billed { background: var(--rc-reserved-soft); color: var(--rc-reserved-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+	.rc-root * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+	.rc-spinner { animation: rc-spin 2s linear infinite !important; animation-iteration-count: infinite !important; }
+}

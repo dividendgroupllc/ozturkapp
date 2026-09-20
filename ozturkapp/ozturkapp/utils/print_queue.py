@@ -21,6 +21,8 @@ PRINTER QAYSI
     Bill      -> filialning `role=Kassa` printeri (bitta)
     KOT       -> stansiyaning (`URY KOT.production`) `role=Oshxona` printer(lar)i
     KOT Item  -> xuddi KOT kabi (taom "Tayyor" bo'lganda)
+    Drawer    -> `role=Kassa` printeri (g'aladon shu printerning DK portiga ulangan)
+    Shift Report -> `role=Kassa` printeri (X/Z smena hisoboti)
 
 Printer sozlanmagan bo'lsa `enqueue_*` `None` qaytaradi — chaqiruvchi
 eski (brauzer) yo'lga tushadi. Ya'ni printer yo'q joyda hech narsa buzilmaydi.
@@ -32,12 +34,16 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, now_datetime
+from frappe.utils import add_to_date, cint, now_datetime
 
 from ozturkapp.ozturkapp.utils import escpos
 
 ROLE_CASHIER = "Kassa"
 ROLE_KITCHEN = "Oshxona"
+
+#: `Ozturk Print Job.job_type` qiymatlari (Bill/KOT/KOT Item/Test — eski, literal).
+JOB_DRAWER = "Drawer"
+JOB_SHIFT_REPORT = "Shift Report"
 
 #: Agent shuncha soniya `heartbeat` yubormasa — oflayn.
 AGENT_TTL = 45
@@ -50,6 +56,15 @@ MAX_ATTEMPTS = 5
 
 #: Bir so'rovda agentga beriladigan topshiriqlar soni.
 PULL_LIMIT = 10
+
+#: G'aladon topshirig'i shuncha soniyadan keyin ESKIRADI (Pending -> Failed).
+#: Agent oflayn bo'lib qolsa oddiy chek keyin chiqsa ham zarar yo'q, lekin
+#: g'aladonning 10 daqiqadan keyin, hech kim kutmagan paytda o'zi ochilishi
+#: xavfli. Eskirish SERVERDA (`pull_jobs`) — agentni yangilash shart emas.
+DRAWER_TTL = 60
+
+#: `kick_drawer` ichidagi savepoint nomi (xatoda faqat o'z yozuvini qaytarish uchun).
+_DRAWER_SAVEPOINT = "ozturk_kick_drawer"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,7 +114,7 @@ def has_printer(branch: str, role: str, production_unit: str | None = None) -> b
 
 def enqueue(job_type: str, printer: dict, payload: bytes, branch: str,
             ref_doctype: str | None = None, ref_name: str | None = None,
-            title: str | None = None) -> str:
+            title: str | None = None, reason: str | None = None) -> str:
     """Tayyor ESC/POS baytlarni navbatga yozish. Topshiriq nomini qaytaradi."""
     doc = frappe.get_doc({
         "doctype": "Ozturk Print Job",
@@ -110,6 +125,7 @@ def enqueue(job_type: str, printer: dict, payload: bytes, branch: str,
         "title": title or f"{job_type} {ref_name or ''}".strip(),
         "ref_doctype": ref_doctype,
         "ref_name": ref_name,
+        "reason": reason,
         "payload": escpos.to_b64(payload),
         "attempts": 0,
     })
@@ -119,6 +135,15 @@ def enqueue(job_type: str, printer: dict, payload: bytes, branch: str,
         "print job %s: %s -> %s (%s)", doc.name, job_type, printer["name"], ref_name
     )
     return doc.name
+
+
+def _header(printer: dict) -> dict:
+    """Chek sarlavhasi/pastki matni — `Ozturk Printer` maydonlaridan."""
+    return {
+        "line1": printer.get("header_line_1"),
+        "line2": printer.get("header_line_2"),
+        "footer": printer.get("footer_text"),
+    }
 
 
 def enqueue_bill(invoice: str, scope=None) -> str | None:
@@ -136,18 +161,18 @@ def enqueue_bill(invoice: str, scope=None) -> str | None:
     bill = cashier_billing.build_bill(invoice, scope, include_kitchen=False)
     bill["restaurant"] = scope.get("restaurant")
     bill["company"] = scope.get("company")
-    header = {
-        "line1": printer.get("header_line_1"),
-        "line2": printer.get("header_line_2"),
-        "footer": printer.get("footer_text"),
-    }
-    payload = escpos.build_bill(bill, printer, header)
-    return enqueue(
+    payload = escpos.build_bill(bill, printer, _header(printer))
+    job = enqueue(
         "Bill", printer, payload, scope.branch,
         ref_doctype="POS Invoice", ref_name=bill["invoice"],
         title=f"Chek {bill.get('order_number') or bill['invoice']}"
         + (f" | Stol {bill['table']}" if bill.get("table") else ""),
     )
+    # Chek endi joriy holat (chegirma, choychaqa) bilan chiqadi — «qayta chop
+    # etish kerak» belgisi o'chadi. Faqat hisob cheki uchun: g'aladon va
+    # hisobot topshiriqlari chekka tegmaydi.
+    cashier_billing.clear_reprint_needed(bill["invoice"])
+    return job
 
 
 def _kot_payload_data(doc) -> dict:
@@ -237,9 +262,100 @@ def enqueue_test(printer_name: str, label: str = "") -> str:
                    title=f"Sinov: {printer.printer_name}")
 
 
+def enqueue_shift_report(report: dict, scope) -> str | None:
+    """X/Z smena hisobotini kassa printeriga qo'yish. Printer yo'q bo'lsa `None`.
+
+    `report` — `utils/shift_report.build_report()` natijasi: bu yerga
+    KO'R SANOQDAN o'tgan (kassir uchun summalari yashirilgan) hisobot keladi,
+    qog'ozga chiqadigan narsa ham shundan farq qilmaydi.
+    """
+    printer = cashier_printer(scope.branch)
+    if not printer:
+        return None
+
+    payload = escpos.build_shift_report(report, printer, _header(printer))
+    cashier = (report.get("cashier") or {}).get("full_name") or ""
+    return enqueue(
+        JOB_SHIFT_REPORT, printer, payload, scope.branch,
+        ref_doctype="POS Opening Entry", ref_name=report.get("pos_opening_entry"),
+        title=f"{report.get('kind')}-hisobot | {cashier}".strip(" |"),
+    )
+
+
+def kick_drawer(scope, reason: str = "", invoice: str | None = None) -> str | None:
+    """Kassa g'aladonini ochish topshirig'ini navbatga qo'yadi. HECH QACHON XATO BERMAYDI.
+
+    Bu funksiyani naqd to'lov kabi PUL amalidan keyin chaqirishadi — g'aladon
+    ochilmagani to'lovni bekor qilmasligi kerak. Shuning uchun har qanday
+    nosozlik (printer yo'q, DocType migratsiya qilinmagan, baza xatosi)
+    logga yoziladi va `None` qaytadi.
+
+    Args:
+        scope: `cashier_permissions.resolve_scope()` natijasi (`branch` kerak).
+        reason: nima uchun ochilyapti ("naqd to'lov", "manual", ...).
+        invoice: to'lov chekining nomi. BERILMAGAN bo'lsa ochilish «savdosiz»
+            hisoblanadi va smena hisobotida alohida sanaladi.
+
+    Kim, qachon, nima uchun ochgani topshiriqning o'zida saqlanadi: `owner`
+    (foydalanuvchi), `creation` (vaqt), `reason`, `ref_name` (chek). Hisobot
+    aynan shu jadvaldan so'raydi.
+
+    Returns:
+        Topshiriq nomi, printer yo'q yoki xato bo'lsa `None`.
+    """
+    logger = frappe.logger("ozturk_print")
+    reason = (reason or "").strip()[:140]
+    user = frappe.session.user
+    try:
+        # Xatoda faqat SHU yozuv qaytariladi — `frappe.db.rollback()` chaqiruvchining
+        # to'lovini ham bekor qilib yuborardi.
+        frappe.db.savepoint(_DRAWER_SAVEPOINT)
+        printer = cashier_printer(scope.branch)
+        if not printer:
+            logger.warning(
+                "drawer: kassa printeri yo'q (filial=%s user=%s sabab=%s chek=%s)",
+                scope.branch, user, reason, invoice,
+            )
+            return None
+        # `title` Data(140): sabab ham 140 belgigacha bo'lishi mumkin — kesilmasa
+        # g'aladon UMUMAN ochilmay qolardi.
+        title = " | ".join(part for part in ("G'aladon", invoice, reason) if part)[:140]
+        job = enqueue(
+            JOB_DRAWER, printer, escpos.build_drawer_pulse(), scope.branch,
+            ref_doctype="POS Invoice" if invoice else None, ref_name=invoice or None,
+            title=title, reason=reason or None,
+        )
+        logger.info("drawer: job=%s filial=%s user=%s sabab=%s chek=%s",
+                    job, scope.branch, user, reason, invoice)
+        return job
+    except Exception:
+        logger.exception("drawer: topshiriq yaratilmadi (user=%s sabab=%s chek=%s)",
+                         user, reason, invoice)
+        try:
+            frappe.db.rollback(save_point=_DRAWER_SAVEPOINT)
+        except Exception:
+            logger.exception("drawer: savepoint qaytarilmadi")
+        return None
+
+
 def requeue(job_name: str) -> str:
     """Mavjud topshiriqning nusxasini yangi Pending topshiriq sifatida yaratish."""
     src = frappe.get_doc("Ozturk Print Job", job_name)
+    if src.job_type == JOB_DRAWER:
+        # Qayta yuborilgan g'aladon impulsi funksiya bayrog'ini, smena
+        # tekshiruvini va sabab yozuvini chetlab o'tardi (`api/printing.open_drawer`).
+        frappe.throw(
+            _("G'aladon topshirig'ini qayta yuborib bo'lmaydi — «G'aladon» tugmasini bosing."),
+            title=_("Qayta chop etib bo'lmaydi"),
+        )
+    if src.job_type == JOB_SHIFT_REPORT:
+        # Tayyor baytlarni nusxalash hisobotni MENEJER uchun tuzilgan
+        # (kutilgan summa va farq bilan) ko'rinishda kassirga ham chiqarib
+        # yuborardi. Yangi hisobot har safar so'rovchining huquqi bilan tuziladi.
+        frappe.throw(
+            _("Hisobotni qayta chop etish uchun X/Z hisobot tugmasidan foydalaning."),
+            title=_("Qayta chop etib bo'lmaydi"),
+        )
     doc = frappe.get_doc({
         "doctype": "Ozturk Print Job",
         "branch": src.branch,
@@ -269,6 +385,7 @@ def pull_jobs(branch: str, agent: str, limit: int = PULL_LIMIT) -> list:
     o'shaniki, ikkinchisi o'sha topshiriqni olmaydi.
     """
     limit = max(1, min(cint(limit) or PULL_LIMIT, 50))
+    expire_stale_drawer_jobs(branch)
     names = frappe.get_all(
         "Ozturk Print Job",
         filters={"branch": branch, "status": "Pending"},
@@ -315,6 +432,33 @@ def pull_jobs(branch: str, agent: str, limit: int = PULL_LIMIT) -> list:
             "created": str(row.creation),
         })
     return jobs
+
+
+def expire_stale_drawer_jobs(branch: str) -> int:
+    """`DRAWER_TTL` dan eski Pending g'aladon topshiriqlarini Failed qiladi.
+
+    Agent yangilanmaydi va topshiriq turini bilmaydi — u faqat baytlarni
+    uzatadi. Shuning uchun eskirishni agentga topshirish o'rniga uni
+    OLMASDAN OLDIN serverning o'zi hal qiladi.
+    """
+    stale = frappe.get_all(
+        "Ozturk Print Job",
+        filters={
+            "branch": branch, "job_type": JOB_DRAWER, "status": "Pending",
+            "creation": ("<", add_to_date(now_datetime(), seconds=-DRAWER_TTL)),
+        },
+        pluck="name",
+    )
+    for name in stale:
+        frappe.db.set_value("Ozturk Print Job", name, {
+            "status": "Failed",
+            "error": "G'aladon topshirig'i eskirdi — o'z vaqtida olinmadi",
+        }, update_modified=True)
+    if stale:
+        frappe.logger("ozturk_print").warning(
+            "drawer: %s ta topshiriq eskirdi (agent oflaynmi?): %s", len(stale), stale
+        )
+    return len(stale)
 
 
 def ack(job_name: str, ok: bool, error: str | None = None, agent: str | None = None) -> dict:

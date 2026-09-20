@@ -33,7 +33,10 @@ biri baza darajasida yiqiladi va u ham mavjud chekka ulanadi.
 """
 
 import frappe
+from frappe import _
 from frappe.utils import cint
+
+from ozturkapp.ozturkapp.utils.table_status import parse_merged_with
 
 #: Upstream `sync_order` qabul qilmaydigan, biz o'zimiz yozadigan maydonlar
 EXTRA_ARGS = ("ticket_number", "active_cashier", "active_cashier_role", "client_ref")
@@ -44,6 +47,65 @@ def _find_by_client_ref(client_ref: str) -> str | None:
     if not client_ref:
         return None
     return frappe.db.get_value("POS Invoice", {"custom_client_ref": client_ref}, "name")
+
+
+def _resolve_invoice_for_table(table, invoice):
+    """Upstream `get_order_invoice()` ning "LIKE" tuzog'idan himoya.
+
+    MUAMMO
+    ======
+    URY stoldagi chekni `restaurant_table = stol` YOKI
+    `custom_merged_tables LIKE %stol%` bilan qidiradi. "Table-1" nomi
+    "Table-10", "Table-11"... ni ham topadi: "Table-10" boshqa stolga
+    birlashtirilgan bo'lsa, "Table-1" ga BERILGAN YANGI buyurtma o'sha
+    birlashtirilgan chekka tushadi. Buyurtma beruvchi kassir bo'lsa
+    (`role_allowed_for_billing`) URY "stol band" tekshiruvini o'tkazib
+    yuboradi va chekning taomlarini yangi ro'yxat bilan ALMASHTIRADI
+    (`invoice.items = []`) — birlashtirilgan stol mehmonining buyurtmasi
+    yo'qoladi.
+
+    YECHIM
+    ======
+    Chek nomi berilmagan, stol berilgan chaqiruvda nomzod cheklar aniq
+    (CSV bo'laklari bo'yicha) tekshiriladi:
+
+        * begona chek topilmasa               -> hech narsa o'zgarmaydi
+        * stolning HAQIQIY egasi ham bor       -> upstream unga yo'naltiriladi
+        * faqat begona (prefiks mos) chek bor  -> buyurtma RAD etiladi
+    """
+    if not table or invoice:
+        return invoice
+
+    rows = frappe.get_all(
+        "POS Invoice",
+        filters={"docstatus": 0, "invoice_printed": 0},
+        or_filters={
+            "restaurant_table": table,
+            "custom_merged_tables": ["like", f"%{table}%"],
+        },
+        fields=["name", "restaurant_table", "custom_merged_tables"],
+        order_by="creation asc",
+    )
+    owners = [
+        row.name
+        for row in rows
+        if row.restaurant_table == table or table in parse_merged_with(row.custom_merged_tables)
+    ]
+    foreign = [row.name for row in rows if row.name not in owners]
+
+    if not foreign:
+        return invoice
+    if owners:
+        return owners[0]
+
+    frappe.throw(
+        _(
+            "{0} stoliga yangi buyurtma ochib bo'lmaydi: uning nomi boshqa stolga "
+            "birlashtirilgan stol nomiga o'xshash ({1}) va tizim chekni adashtirib "
+            "yuborishi mumkin. Avval o'sha stollarni ajrating."
+        ).format(table, ", ".join(foreign)),
+        title=_("Stol nomi to'qnashuvi"),
+    )
 
 
 def _upstream_kwargs(fn, kwargs: dict) -> dict:
@@ -122,6 +184,8 @@ def sync_order(**kwargs):
             f"sync_order: takroriy so'rov (client_ref={client_ref}) -> {existing}"
         )
         return frappe.get_doc("POS Invoice", existing).as_dict()
+
+    kwargs["invoice"] = _resolve_invoice_for_table(kwargs.get("table"), kwargs.get("invoice"))
 
     result = _upstream_sync_order(**_upstream_kwargs(_upstream_sync_order, kwargs))
 

@@ -200,12 +200,26 @@ def _build_scope(user: str = None) -> frappe._dict:
 #  Obyekt darajasidagi ko'lam tekshiruvi
 # ═══════════════════════════════════════════════════════════════════
 
+def _plain_name(value, label: str) -> str:
+    """Hujjat nomi oddiy MATN bo'lishi shart.
+
+    Whitelisted argumentlar HTTP orqali ro'yxat yoki lug'at bo'lib kelishi
+    mumkin. `frappe.db.get_value(doctype, <lug'at>)` esa lug'atni FILTR deb
+    qabul qiladi (`{"name": ["like", "%"]}` — "birinchi mos qator"), ya'ni
+    keyingi tekshiruvlar mijoz aytgan emas, filtr topgan qatorga qo'llanardi.
+    """
+    if not isinstance(value, str) or not value.strip():
+        frappe.throw(_("{0} noto'g'ri ko'rsatilgan").format(label), title=_("Noto'g'ri so'rov"))
+    return value
+
+
 def assert_table_in_scope(table: str, scope=None) -> frappe._dict:
     """Stol mavjudligini va joriy filialga tegishliligini tasdiqlaydi.
 
     Bunisiz A filial kassiri B filialning stolini boshqara olardi.
     """
     scope = scope or resolve_scope()
+    table = _plain_name(table, _("Stol"))
 
     row = frappe.db.get_value(
         "URY Table",
@@ -231,6 +245,7 @@ def assert_invoice_in_scope(invoice: str, scope=None, docstatus=None) -> frappe.
                    (0 = qoralama/to'lanmagan, 1 = to'langan).
     """
     scope = scope or resolve_scope()
+    invoice = _plain_name(invoice, _("Chek"))
 
     row = frappe.db.get_value(
         "POS Invoice",
@@ -251,7 +266,13 @@ def assert_invoice_in_scope(invoice: str, scope=None, docstatus=None) -> frappe.
     if not row:
         frappe.throw(_("'{0}' cheki topilmadi").format(invoice), frappe.DoesNotExistError)
 
-    if row.branch and row.branch != scope.branch:
+    # `branch` bo'sh chek (URY'dan tashqarida yaratilgan) "hech kimniki emas"
+    # deb HAR QANDAY filialga ochilmaydi: uning filiali POS Profile'dan
+    # aniqlanadi, u ham bo'lmasa chek rad etiladi.
+    branch = row.branch or (
+        frappe.db.get_value("POS Profile", row.pos_profile, "branch") if row.pos_profile else None
+    )
+    if branch != scope.branch:
         raise CashierPermissionError(
             _("'{0}' cheki boshqa filialga tegishli").format(invoice)
         )

@@ -33,7 +33,7 @@ bo'ladi va u nima qilishni bilmaydi. Filtr `custom_cancelled = 0`
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, flt
 
 from ozturkapp.ozturkapp.utils import cashier_permissions, kitchen_status, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change, emit_order_change
@@ -178,12 +178,10 @@ def cancel_invoice(row, reason, scope=None) -> dict:
 
     # ── Atomiylik ─────────────────────────────────────────────────────
     # Shu daqiqada boshqa kassir «To'lov» tugmasini bosgan bo'lishi mumkin.
-    # Qatorni qulflaymiz va holatni QULFDAN KEYIN qayta o'qiymiz — mijozdan
-    # kelgan holatga ham, yuqorida o'qilgan `row` ga ham ishonmaymiz.
-    frappe.db.sql(
-        "select name from `tabPOS Invoice` where name = %s for update", invoice
-    )
-
+    # Qatorni QULFLOVCHI o'qish bilan olamiz (`for_update=True`): MariaDB'ning
+    # REPEATABLE READ darajasida `FOR UPDATE` dan keyingi oddiy `SELECT`
+    # so'rov boshidagi ESKI suratni qaytaradi va to'langan chek "to'lanmagan"
+    # ko'rinib, bekor qilinib ketardi.
     fresh = frappe.db.get_value(
         "POS Invoice",
         invoice,
@@ -195,6 +193,7 @@ def cancel_invoice(row, reason, scope=None) -> dict:
             "custom_merged_tables",
         ],
         as_dict=True,
+        for_update=True,
     ) or frappe._dict()
     fresh.name = invoice
 
@@ -236,7 +235,7 @@ def cancel_invoice(row, reason, scope=None) -> dict:
     frappe.db.set_value("POS Invoice", invoice, values, update_modified=True)
 
     cancelled_items = _close_kitchen_tickets(invoice, branch)
-    freed = _free_empty_tables(branch, tables)
+    freed = free_empty_tables(branch, tables)
 
     frappe.logger("ozturk_cashier").info(
         "Buyurtma bekor qilindi: %s | kassir=%s | menejer_huquqi=%s | "
@@ -478,6 +477,73 @@ def _consume_pending_rows(
     return need
 
 
+def close_surplus_kitchen_rows(invoice: str, item: str) -> int:
+    """Chekdagi miqdordan ORTIQ turgan navbatdagi oshxona qatorlarini yopadi.
+
+    NEGA KERAK
+    ==========
+    URY taom olib tashlanganini eski va yangi ro'yxatni SOLISHTIRIB aniqlaydi
+    (`ury_kot_generate.compare_two_array`). Bir taom chekda bir necha qatorda
+    bo'lsa yoki miqdor tasodifan eski qatorlardan biriga teng chiqsa, bu
+    solishtirish bekor-KOT yaratmaydi — oshxonada olib tashlangan taomning
+    chiptasi qolib ketadi. Bu funksiya solishtirishga TAYANMAYDI: chekdagi
+    jami miqdor bilan oshxona chiptalaridagi jami miqdorni qiyoslaydi va
+    ortig'ini yopadi.
+
+    IDEMPOTENT: URY bekor-KOT yaratib bo'lgan bo'lsa (`apply_item_cancellation`)
+    ortiqcha qolmaydi va bu funksiya hech narsa qilmaydi. Oshxona ALLAQACHON
+    boshlagan porsiyaga TEGILMAYDI — u `apply_item_cancellation` dagi
+    «to'xtat» oqimiga tegishli.
+
+    Returns:
+        int: yopilgan (navbatdagi) porsiyalar soni.
+    """
+    if not frappe.db.exists("DocType", "URY KOT"):
+        return 0
+
+    on_invoice = flt(
+        frappe.db.sql(
+            "select coalesce(sum(qty), 0) from `tabPOS Invoice Item` "
+            "where parent = %s and item_code = %s",
+            (invoice, item),
+        )[0][0]
+    )
+
+    in_kitchen = flt(
+        frappe.db.sql(
+            """
+            SELECT coalesce(sum(ki.quantity), 0)
+            FROM `tabURY KOT Items` ki
+            INNER JOIN `tabURY KOT` k ON k.name = ki.parent
+            WHERE k.invoice = %(invoice)s AND k.docstatus = 1
+              AND k.type IN %(types)s AND ki.item = %(item)s
+              AND IFNULL(ki.custom_kitchen_status, %(pending)s) != %(cancelled)s
+            """,
+            {
+                "invoice": invoice,
+                "item": item,
+                "types": kitchen_status.COOKING_KOT_TYPES,
+                "pending": kitchen_status.PENDING,
+                "cancelled": kitchen_status.CANCELLED,
+            },
+        )[0][0]
+    )
+
+    surplus = cint(in_kitchen - on_invoice)
+    if surplus <= 0:
+        return 0
+
+    touched = {}
+    left = _consume_pending_rows(invoice, item, surplus, touched)
+
+    branch = frappe.db.get_value("POS Invoice", invoice, "branch")
+    for kot, production in touched.items():
+        _sync_cancelled_kot(kot)
+        emit_kot_change(branch, kot, "KOT_ITEM_CANCELLED", production, invoice)
+
+    return surplus - left
+
+
 def _sync_cancelled_kot(kot: str):
     """KOT darajasidagi `order_status` ni chiptaga mos keltiradi.
 
@@ -514,7 +580,7 @@ def _sync_cancelled_kot(kot: str):
 #  Stol
 # ═══════════════════════════════════════════════════════════════════
 
-def _free_empty_tables(branch: str, tables: list) -> list:
+def free_empty_tables(branch: str, tables: list) -> list:
     """Boshqa ochiq cheki qolmagan stollarni bo'shatadi.
 
     Hisob bo'lingan bo'lsa bitta stolda bir nechta chek bo'ladi — bittasi
@@ -543,6 +609,13 @@ def _free_empty_tables(branch: str, tables: list) -> list:
             update_modified=False,
         )
         freed.append(table)
+
+    # Birlashtirilgan stollarning HAMMASI bo'shagan bo'lsa birlashtirish ham
+    # tarqaladi — aks holda stollar abadiy "birlashtirilgan" qolardi
+    # (`overrides/pos_invoice._reconcile_tables` to'lovdan keyin shunday qiladi).
+    if len(freed) > 1 and len(freed) == len(tables):
+        for table in freed:
+            frappe.db.set_value("URY Table", table, "merged_with", None, update_modified=False)
 
     return freed
 

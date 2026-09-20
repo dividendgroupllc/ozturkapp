@@ -17,7 +17,9 @@ POS Invoice darajasigacha tekshiramiz.
 """
 
 import json
+import os
 import re
+from unittest import mock
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -53,6 +55,126 @@ def _free_table(branch=None):
         if name not in busy:
             return name
     return None
+
+
+def _read(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def eval_format_js(calls):
+    """`util/format.js` funksiyalarini HAQIQIY JS'da baholaydi: `[("hhmm", ["9:00:00"]), ...]` -> natijalar.
+
+    Manba matni tekshiruvi vaqtni to'g'ri ko'rsatishni kafolatlamaydi — `9:00:00` xatosi
+    aynan shunday o'tib ketgan edi. `esbuild` (yig'ish uchun baribir kerak) modulni CommonJS
+    ga o'giradi. Node yo'q bo'lsa test o'tkazib yuboriladi.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    frappe_js = os.path.join(frappe.get_app_path("frappe"), "..", "node_modules")
+    if not node or not os.path.isdir(os.path.join(frappe_js, "esbuild")):
+        return None
+
+    path = frappe.get_app_path("ozturkapp", "public", "js", "cashier", "util", "format.js")
+    script = """
+        const fs = require("fs");
+        const esbuild = require("esbuild");
+        const code = esbuild.transformSync(fs.readFileSync(process.argv[1], "utf8"), { format: "cjs" }).code;
+        const mod = { exports: {} };
+        new Function("module", "exports", "frappe", "cint", "flt", "__", code)(
+            mod, mod.exports, {}, (v) => parseInt(v, 10) || 0, (v) => parseFloat(v) || 0, (s) => s
+        );
+        const calls = JSON.parse(process.argv[2]);
+        console.log(JSON.stringify(calls.map(([fn, args]) => mod.exports[fn](...args))));
+    """
+    result = subprocess.run(
+        [node, "-e", script, path, json.dumps(calls)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "NODE_PATH": os.path.abspath(frappe_js)},
+    )
+    if result.returncode:
+        raise AssertionError(result.stderr)
+    return json.loads(result.stdout)
+
+
+def js_slot_item(source, item_id):
+    """`slots.contribute(..., { id: "<item_id>", ... })` bandining matni."""
+    marker = f'id: "{item_id}"'
+    at = source.index(marker)
+    start = source.rindex("slots.contribute(", 0, at)
+    end = source.index("\n});", at)
+    return source[start : end + 4]
+
+
+class _CashierPage:
+    """Kassa sahifasining BARCHA manbasi — modullarga bo'lingandan keyin ham
+    matn tekshiruvlari bir joydan o'qiydi.
+
+    `script` — sahifa kirish fayli + HTML shablon + yig'maning YADRO
+    modullari (`public/js/cashier/`, `features/` dan tashqari). Yadro
+    tekshiruvlari (masalan «kassa buyurtmani tahrirlamaydi») shunga tayanadi:
+    qo'shimcha funksiya modullari (`features/`) POS Profile bayrog'i bilan
+    yoqiladi va o'z testlari bilan qoplanadi.
+
+    `all_script` — `features/` bilan birga; `style` — sahifa uslubi va
+    `public/css/cashier/` bo'laklari.
+    """
+
+    def __init__(self):
+        page = frappe.get_doc("Page", "restaurant-cashier")
+        page.load_assets()
+
+        core, features = [], []
+        js_root = frappe.get_app_path("ozturkapp", "public", "js", "cashier")
+        for folder, _dirs, files in sorted(os.walk(js_root)):
+            for name in sorted(files):
+                if not name.endswith(".js"):
+                    continue
+                with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                    body = handle.read()
+                is_feature = os.path.relpath(folder, js_root).split(os.sep)[0] == "features"
+                (features if is_feature else core).append(body)
+
+        css = [getattr(page, "style", None) or ""]
+        css_root = frappe.get_app_path("ozturkapp", "public", "css", "cashier")
+        for folder, _dirs, files in sorted(os.walk(css_root)):
+            for name in sorted(files):
+                if name.endswith((".css", ".scss")):
+                    with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                        css.append(handle.read())
+
+        self.entry = page.script
+        self.script = page.script + "\n".join(core)
+        self.all_script = self.script + "\n".join(features)
+        self.style = "\n".join(css)
+
+
+def cashier_page():
+    return _CashierPage()
+
+
+def js_method(source, signature):
+    """`signature` bilan boshlanadigan JS metodining TANASI (figurali qavslar bo'yicha).
+
+    Modullarga bo'lingandan keyin fayllar tartibi o'zgaradi, shuning uchun
+    «metod boshidan keyingi matn» ga tayanib bo'lmaydi — faqat metodning
+    o'zini tekshiramiz.
+    """
+    start = source.index(signature)
+    depth, pos = 0, source.index("{", start)
+    for index in range(pos, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise ValueError(f"{signature} tanasi yopilmagan")
 
 
 class TestPageAssets(FrappeTestCase):
@@ -97,20 +219,102 @@ class TestPageAssets(FrappeTestCase):
             "aks holda sahifa skripti SyntaxError bilan yiqiladi",
         )
 
-    def test_page_script_exposes_entry_points(self):
+    def test_page_entry_loads_the_bundle_and_drives_the_lifecycle(self):
+        """Sahifa kirish fayli yig'mani yuklaydi va Desk hodisalarini uzatadi."""
         script = self._assets().script
         self.assertRegex(script, r"frappe\.pages\[.restaurant-cashier.\]\.on_page_load")
-        self.assertIn("ozturk.cashier.Screen", script)
+        self.assertIn('frappe.require(["cashier.bundle.css", "cashier.bundle.js"', script)
+        self.assertIn("new ozturk.cashier.Screen(page)", script)
+        self.assertRegex(script, r"on_page_show = function \(wrapper\) \{[^}]*\.resume\(\)")
+        # Desk v15 `on_page_hide` ni chaqirmaydi (views/container.js faqat jQuery
+        # "hide" hodisasini yuboradi) — yorliqlar va fon vazifalari shu hodisa bilan to'xtaydi.
+        self.assertRegex(script, r'\$\(wrapper\)\.on\("hide", \(\) => \{[^}]*\.suspend\(\)')
+        self.assertNotIn("on_page_hide", script.replace("`on_page_hide`", "").replace("// Desk v15 `on_page_hide`", ""))
+
+    def test_entry_discovers_feature_bundles_without_being_edited(self):
+        """`cashier_*.bundle.*` yig'malari `assets.json` dan o'zi topiladi (wave-2 moduli kirish faylini tahrirlamaydi)."""
+        script = self._assets().script
+        self.assertIn("frappe.boot.assets_json", script)
+        self.assertIn("cashier_[a-z0-9_]+", script)
+
+    def test_bundle_exposes_the_screen_and_renders_the_template(self):
+        script = cashier_page().script
+        self.assertIn("Screen: CashierScreen", script)
         self.assertIn('render_template("restaurant_cashier"', script)
 
+    def test_bundle_public_namespace_is_complete(self):
+        """Funksiya modullari yadroga FAQAT `ozturk.cashier` orqali ulanadi."""
+        entry = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "cashier.bundle.js"))
+        for name in ("Screen", "features", "slots", "ui", "api", "util", "BUILD"):
+            self.assertRegex(entry, rf"\b{name}\b", f"ozturk.cashier.{name} e'lon qilinmagan")
+
     def test_page_style_is_loaded(self):
-        style = self._assets().style or ""
+        style = cashier_page().style
         self.assertIn(".rc-root", style)
         self.assertIn(".rc-table--OCCUPIED", style)
 
+    def test_bundle_sources_exist(self):
+        for parts in (
+            ("js", "cashier", "cashier.bundle.js"),
+            ("css", "cashier.bundle.scss"),
+            ("js", "cashier", "README.md"),
+            ("js", "cashier", "core", "slots.js"),
+            ("js", "cashier", "core", "features.js"),
+            ("js", "cashier", "core", "shortcuts.js"),
+            ("js", "cashier", "core", "layout.js"),
+            ("js", "cashier", "kit", "dialog.js"),
+            ("js", "cashier", "kit", "keyboard.js"),
+            ("js", "cashier", "kit", "approval.js"),
+            ("js", "cashier", "kit", "controls.js"),
+        ):
+            path = frappe.get_app_path("ozturkapp", "public", *parts)
+            self.assertTrue(os.path.exists(path), f"{'/'.join(parts)} yo'q")
+
+    def test_bundles_are_built_and_registered(self):
+        """`bench build` yig'mani `assets.json` ga yozgan bo'lishi shart.
+
+        Aks holda `frappe.require("cashier.bundle.js")` mavjud bo'lmagan fayl
+        so'raydi va sahifa bo'sh qoladi (`deploy.sh` `bench build` ni
+        ishga tushiradi, lekin qo'lda yig'ilmagan dev-saytda shu test ushlaydi).
+        """
+        from frappe.utils import get_assets_json
+
+        assets = get_assets_json()
+        for bundle in ("cashier.bundle.js", "cashier.bundle.css"):
+            self.assertIn(bundle, assets, f"{bundle} yig'ilmagan — `bench build --app ozturkapp`")
+            built = frappe.get_site_path("..", "assets", assets[bundle].replace("/assets/", "", 1))
+            self.assertTrue(os.path.exists(built), f"{assets[bundle]} diskda yo'q")
+
+    def test_cashier_uses_no_desk_dialogs(self):
+        """Kassa ichida Desk'ning sichqoncha oynalari ishlatilmaydi — UI to'plami bor."""
+        source = cashier_page().all_script
+        for call in ("frappe.prompt(", "frappe.confirm(", "frappe.msgprint(", "frappe.show_alert("):
+            self.assertNotIn(call, source, f"{call} o'rniga `ui.form/confirm/alert/toast`")
+
+    def test_every_slot_is_documented(self):
+        """README kengaytma nuqtalarining BARCHASINI tavsiflaydi — wave-2 uchun shartnoma."""
+        slots_js = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "core", "slots.js"))
+        block = re.search(r"SLOT_NAMES = \[(.*?)\];", slots_js, re.S).group(1)
+        names = re.findall(r'"([^"]+)"', block)
+        self.assertGreaterEqual(len(names), 10)
+
+        readme = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "README.md"))
+        for name in names:
+            self.assertIn(f"`{name}`", readme, f"README'da `{name}` slot tavsifi yo'q")
+
+    def test_touch_target_size_is_a_shared_variable(self):
+        style = cashier_page().style
+        self.assertIn("--rc-touch: 48px", style)
+        # To'liq ekran (kiosk) rejimi yo'q: Desk paneli hech qachon yashirilmaydi.
+        self.assertNotIn("rc-kiosk", style)
+        # Ikki ustun 1024px gacha saqlanadi: 1100px dagi qoida faqat tugma yozuvlarini
+        # yig'adi, `.rc-main` ni bir ustunga tushirmaydi.
+        self.assertNotRegex(style, r"@media[^{]*\{\s*\.rc-main\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);")
+        self.assertRegex(style, r"\.rc-main\s*\{[^}]*grid-template-columns:[^;]*clamp\(340px")
+
     def test_service_charge_rate_is_not_hardcoded_in_frontend(self):
         """Foiz faqat ERPNext shablonida turishi kerak (TZ §8)."""
-        script = self._assets().script
+        script = cashier_page().all_script
         code = [
             line
             for line in script.split("\n")
@@ -121,6 +325,480 @@ class TestPageAssets(FrappeTestCase):
             r"\b0\.12\b",
             "xizmat haqi foizi frontend'ga qattiq yozilgan",
         )
+
+
+class TestCashierFrontendContract(FrappeTestCase):
+    """Ilova joylashuvi (Desk sahifasi ichida), UI to'plami va kengaytma reestri shartnomalari.
+
+    Brauzersiz tekshiriladigan qismi: manba matni va sahifa fayllari. Ko'rinish
+    (masshtab, 48px nishonlar, aylantirishsiz sig'ish) `bench build` dan keyin
+    brauzerda tekshirilgan — bu testlar ularning REGRESSIYASINI ushlaydi.
+    """
+
+    def setUp(self):
+        self.page = cashier_page()
+        self.js_root = frappe.get_app_path("ozturkapp", "public", "js", "cashier")
+
+    def _js(self, *parts):
+        return _read(os.path.join(self.js_root, *parts))
+
+    def test_page_json_is_sane(self):
+        path = frappe.get_app_path(
+            "ozturkapp", "ozturkapp", "page", "restaurant_cashier", "restaurant_cashier.json"
+        )
+        page = json.loads(_read(path))
+
+        self.assertEqual(page["name"], "restaurant-cashier")
+        self.assertEqual(page["standard"], "Yes")
+        self.assertEqual(
+            {row["role"] for row in page["roles"]},
+            {"URY Cashier", "URY Manager", "System Manager"},
+        )
+
+    def test_html_shell_has_the_app_structure(self):
+        html = _read(
+            frappe.get_app_path(
+                "ozturkapp", "ozturkapp", "page", "restaurant_cashier", "restaurant_cashier.html"
+            )
+        )
+        for hook in ("rc-topbar", "rc-rooms", "rc-filters", "rc-viewtabs", "rc-menu-btn", "rc-panel"):
+            self.assertIn(hook, html)
+        # To'liq ekran rejimi olib tashlangan: shablonda unga oid hech narsa yo'q.
+        self.assertNotIn("kiosk", html.lower())
+
+        # Joyi qimmat, kassirga kerak emas: ular «⋯» menyusi tagiga yoki tooltip'ga ko'chgan.
+        for gone in ("rc-build", "rc-restaurant", "rc-branch", "rc-orders__title", "Yangilash"):
+            self.assertNotIn(gone, html)
+
+    def test_removed_clutter_stays_removed(self):
+        script = self.page.all_script
+        self.assertNotIn('__("Shakl")', script)
+        self.assertNotIn("Buyurtma avtomatik yaratilmaydi", script)
+        self.assertNotIn("set_primary_action", script)
+
+        # «Joylashuvni tahrirlash» — faqat menejerga va faqat «⋯» menyusida.
+        menu = self._js("ui", "menu.js")
+        self.assertIn("is_supervisor", js_slot_item(menu, "layout-edit"))
+        self.assertNotIn('__("Joylashuvni tahrirlash")', self._js("ui", "floor.js"))
+
+        # Xato kodi yig'iladigan bo'limda.
+        self.assertIn("<details", self._js("ui", "panel.js"))
+
+    def test_panel_footer_is_pinned_and_body_scrolls(self):
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-panel__body\s*\{[^}]*overflow-y:\s*auto")
+        self.assertRegex(style, r"\.rc-panel__foot\s*\{[^}]*flex:\s*0 0 auto")
+        # Ikki katta tugma «Hisob berish» va «To'lov» — pastki qatorda.
+        self.assertIn('id: "give-bill"', self._js("ui", "panel.js"))
+        self.assertIn('id: "pay"', self._js("ui", "panel.js"))
+
+    def test_floor_scales_to_width_and_height_and_refits_on_resize(self):
+        floor = self._js("ui", "floor.js")
+        fit = js_method(floor, "fitFloor() {")
+        # Bitta zal (`plain`) va barcha zallar (`packBlocks`) — ikkalasi ham eni VA balandligi bo'yicha.
+        arrange = js_method(floor, "arrangeFloor() {")
+        self.assertIn("availableWidth / extent.width", arrange)
+        self.assertIn("availableHeight / extent.height", arrange)
+        pack = js_method(floor, "export function packBlocks(")
+        self.assertIn("availableWidth / width", pack)
+        self.assertIn("availableHeight / height", pack)
+        self.assertIn("this.positionFloor(this.arrangeFloor())", fit)
+        self.assertIn("new ResizeObserver", self._js("core", "screen.js"))
+
+    def test_elapsed_time_ticks_on_the_client(self):
+        fmt = self._js("util", "format.js")
+        self.assertIn("ELAPSED_WARN_MINUTES = 60", fmt)
+        self.assertIn("ELAPSED_ALERT_MINUTES = 90", fmt)
+        # Server soatiga emas, YUKLANGAN paytga tayanadi (soat/vaqt mintaqasi farq qilishi mumkin).
+        self.assertIn("data-since", fmt)
+        self.assertIn("tickElapsed()", js_method(self._js("core", "screen.js"), "tick() {"))
+
+    def test_bill_requested_bell_is_persistent_and_respects_reduced_motion(self):
+        self.assertIn("bill_requested", self._js("ui", "floor.js"))
+        self.assertIn("bill_requested", self._js("ui", "orders.js"))
+        self.assertIn("prefers-reduced-motion", self.page.style)
+        # Belgi faqat server bayrog'iga bog'liq — yo'q bo'lsa chizilmaydi.
+        self.assertIn('fromTable(table, "bill_requested")', self._js("ui", "floor.js"))
+
+    def test_full_screen_mode_is_gone_and_desk_chrome_is_never_hidden(self):
+        """To'liq ekran (kiosk) rejimi foydalanuvchi talabi bilan ATAYLAB olib tashlangan."""
+        self.assertFalse(os.path.exists(os.path.join(self.js_root, "core", "kiosk.js")))
+
+        # Yig'ma manbasi (JS + CSS + HTML + sahifa kirish fayli) da kiosk izi yo'q.
+        everything = (self.page.all_script + "\n" + self.page.style).lower()
+        for trace in ("kiosk", "rc-kiosk", "ozturk_cashier_kiosk", "kiosk_mode"):
+            self.assertNotIn(trace, everything, f"`{trace}` qolib ketgan")
+
+        # Desk navbari va sahifa sarlavhasi hech qachon yashirilmaydi.
+        self.assertNotRegex(self.page.style, r"\.page-head[^{}]*\{[^}]*display:\s*none")
+        self.assertNotRegex(self.page.style, r"\.sticky-top[^{}]*\{[^}]*display:\s*none")
+        self.assertNotIn("overflow: hidden !important", self.page.style)
+        # `body` ga hech qanday sinf qo'yilmaydi.
+        self.assertNotIn("document.body.classList", self.page.all_script)
+
+        # Balandlik ekran o'lchamidan emas, ilovaning HAQIQIY o'rnidan (`--rc-offset`) olinadi.
+        layout = self._js("core", "layout.js")
+        self.assertIn("getBoundingClientRect().top", js_method(layout, "export function syncOffset(root) {"))
+        self.assertIn("scrollHeight", js_method(layout, "export function syncOffset(root) {"))
+        screen = self._js("core", "screen.js")
+        self.assertIn("syncOffset(root)", js_method(screen, "syncLayout() {"))
+        self.assertIn("this.syncLayout()", js_method(screen, "setState(state) {"))
+        self.assertIn("this.syncLayout()", js_method(screen, "resume() {"))
+        self.assertRegex(self.page.style, r"\.rc-root\[data-state=\"ready\"\]\s*\{[^}]*calc\(100vh - var\(--rc-offset")
+
+    def test_text_keyboard_supports_uzbek_and_cyrillic(self):
+        keyboard = self._js("kit", "keyboard.js")
+        for key in ("oʻ", "gʻ", "sh", "ch", "ʼ", "қ", "ғ", "ҳ", "ў"):
+            self.assertIn(key, keyboard, f"'{key}' klaviaturada yo'q")
+        for layout in ("uz:", "ru:", "sym:", "num:"):
+            self.assertIn(layout, keyboard)
+        # Klaviatura faqat POS Profile bayrog'i yoqilganda.
+        self.assertIn("if (kit.virtualKeyboard) this.bindKeyboard()", self._js("kit", "dialog.js"))
+
+    def test_approval_flow_follows_the_server_contract(self):
+        approval = self._js("kit", "approval.js")
+        self.assertIn("ozturkapp.ozturkapp.api.approval.get_approvers", approval)
+        self.assertIn("self_approves", approval)
+        self.assertIn("isApprovalRequired(error)", approval)
+        self.assertIn("ApprovalCancelled", approval)
+        # PIN hech qayerga yozilmaydi.
+        for storage in ("localStorage", "sessionStorage", "console.log"):
+            self.assertNotIn(storage, approval)
+        self.assertIn('exc_type', self._js("core", "api.js"))
+
+    def test_registry_rejects_typos_and_duplicates(self):
+        slots = self._js("core", "slots.js")
+        self.assertIn("Noma'lum slot", slots)
+        self.assertIn("allaqachon qo'shilgan", slots)
+        self.assertIn("allaqachon bor", self._js("core", "features.js"))
+
+    def test_feature_bundles_are_found_by_name_convention(self):
+        entry = _read(
+            frappe.get_app_path(
+                "ozturkapp", "ozturkapp", "page", "restaurant_cashier", "restaurant_cashier.js"
+            )
+        )
+        self.assertIn("^cashier_[a-z0-9_]+\\.bundle\\.(js|css)$", entry)
+        self.assertIn("features/cashier_<nom>", self._js("README.md").replace("features/<nom>/cashier_<nom>", "features/cashier_<nom>"))
+
+    # ── Wave-2 uchun uchta qo'shimcha slot ───────────────────────────
+
+    def test_panel_more_info_and_quick_slots_are_registered_and_documented(self):
+        slots_js = self._js("core", "slots.js")
+        readme = self._js("README.md")
+
+        for name in ("panel.more", "panel.info", "topbar.quick"):
+            self.assertIn(f'"{name}"', slots_js, f"{name} SLOT_NAMES da yo'q")
+            # README §6 jadvalida qatori bor
+            self.assertRegex(readme, rf"\| `{re.escape(name)}` \|", f"{name} jadvalda yo'q")
+
+        # Element shakllari va yordamchi a'zolar hujjatlangan.
+        self.assertIn("render(screen, detail) -> HTMLElement", readme)
+        self.assertIn("icon?:", readme)
+        self.assertIn("screen.detail", readme)
+        self.assertIn("openMoreSheet", readme)
+
+    def test_slot_contribution_to_new_slots_is_accepted_and_typos_are_not(self):
+        """Ro'yxatdagi nomlarga qo'shish mumkin; imloviy xato jimgina o'tib ketmaydi."""
+        slots_js = self._js("core", "slots.js")
+        block = re.search(r"SLOT_NAMES = \[(.*?)\];", slots_js, re.S).group(1)
+        names = re.findall(r'"([^"]+)"', block)
+        self.assertEqual(len(names), len(set(names)), "SLOT_NAMES da takrorlanish bor")
+        self.assertIn("Noma'lum slot", slots_js)
+
+    def test_panel_more_button_appears_only_when_an_item_is_visible(self):
+        panel = self._js("ui", "panel.js")
+        actions = js_method(panel, "actionsHtml(detail) {")
+
+        self.assertIn('slots.visible("panel.more", this, detail).length > 0', actions)
+        self.assertIn('data-action="panel-more"', actions)
+        self.assertIn("hasMore ? moreButton", actions)
+        # Yadro tugmalari joyida: «Yana ⋯» ikkinchi qatorning OXIRIDA.
+        self.assertLess(actions.index("secondary.map(button)"), actions.index("moreButton :"))
+
+        sheet = js_method(panel, "openMoreSheet(detail, button) {")
+        # Sabab matni qator ostida (sensorli ekranda `title` ko'rinmaydi).
+        self.assertIn("rc-more__reason", sheet)
+        self.assertIn("row.disabled", sheet)
+        # Amal varaq YOPILGANDAN keyin ishga tushadi va `button` uzatiladi.
+        self.assertLess(sheet.index("sheet.close(null)"), sheet.index("item.onClick(this, detail, button)"))
+
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-more__item\s*\{[^}]*min-height:\s*60px")
+        self.assertRegex(style, r"\.rc-btn--more|\.rc-panel__secondary--more")
+        for kind in ("primary", "pay", "danger"):
+            self.assertIn(f".rc-more__item--{kind}", style)
+
+    def test_panel_more_keeps_the_footer_height_at_narrow_widths(self):
+        """1024px da «Yana ⋯» yadro tugmalarini ikki qatorga o'ratib, pastki qatorni siljitmasin."""
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-panel__secondary \.rc-btn\s*\{[^}]*line-height:\s*1\.1")
+        narrow = re.search(r"@media \(max-width: 1100px\) \{\s*\.rc-panel__secondary--more.*?\n\}", style, re.S)
+        self.assertIsNotNone(narrow, "tor ekranda «Yana» yozuvi yig'ilmagan")
+        self.assertIn(".rc-btn--more .rc-btn__label { display: none; }", narrow.group(0))
+
+    def test_panel_info_is_zero_height_when_empty_and_never_starves_the_list(self):
+        panel = self._js("ui", "panel.js")
+
+        self.assertIn("const PANEL_MIN_LIST = 120;", panel)
+        # Karkasda blok bor va bo'sh paytda `hidden` (balandlik 0).
+        self.assertIn('<div class="rc-panel__info" hidden></div>', panel)
+        mount = js_method(panel, "mountPanelInfo(detail) {")
+        self.assertIn("info.hidden = true", mount)
+        # Bitta modulning `render` xatosi panelni buzmaydi.
+        self.assertIn("catch (error)", mount)
+        self.assertIn("console.error", mount)
+        # Har `renderPanel` da qayta chiziladi.
+        self.assertIn("this.mountPanelInfo(detail);", js_method(panel, "renderPanel(detail) {"))
+
+        fit = js_method(panel, "fitPanelInfo() {")
+        self.assertIn("- PANEL_MIN_LIST", re.sub(r"\s+", " ", fit))
+        self.assertIn('__("+{0} yana"', fit)
+        self.assertIn("Yig'ish", fit)
+
+        # Sig'may qolsa avval blok shrink bo'ladi, ro'yxat emas.
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-panel__info\s*\{[^}]*flex:\s*0 1 auto[^}]*overflow-y:\s*auto")
+        self.assertRegex(style, r"\.rc-panel__body\s*\{[^}]*flex:\s*1 1 0[^}]*min-height:\s*120px")
+
+        # Panel o'lchami o'zgarganda qayta sig'diriladi.
+        self.assertIn("resizeObserver.observe(this.el.panel)", self._js("core", "screen.js"))
+
+    def test_topbar_quick_is_icon_only_on_narrow_screens_and_single_row(self):
+        top = self._js("ui", "topbar.js")
+        quick = js_method(top, "renderQuick() {")
+        # Yozuv yashirilganda ham tugma nomi bor.
+        self.assertIn("aria-label=", quick)
+        self.assertIn("title=", quick)
+        # O'chirilgan tugma sababi bosilganda ko'rinadi (HTML `disabled` EMAS).
+        self.assertIn("aria-disabled", quick)
+        self.assertIn("ui.toast(disabled", js_method(top, "onQuickClick(button) {"))
+        # Holat o'zgarmasa DOM'ga tegilmaydi.
+        self.assertIn("this.quickHtml === html", quick)
+
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-topquick__btn\s*\{[^}]*min-height:\s*var\(--rc-touch\)")
+        # Sig'masa yozuv yashiriladi: JS tarkibni O'LCHAYDI (`data-compact`), ekran kengligiga tayanmaydi.
+        hidden = re.search(r'\.rc-root\[data-compact="3"\] \.rc-topquick__label[^{]*\{[^}]*display:\s*none', style)
+        self.assertIsNotNone(hidden, "sig'masa tez tugma yozuvi yashirilmagan")
+        layout = self._js("core", "layout.js")
+        self.assertIn("bar.scrollWidth > bar.clientWidth", js_method(layout, "export function syncCompact(root) {"))
+        self.assertIn("syncCompact", js_method(top, "fitTopbar() {"))
+        self.assertRegex(style, r"\.rc-topbar\s*\{[^}]*flex-wrap:\s*nowrap")
+        # Bo'sh joyni cho'ziluvchi oraliq oladi; zallar faqat oxirgi bosqichda aylantiriladi.
+        self.assertRegex(style, r"\.rc-topbar__spacer\s*\{[^}]*flex:\s*1 1 0")
+        self.assertRegex(style, r'\.rc-root\[data-compact="5"\] \.rc-rooms\s*\{[^}]*overflow-x:\s*auto')
+
+        html = _read(
+            frappe.get_app_path(
+                "ozturkapp", "ozturkapp", "page", "restaurant_cashier", "restaurant_cashier.html"
+            )
+        )
+        self.assertLess(html.index("rc-topquick"), html.index("rc-menu-btn"))
+
+    def test_screen_detail_is_exposed_for_feature_bundles(self):
+        panel = self._js("ui", "panel.js")
+        self.assertIn("this.detail = detail;", js_method(panel, "renderPanel(detail) {"))
+        self.assertIn("this.detail = null;", js_method(panel, "clearSelection() {"))
+        self.assertIn("this.detail = null;", self._js("core", "screen.js"))
+
+        # Funksiya modullari ishlatadigan a'zolar `screen` da va hujjatlangan.
+        readme = self._js("README.md")
+        for member in ("screen.call(", "screen.refresh(", "selectTable(name)", "selectOrder(invoice)",
+                       "screen.openPaymentModal(detail)", "ozturk.cashier.ui"):
+            self.assertIn(member, readme, f"README §4 da `{member}` yo'q")
+
+    # ── Yadro silliqlash (server vaqti, menyu tartibi, forma xatosi, bildirishnoma, ...) ──
+
+    def test_hhmm_normalises_every_server_time_shape(self):
+        """`9:00:00` → `09:00`; `slice(0, 5)` `9:00:` berardi (haqiqiy xato)."""
+        cases = [
+            "9:00:00", "09:00:00", "9:00", "19:30:00", "2026-09-20 9:05:00.123456",
+            "2026-09-20T09:05:00", "2026-09-20", None, "", "abc", 0,
+        ]
+        result = eval_format_js([("hhmm", [value]) for value in cases])
+        if result is None:
+            self.skipTest("node/esbuild yo'q")
+
+        self.assertEqual(
+            result,
+            ["09:00", "09:00", "09:00", "19:30", "09:05", "09:05", "", "", "", "", ""],
+        )
+
+    def test_core_never_slices_server_time_by_hand(self):
+        for name, source in (
+            ("ui/floor.js", self._js("ui", "floor.js")),
+            ("ui/panel.js", self._js("ui", "panel.js")),
+            ("ui/history.js", self._js("ui", "history.js")),
+        ):
+            self.assertNotIn(".slice(0, 5)", source, f"{name}: vaqt `hhmm()` orqali ko'rsatiladi")
+        self.assertIn("hhmm(reservation.from_time)", self._js("ui", "floor.js"))
+        self.assertIn("hhmm(r.from_time)", self._js("ui", "panel.js"))
+        self.assertIn("hhmm(r.time)", self._js("ui", "history.js"))
+        self.assertRegex(self._js("cashier.bundle.js"), r"\bhhmm,")
+
+    def test_feature_modules_share_the_core_time_helper(self):
+        """Funksiya modullari o'zining `hhmm` ini yozmaydi — yadrodagi yagona qoida."""
+        features = os.path.join(self.js_root, "features")
+        for folder, _dirs, files in os.walk(features):
+            for name in files:
+                if not name.endswith(".js"):
+                    continue
+                source = _read(os.path.join(folder, name))
+                self.assertNotRegex(
+                    source,
+                    r"function hhmm\(|const hhmm = \(",
+                    f"{os.path.relpath(os.path.join(folder, name), self.js_root)}: hhmm nusxasi",
+                )
+
+    def test_close_shift_sorts_below_every_feature_item(self):
+        menu = self._js("ui", "menu.js")
+        self.assertIn("order: 900", js_slot_item(menu, "close-shift"))
+
+        orders = [
+            int(order)
+            for order in re.findall(
+                r'slots\.contribute\("topbar\.menu", \{\s*id: "[\w-]+",\s*order: (\d+)', menu
+            )
+        ]
+        self.assertEqual(max(orders), 900)
+        self.assertEqual(sorted(orders)[-2] < 100, True, "yadro bandlari 10–40 oralig'ida")
+
+    def test_form_field_error_clears_when_the_user_fixes_the_field(self):
+        dialog = self._js("kit", "dialog.js")
+        self.assertIn("clearFieldError(field) {", dialog)
+        body = js_method(dialog, "clearFieldError(field) {")
+        self.assertIn('classList.remove("rc-field--invalid")', body)
+        self.assertIn("textContent = \"\"", body)
+        # Yozish, tanlov va chip bosilganda; maydonga fokus tushishi xatoni olib tashlamaydi.
+        for event in ('addEventListener("input"', 'addEventListener("change"', 'addEventListener("click"'):
+            self.assertIn(event, dialog)
+        self.assertIn('closest(".rc-chip-opt")', dialog)
+        self.assertNotIn('addEventListener("focus"', js_method(dialog, "build() {"))
+
+    def test_toasts_never_cover_dialog_buttons(self):
+        style = self.page.style
+        rule = re.search(
+            r"\.rc-root:has\(\.rc-overlay:not\(\[hidden\]\)\) \.rc-toasts\s*\{([^}]*)\}", style
+        )
+        self.assertIsNotNone(rule, "oyna ochiq paytidagi bildirishnoma qoidasi yo'q")
+        self.assertIn("top: 12px", rule.group(1))
+        self.assertIn("bottom: auto", rule.group(1))
+        self.assertRegex(
+            style,
+            r"\.rc-root:has\(\.rc-overlay:not\(\[hidden\]\)\) \.rc-toast\s*\{[^}]*pointer-events:\s*none",
+        )
+
+    def test_payment_session_api_for_features(self):
+        payment = self._js("ui", "payment.js")
+        session = payment[payment.index("class PaymentSession"): payment.index("export class PaymentMethods")]
+
+        # (a) dinamik maydonlar bitta raqam paneliga ulanadi
+        self.assertIn("bindNumpad(input) {", session)
+        self.assertIn("this.numpad.bind(input)", session)
+        self.assertIn("session.numpad = this.mountNumpad($body, $inputs)", payment)
+        keyboard = self._js("kit", "keyboard.js")
+        self.assertIn("el.bind = (input) =>", keyboard)
+        self.assertIn("getClientRects().length > 0", keyboard)  # yashirin maydonga yozilmaydi
+
+        # (d) tasdiqlash tugmasi holati `busy(false)` dan omon qoladi
+        self.assertIn("setConfirmEnabled(enabled) {", session)
+        self.assertIn('dataset.locked = "1"', session)
+        helpers = js_method(self._js("core", "helpers.js"), "busy(button, state) {")
+        self.assertIn('button.dataset.locked === "1"', helpers)
+
+        # (c) bitta bo'lim xatosi oynani buzmaydi
+        sections = js_method(payment, "mountPaymentSections($body, session) {")
+        self.assertIn("catch (error)", sections)
+        self.assertIn("console.error", sections)
+
+        # (b) chap ustun ichkarida aylanadi, xato qotirilgan qatorda
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-pay__cols\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\)")
+        self.assertRegex(style, r"\.rc-pay__main\s*\{[^}]*overflow-y:\s*auto")
+        self.assertRegex(payment, r'rc-pay__foot">\s*<div class="rc-pay__error"')
+
+    def test_payment_confirm_needs_no_manager_approval(self):
+        """`submit_payment` tasdiq qabul qilmaydi — bo'sh `withApproval` o'ramasi yo'q."""
+        payment = self._js("ui", "payment.js")
+        self.assertNotIn("withApproval", payment)
+        call = re.search(r'this\.call\("ozturkapp\.ozturkapp\.api\.billing\.submit_payment", \{(.*?)\}\);', payment, re.S)
+        self.assertIsNotNone(call, "submit_payment chaqiruvi topilmadi")
+        self.assertNotIn("approval", call.group(1))
+
+    def test_numpad_panel_accepts_dynamic_inputs(self):
+        keyboard = self._js("kit", "keyboard.js")
+        start = keyboard.index("export function numpad(")
+        bind = keyboard[start : keyboard.index("// ═══", start)]
+
+        self.assertIn("el.bind = (input) =>", bind)
+        self.assertIn("inputs.forEach(el.bind)", bind)
+        # DOM'dan olib tashlangan (qayta chizilgan) maydonlar ro'yxatni to'ldirmaydi.
+        self.assertIn("bound.delete(old)", bind)
+        # Faqat KO'RINIB turgan maydonga yoziladi.
+        self.assertIn("getClientRects().length > 0", bind)
+
+    def test_history_shows_returns_natively(self):
+        history = self._js("ui", "history.js")
+        self.assertIn("const returnBadge = () =>", history)
+        self.assertIn('__("QAYTARISH")', history)
+        # Ro'yxat qatorida ham, tafsilot sarlavhasida ham belgi.
+        self.assertIn("r.is_return", js_method(history, "renderHistoryList(rows, $list, $summary) {"))
+        detail = js_method(history, "renderHistoryDetail(bill, $detail) {")
+        self.assertIn("bill.is_return ? returnBadge()", detail)
+        # «Asl chek» havolasi asl chekning tafsilotini ochadi (`showDetail`).
+        self.assertIn("bill.is_return && bill.return_against", detail)
+        self.assertIn('data-action="history-open"', detail)
+        self.assertIn('[data-action="history-open"]', js_method(history, "async openHistoryModal() {"))
+
+        style = self.page.style
+        self.assertRegex(style, r"\.rc-return-badge\s*\{[^}]*background:\s*var\(--rc-occupied\)")
+        self.assertRegex(style, r"\.rc-history__origin\s*\{[^}]*min-height:\s*var\(--rc-touch\)")
+
+    def test_history_is_scoped_to_a_shift_not_to_dates(self):
+        """Tarix kassa ochilgandan yopilgunicha bo'lgan cheklarni ko'rsatadi."""
+        history = self._js("ui", "history.js")
+        opener = js_method(history, "async openHistoryModal() {")
+
+        self.assertIn('data-field="shift"', opener)
+        self.assertIn("get_paid_order_filter_options", opener)
+        self.assertIn("shifts.find((s) => s.name === current)", opener)
+        # Kassirga bitta smena keladi: tanlagich o'rniga hozirgi smena yozuvi.
+        self.assertIn("if (shifts.length === 1) {", opener)
+        self.assertRegex(opener, r"get_paid_orders\", \{\s*shift,")
+        for stale in ("date_from", "date_to", 'type="date"', "get_today"):
+            self.assertNotIn(stale, opener)
+
+    def test_readme_documents_the_members_features_rely_on(self):
+        readme = self._js("README.md")
+        screen = self._js("core", "screen.js")
+        floor = self._js("ui", "floor.js")
+        realtime = self._js("core", "realtime.js")
+
+        # Har bir hujjatlangan a'zo HAQIQATAN mavjud (hujjat yolg'on bo'lmasin).
+        exists = {
+            "screen.active": "this.active = ",
+            "screen.state": "this.state = state",
+            "screen.layoutEditMode": "this.layoutEditMode = ",
+            "screen.renderFloor()": "renderFloor() {",
+            "screen.el.canvas": "canvas: find(",
+            "screen.floorLoadedAt": "this.floorLoadedAt = Date.now()",
+            "screen.scheduleRefresh": "scheduleRefresh(scope = {}) {",
+        }
+        for member, needle in exists.items():
+            self.assertIn(member, readme, f"README §4 da `{member}` yo'q")
+            self.assertTrue(needle in screen or needle in floor or needle in realtime, f"{member}: manbada `{needle}` yo'q")
+
+        self.assertIn("screen.floor.generated_at", readme)
+        self.assertIn("screen.selectTable(name)", readme)
+        self.assertIn("ozturk.cashier.util.hhmm", readme)
+
+    def test_shift_and_table_features_use_the_core_helper(self):
+        shift = _read(os.path.join(self.js_root, "features", "shift", "shared.js"))
+        self.assertIn("export const { esc, hhmm } = util;", shift)
+        tables = _read(os.path.join(self.js_root, "features", "tables", "table_data.js"))
+        self.assertIn("const { hhmm } = ozturk.cashier.util;", tables)
+        self.assertNotIn("export function hhmm", tables)
 
 
 class TestTableStatus(FrappeTestCase):
@@ -664,6 +1342,7 @@ class TestPaidOrderHistory(FrappeTestCase):
         if not self.table:
             self.skipTest("Ochiq cheksiz URY Table yo'q")
         self.invoices = []
+        self.shifts = []
 
     def tearDown(self):
         for name in self.invoices:
@@ -671,10 +1350,78 @@ class TestPaidOrderHistory(FrappeTestCase):
                 "Sales Invoice Payment", {"parent": name, "parenttype": "POS Invoice"}
             )
             frappe.db.delete("POS Invoice", {"name": name})
+        for name in self.shifts:
+            frappe.db.delete("POS Closing Entry", {"pos_opening_entry": name})
+            frappe.db.delete("POS Opening Entry", {"name": name})
+        frappe.set_user("Administrator")
+        for user in getattr(self, "users", []):
+            frappe.delete_doc("User", user, force=True, ignore_permissions=True)
+
+    def _cashier(self):
+        """Oddiy kassir (`URY Cashier`, menejer emas) — hozirgi foydalanuvchi qilib qo'yiladi."""
+        email = f"history-{frappe.generate_hash(length=6)}@example.com"
+        frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": email,
+                "first_name": "Tarix",
+                "send_welcome_email": 0,
+                "roles": [{"role": "URY Cashier"}],
+            }
+        ).insert(ignore_permissions=True)
+        self.users = getattr(self, "users", []) + [email]
+        frappe.set_user(email)
+        return email
+
+    def _current_shift(self, name):
+        """Kassa sahifasi "hozirgi ochiq smena" deb hisoblaydigan smenani belgilaydi."""
+        return mock.patch.object(cashier_permissions, "open_shift_name", return_value=name)
+
+    def _shift(self, start, end=None, status=None, profile=None):
+        """Smena (POS Opening Entry) va `end` berilsa yakuniy POS Closing Entry.
+
+        `db_insert` — sinov faqat vaqt oynasini o'qiydi, ERPNext'ning ochish/yopish
+        qoidalari (bir vaqtda bitta ochiq smena va h.k.) bu yerda kerak emas.
+        """
+        profile = profile or self.scope.pos_profile
+        name = "TEST-OPE-" + frappe.generate_hash(length=8)
+        opening = frappe.get_doc(
+            {
+                "doctype": "POS Opening Entry",
+                "name": name,
+                "pos_profile": profile,
+                "user": "Administrator",
+                "company": self.scope.company,
+                "period_start_date": start,
+                "posting_date": str(start)[:10],
+                "status": status or ("Closed" if end else "Open"),
+                "docstatus": 1,
+            }
+        )
+        opening.db_insert()
+        self.shifts.append(name)
+
+        if end:
+            closing = frappe.get_doc(
+                {
+                    "doctype": "POS Closing Entry",
+                    "name": "TEST-CLO-" + frappe.generate_hash(length=8),
+                    "pos_opening_entry": name,
+                    "pos_profile": profile,
+                    "user": "Administrator",
+                    "company": self.scope.company,
+                    "period_start_date": start,
+                    "period_end_date": end,
+                    "posting_date": str(end)[:10],
+                    "docstatus": 1,
+                }
+            )
+            closing.db_insert()
+        return name
 
     def _paid(
         self, posting_date, amount=100000, customer_name="Test mijoz", mode="Cash",
-        table=None, waiter=None,
+        table=None, waiter=None, posting_time="12:00:00",
     ):
         name = frappe.generate_hash(length=10)
         frappe.db.sql(
@@ -685,12 +1432,12 @@ class TestPaidOrderHistory(FrappeTestCase):
                  customer_name, cashier, waiter, posting_date, posting_time,
                  grand_total, rounded_total, paid_amount)
             values (%s, now(), now(), 'Administrator', 'Administrator', 1,
-                 %s, %s, 1, 0, %s, 'Administrator', %s, %s, '12:00:00',
+                 %s, %s, 1, 0, %s, 'Administrator', %s, %s, %s,
                  %s, %s, %s)
             """,
             (
                 name, table or self.table, self.scope.branch, customer_name,
-                waiter, posting_date, amount, amount, amount,
+                waiter, posting_date, posting_time, amount, amount, amount,
             ),
         )
         frappe.db.sql(
@@ -779,6 +1526,206 @@ class TestPaidOrderHistory(FrappeTestCase):
             "waiter-c@example.com", [w["value"] for w in options["waiters"]]
         )
 
+    # ── Smena oynasi: kassa ochilgandan yopilgunicha ──────────────────
+
+    def _names(self, **kwargs):
+        from ozturkapp.ozturkapp.api.order import get_paid_orders
+
+        return {r["invoice"] for r in get_paid_orders(**kwargs)}
+
+    def test_closed_shift_shows_only_invoices_between_opening_and_closing(self):
+        today = frappe.utils.today()
+        shift = self._shift(f"{today} 10:00:00", f"{today} 14:00:00")
+
+        before = self._paid(today, posting_time="09:59:59")
+        first = self._paid(today, posting_time="10:00:01")
+        last = self._paid(today, posting_time="13:59:59")
+        after = self._paid(today, posting_time="14:00:01")
+
+        names = self._names(shift=shift)
+        self.assertEqual(names & {before, first, last, after}, {first, last})
+
+    def test_open_shift_has_no_upper_bound_and_crosses_midnight(self):
+        today = frappe.utils.today()
+        yesterday = frappe.utils.add_days(today, -1)
+        shift = self._shift(f"{yesterday} 22:00:00")
+
+        early = self._paid(yesterday, posting_time="21:59:59")
+        late = self._paid(yesterday, posting_time="23:30:00")
+        next_day = self._paid(today, posting_time="01:15:00")
+
+        # Sana filtri bilan `bugun` ro'yxatida faqat oxirgisi bo'lardi.
+        names = self._names(shift=shift)
+        self.assertEqual(names & {early, late, next_day}, {late, next_day})
+        self.assertEqual(self._names(date_from=today, date_to=today) & {late, next_day}, {next_day})
+
+    def test_two_shifts_on_one_day_do_not_mix(self):
+        today = frappe.utils.today()
+        morning = self._shift(f"{today} 08:00:00", f"{today} 15:00:00")
+        evening = self._shift(f"{today} 18:00:00", f"{today} 23:00:00")
+
+        a = self._paid(today, posting_time="09:00:00")
+        b = self._paid(today, posting_time="19:00:00")
+        between = self._paid(today, posting_time="16:30:00")
+
+        mine = {a, b, between}
+        self.assertEqual(self._names(shift=morning) & mine, {a})
+        self.assertEqual(self._names(shift=evening) & mine, {b})
+
+    def test_shift_ignores_the_date_filter(self):
+        today = frappe.utils.today()
+        shift = self._shift(f"{today} 10:00:00", f"{today} 14:00:00")
+        inv = self._paid(today, posting_time="11:00:00")
+
+        long_ago = frappe.utils.add_days(today, -30)
+        self.assertIn(inv, self._names(shift=shift, date_from=long_ago, date_to=long_ago))
+
+    def test_shift_combines_with_table_and_waiter_filters(self):
+        today = frappe.utils.today()
+        shift = self._shift(f"{today} 10:00:00", f"{today} 14:00:00")
+
+        wanted = self._paid(today, table=self.table, waiter="waiter-a@example.com", posting_time="11:00:00")
+        other_table = self._paid(today, table="Test-Table-Boshqa", waiter="waiter-a@example.com", posting_time="11:00:00")
+        other_waiter = self._paid(today, table=self.table, waiter="waiter-b@example.com", posting_time="11:00:00")
+
+        names = self._names(shift=shift, table=self.table, waiter="waiter-a@example.com")
+        self.assertEqual(names & {wanted, other_table, other_waiter}, {wanted})
+
+    def test_closed_shift_without_closing_entry_ends_when_the_next_one_opens(self):
+        """Ko'p kassirli rejimda `Sub POS Closing` smenani yakuniy hujjatsiz `Closed` qiladi."""
+        today = frappe.utils.today()
+        first = self._shift(f"{today} 08:00:00", status="Closed")
+        self._shift(f"{today} 13:00:00")
+
+        inside = self._paid(today, posting_time="10:00:00")
+        outside = self._paid(today, posting_time="13:30:00")
+
+        self.assertEqual(self._names(shift=first) & {inside, outside}, {inside})
+
+    def test_shift_of_another_pos_profile_is_rejected(self):
+        today = frappe.utils.today()
+        foreign = self._shift(f"{today} 10:00:00", f"{today} 14:00:00", profile="Test-Boshqa-Profil")
+
+        with self.assertRaises(cashier_permissions.CashierPermissionError):
+            self._names(shift=foreign)
+
+    def test_unknown_shift_is_rejected(self):
+        with self.assertRaises(frappe.DoesNotExistError):
+            self._names(shift="TEST-OPE-yo'q")
+
+    def test_shift_name_must_be_plain_text(self):
+        with self.assertRaises(frappe.DoesNotExistError):
+            self._names(shift='["POS-OPE-2026-00001"]')
+
+    def test_filter_options_list_shifts_newest_first_with_their_windows(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        today = frappe.utils.today()
+        closed = self._shift(f"{today} 01:00:00", f"{today} 02:00:00")
+        current = self._shift(f"{today} 03:00:00")
+
+        shifts = get_paid_order_filter_options()["shifts"]
+        by_name = {s["name"]: s for s in shifts}
+
+        self.assertTrue(by_name[current]["open"])
+        self.assertIsNone(by_name[current]["closed_at"])
+        self.assertFalse(by_name[closed]["open"])
+        self.assertTrue(by_name[closed]["closed_at"].startswith(f"{today} 02:00:00"))
+        self.assertTrue(by_name[closed]["opened_at"].startswith(f"{today} 01:00:00"))
+
+        names = [s["name"] for s in shifts]
+        self.assertLess(names.index(current), names.index(closed))
+
+    def test_shifts_of_other_pos_profiles_are_not_listed(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        today = frappe.utils.today()
+        foreign = self._shift(f"{today} 10:00:00", f"{today} 14:00:00", profile="Test-Boshqa-Profil")
+
+        listed = {s["name"] for s in get_paid_order_filter_options()["shifts"]}
+        self.assertNotIn(foreign, listed)
+
+    # ── Kassir oldingi smenalarni KO'RMAYDI ───────────────────────────
+
+    def _two_shifts(self):
+        """Yopilgan smena (01:00–02:00) va hozirgi ochiq smena (03:00 dan), har birida bittadan chek."""
+        today = frappe.utils.today()
+        old = self._shift(f"{today} 01:00:00", f"{today} 02:00:00")
+        current = self._shift(f"{today} 03:00:00")
+        old_inv = self._paid(today, table="Test-Table-Eski", waiter="waiter-old@example.com", posting_time="01:30:00")
+        new_inv = self._paid(today, table="Test-Table-Yangi", waiter="waiter-new@example.com", posting_time="03:30:00")
+        return today, old, current, old_inv, new_inv
+
+    def test_cashier_sees_only_the_current_open_shift(self):
+        today, old, current, old_inv, new_inv = self._two_shifts()
+        self._cashier()
+
+        with self._current_shift(current):
+            names = self._names()
+        self.assertEqual(names & {old_inv, new_inv}, {new_inv})
+
+    def test_cashier_cannot_ask_for_a_previous_shift(self):
+        today, old, current, old_inv, new_inv = self._two_shifts()
+        self._cashier()
+
+        with self._current_shift(current):
+            with self.assertRaises(cashier_permissions.CashierPermissionError):
+                self._names(shift=old)
+            # O'z smenasini aniq so'rasa — o'tadi.
+            self.assertEqual(self._names(shift=current) & {old_inv, new_inv}, {new_inv})
+
+    def test_cashier_cannot_bypass_the_limit_with_dates(self):
+        today, old, current, old_inv, new_inv = self._two_shifts()
+        self._cashier()
+
+        long_ago = frappe.utils.add_days(today, -365)
+        with self._current_shift(current):
+            names = self._names(date_from=long_ago, date_to=today)
+        self.assertEqual(names & {old_inv, new_inv}, {new_inv})
+
+    def test_cashier_sees_nothing_when_no_shift_is_open(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        self._two_shifts()
+        self._cashier()
+
+        with self._current_shift(""):
+            self.assertEqual(self._names(), set())
+            self.assertEqual(
+                get_paid_order_filter_options(), {"tables": [], "waiters": [], "shifts": []}
+            )
+
+    def test_cashier_filter_options_are_limited_to_the_current_shift(self):
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        today, old, current, old_inv, new_inv = self._two_shifts()
+        self._cashier()
+
+        with self._current_shift(current):
+            options = get_paid_order_filter_options()
+
+        self.assertEqual([s["name"] for s in options["shifts"]], [current])
+        self.assertIn("Test-Table-Yangi", options["tables"])
+        self.assertNotIn("Test-Table-Eski", options["tables"])
+        waiters = [w["value"] for w in options["waiters"]]
+        self.assertIn("waiter-new@example.com", waiters)
+        self.assertNotIn("waiter-old@example.com", waiters)
+
+    def test_manager_still_sees_previous_shifts(self):
+        """Administrator (`System Manager`) — menejer huquqi: hamma smenalar."""
+        from ozturkapp.ozturkapp.api.order import get_paid_order_filter_options
+
+        today, old, current, old_inv, new_inv = self._two_shifts()
+
+        with self._current_shift(current):
+            self.assertEqual(self._names(shift=old) & {old_inv, new_inv}, {old_inv})
+            options = get_paid_order_filter_options()
+
+        listed = [s["name"] for s in options["shifts"]]
+        self.assertIn(old, listed)
+        self.assertIn(current, listed)
+        self.assertIn("Test-Table-Eski", options["tables"])
+
     def test_never_mutates(self):
         """`get_paid_orders` / `get_paid_order_filter_options` — faqat o'qish."""
         import inspect
@@ -830,14 +1777,19 @@ class TestCashierCannotEditOrder(FrappeTestCase):
                 )
 
     def test_page_script_has_no_item_editing_calls(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        """Yadroda taom tahrirlash yo'q.
+
+        Kassadan buyurtma qabul qilish (`cashier_orders`) — POS Profile
+        bayrog'i bilan yoqiladigan ALOHIDA funksiya moduli (`features/`);
+        u o'z testlari bilan qoplanadi va shu yerda tekshirilmaydi.
+        """
+        page = cashier_page()
 
         for needle in ("sync_order", "add_item", "remove_item", "cart"):
             self.assertNotIn(
                 needle,
                 page.script,
-                f"kassa sahifasida '{needle}' bo'lmasligi kerak",
+                f"kassa yadrosida '{needle}' bo'lmasligi kerak",
             )
 
 
@@ -886,7 +1838,9 @@ class TestShiftManagement(FrappeTestCase):
         if not cash:
             self.skipTest("Naqd to'lov usuli yo'q")
 
-        self.assertEqual(_parse_counted_cash({cash[0]: 1000}, profile), {cash[0]: 1000.0})
+        # Sanoq HAR BIR naqd usul uchun kiritiladi (POS Profile'da bir nechta naqd usul bo'lishi mumkin).
+        counted = {mode: 1000 for mode in cash}
+        self.assertEqual(_parse_counted_cash(counted, profile), {mode: 1000.0 for mode in cash})
 
         non_cash = [
             m["mode_of_payment"]
@@ -895,14 +1849,13 @@ class TestShiftManagement(FrappeTestCase):
         ]
         if non_cash:
             with self.assertRaises(frappe.ValidationError):
-                _parse_counted_cash({non_cash[0]: 1000}, profile)
+                _parse_counted_cash({**counted, non_cash[0]: 1000}, profile)
 
         with self.assertRaises(frappe.ValidationError):
-            _parse_counted_cash({cash[0]: -1}, profile)
+            _parse_counted_cash({**counted, cash[0]: -1}, profile)
 
     def test_page_has_blind_count_with_countdown(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         self.assertIn("Cheklar soni", page.script)
         self.assertIn("countdownTimer", page.script)
@@ -914,8 +1867,7 @@ class TestShiftManagement(FrappeTestCase):
 
     def test_count_is_entered_twice(self):
         """Ikki bosqichli sanoq — xato raqam o'tib ketmasligi uchun."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         self.assertIn("renderCountStep", page.script)
         self.assertIn("Davom etish", page.script)
@@ -935,8 +1887,7 @@ class TestShiftManagement(FrappeTestCase):
 
             200 000 -> 180 000 -> 180 000 (yopiladi)
         """
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         block = page.script[page.script.index("if (mismatch.length)") :]
         block = block[: block.index("return;")]
@@ -962,11 +1913,9 @@ class TestShiftManagement(FrappeTestCase):
         Mos kelmagandan keyin `first` BO'SH EMAS holda qayta chiziladi,
         ya'ni `second` rost bo'ladi va sanoq shoxi yana ishga tushadi.
         """
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
-        step = page.script[page.script.index("renderCountStep(data, first)") :]
-        block = step[: step.index("setModalLocked(locked)")]
+        block = js_method(page.script, "renderCountStep(data, first) {")
 
         # Sanoq `second` (ya'ni `first !== null`) shoxida ishga tushadi.
         self.assertIn("const second = first !== null;", block)
@@ -981,8 +1930,7 @@ class TestShiftManagement(FrappeTestCase):
         to'planib, bitta bosishda ikkalasi ham ishlab ketardi — 2-bosqich
         tugmasi sanoqni QAYTADAN boshlab yuborardi (ko'rilgan xato).
         """
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         # Ishlovchi bog'laydigan har bir joy — ya'ni `const $body = ...` —
         # `.off()` bilan olinishi kerak. Faqat o'qish uchun ishlatilgan
@@ -1001,11 +1949,9 @@ class TestShiftManagement(FrappeTestCase):
 
     def test_countdown_starts_after_first_entry_not_before(self):
         """Sanoq 1-bosqichda EMAS, 2-bosqichda boshlanadi."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        script = page.load_assets() or page.script
+        page = cashier_page()
 
-        step = page.script[page.script.index("renderCountStep(data, first)") :]
-        block = step[: step.index("setModalLocked(locked)")]
+        block = js_method(page.script, "renderCountStep(data, first) {")
 
         # Sanoq `if (second)` shoxida ishga tushishi kerak.
         self.assertIn("if (second) {", block)
@@ -1064,8 +2010,7 @@ class TestShiftManagement(FrappeTestCase):
             frappe.db.delete("POS Invoice", {"name": name})
 
     def test_page_has_shift_buttons(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         # Ochish — bloklovchi ekran orqali, yopish — modal orqali.
         self.assertIn("renderShiftGate", page.script)
         self.assertIn("closeShiftDialog", page.script)
@@ -1076,41 +2021,33 @@ class TestShiftManagement(FrappeTestCase):
         Modal bo'lganda uni yopib ishlashda davom etish mumkin edi; endi
         `data-state="shift"` butun ish maydonini berkitadi.
         """
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         self.assertIn('this.setState("shift")', page.script)
         self.assertIn('.rc-root[data-state="shift"]', page.style or "")
 
-    def test_shift_button_sits_next_to_refresh(self):
-        """Tugma sahifaning «Yangilash» tugmasi yonida va ochiq smenada QIZIL."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+    def test_close_shift_is_a_red_menu_item(self):
+        """«Kassani yopish» — «⋯» menyusidagi QIZIL band (Desk sarlavhasi ko'rinib turadi, menyu esa «⋯» da)."""
+        page = cashier_page()
+        menu = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "ui", "menu.js"))
 
-        self.assertIn("this.page.custom_actions", page.script)
-        self.assertIn("btn-danger", page.script)
+        block = js_slot_item(menu, "close-shift")
+        self.assertIn('kind: "danger"', block)
+        self.assertIn("screen.closeShiftDialog()", block)
+        self.assertIn("--rc-occupied", re.search(r"\.rc-menu__item--danger[^}]*\}", page.style).group(0))
 
-        style = page.style or ""
-        self.assertIn(".rc-shift-action", style)
+    def test_close_shift_is_offered_once_and_only_when_open(self):
+        """Band bir marta e'lon qilinadi va faqat ochiq smenada, kassir uchun chiqadi."""
+        menu = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "ui", "menu.js"))
+        self.assertEqual(menu.count('id: "close-shift"'), 1)
 
-        # Tugma `.rc-root` DAN TASHQARIDA turadi — u yerda `--rc-*`
-        # o'zgaruvchilar aniqlanmagan. Ular ishlatilsa `background`
-        # butunlay o'chib, tugma RANGSIZ qoladi (ko'rilgan xato).
-        import re
+        block = js_slot_item(menu, "close-shift")
+        self.assertIn("shift.open && canOperate", block)
 
-        rule = re.search(r"\.rc-shift-action\.btn-danger.*?\}", style, re.S)
-        self.assertIsNotNone(rule, "qizil rang qoidasi yo'q")
-        self.assertNotIn("--rc-", rule.group(0), "komponent o'zgaruvchisi ishlatilgan")
-        self.assertIn("--danger", rule.group(0))
-
-    def test_shift_button_is_created_once(self):
-        """`page.add_button()` ishlatilmasligi kerak — u mobil menyuni to'ldiradi."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
-
-        # Izohlarda eslatilishi mumkin — HAQIQIY chaqiruv bo'lmasligi kerak.
-        self.assertNotIn("this.page.add_button(", page.script)
-        self.assertIn("if (!this.$shiftBtn)", page.script)
+        # Sarlavha tugmalari va mobil menyu to'lib ketishi endi mumkin emas.
+        script = cashier_page().script
+        for call in ("this.page.add_button(", "set_primary_action(", "set_secondary_action(", "custom_actions"):
+            self.assertNotIn(call, script)
 
 
 class TestValuationRateGuard(FrappeTestCase):
@@ -1200,8 +2137,7 @@ class TestDefaultRoomSelection(FrappeTestCase):
     """Standart holat — BARCHA ZALLAR (kassir keyin o'zgartirib oladi)."""
 
     def test_cashier_defaults_to_all_rooms(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         # `default_room` ga qaytish MANTIG'I bo'lmasligi kerak.
         self.assertNotIn("restaurant || {}).default_room", page.script)
@@ -1246,11 +2182,11 @@ class TestCashierCannotOccupyTable(FrappeTestCase):
         self.assertTrue(hasattr(table_api, "cancel_reservation"))
 
     def test_cashier_page_has_no_seat_action(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertNotIn('data-action="seat"', page.script)
-        self.assertIn('data-action="reserve"', page.script)
-        self.assertIn('data-action="unreserve"', page.script)
+        self.assertNotIn('id: "seat"', page.script)
+        self.assertIn('id: "reserve"', page.script)
+        self.assertIn('id: "unreserve"', page.script)
 
     def test_no_manual_release_button_in_normal_flow(self):
         """Stol faqat to'lovda bo'shaydi — oddiy panelda tugma yo'q.
@@ -1258,33 +2194,33 @@ class TestCashierCannotOccupyTable(FrappeTestCase):
         `release` amali FAQAT buzilgan holat (`STALE_OCCUPIED_FLAG`)
         panelida qoladi, aks holda bunday stolni tozalab bo'lmaydi.
         """
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertEqual(
-            page.script.count('data-action="release"'),
+            page.script.count('id: "release"'),
             1,
             "bo'shatish tugmasi faqat xato panelida bo'lishi kerak",
         )
+        block = js_slot_item(page.script, "release")
+        self.assertIn("STALE_OCCUPIED_FLAG", block)
+        self.assertIn("is_supervisor", block)
 
     def test_no_ury_pos_link(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertNotIn('data-action="pos"', page.script)
 
     def test_bill_is_given_not_just_opened(self):
         """«Hisobni berish» — chekni belgilaydi VA chop etadi."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
-        self.assertIn('data-action="give-bill"', page.script)
-        self.assertIn("giveBill", page.script)
-        self.assertIn("printReceipt", page.script)
-        # Alohida "chop etish" tugmasi bo'lmasligi kerak.
+        page = cashier_page()
+        self.assertIn('id: "give-bill"', page.script)
+        self.assertIn("screen.giveBill(detail, button)", page.script)
+        self.assertIn("this.printReceipt(detail)", js_method(page.script, "async giveBill(detail, button) {"))
+        # Alohida "chop etish" (data-action="print") tugmasi bo'lmasligi kerak.
         self.assertNotIn('data-action="print"', page.script)
+        self.assertNotIn('id: "print"', page.script)
 
     def test_errors_are_shown_by_the_page_not_erpnext(self):
         """ERPNext'ning o'z msgprint oynasi chiqmasligi kerak."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertIn("silent: true", page.script)
         # jqXHR ichidagi haqiqiy xabar o'qilishi kerak ([object Object] emas).
         self.assertIn("responseJSON", page.script)
@@ -1339,12 +2275,16 @@ class TestCustomerReceipt(FrappeTestCase):
         )
 
     def test_qty_and_rate_are_separate_columns(self):
+        """Soni, narxi va summasi — har biri o'z ustunida, summalar umumiy formatlagich bilan."""
         html = self._html()
         # Standart ERPNext formatidagi "qty @ rate" birikmasi BO'LMASLIGI kerak.
         self.assertNotIn("@ {{ item.get_formatted", html)
-        self.assertIn('{{ item.qty | int }}', html)
-        self.assertIn('{{ item.get_formatted("rate") }}', html)
-        self.assertIn('{{ item.get_formatted("amount") }}', html)
+        self.assertIn('<td class="num">{{ item.qty | int }}</td>', html)
+        # Narx va summa `format_amount` orqali (probel bilan guruhlanadi) —
+        # Frappe'ning `get_formatted()` i saytning `#,###.##` formatiga tayanadi.
+        self.assertIn('<td class="num">{{ format_amount(item.rate) }}</td>', html)
+        self.assertIn('<td class="num">{{ format_amount(item.amount) }}</td>', html)
+        self.assertNotIn('item.get_formatted("rate")', html)
 
     def test_exactly_three_total_rows(self):
         """Jami · xizmat haqi · umumiy summa — boshqasi yo'q."""
@@ -1408,6 +2348,17 @@ class TestPaymentValidation(FrappeTestCase):
             precision=lambda field: 2,
         )
 
+        # To'lov usuli nomi QATTIQ yozilmaydi: har bir restoranda o'zicha
+        # («Naqd», «Нахт», ...). POS Profile'ning standart usuli olinadi —
+        # aks holda test «noma'lum usul» xatosini «to'lov yetarli emas»
+        # deb o'ylab, noto'g'ri sabab bilan o'tib ketardi.
+        methods = cashier_billing.get_payment_methods(self.scope.pos_profile)
+        if not methods:
+            self.skipTest("POS Profile'da to'lov usuli sozlanmagan")
+        self.mode = next((m for m in methods if m.get("default")), methods[0])[
+            "mode_of_payment"
+        ]
+
     def _validate(self, payments):
         from ozturkapp.ozturkapp.api.billing import _validate_payments
 
@@ -1415,7 +2366,7 @@ class TestPaymentValidation(FrappeTestCase):
 
     def test_underpayment_is_rejected(self):
         with self.assertRaises(frappe.ValidationError):
-            self._validate([{"mode_of_payment": "Cash", "amount": 50000}])
+            self._validate([{"mode_of_payment": self.mode, "amount": 50000}])
 
     def test_unknown_mode_of_payment_is_rejected(self):
         with self.assertRaises(frappe.ValidationError):
@@ -1429,14 +2380,15 @@ class TestPaymentValidation(FrappeTestCase):
         with self.assertRaises(frappe.ValidationError):
             self._validate(
                 [
-                    {"mode_of_payment": "Cash", "amount": 200000},
-                    {"mode_of_payment": "Cash", "amount": -50000},
+                    {"mode_of_payment": self.mode, "amount": 200000},
+                    {"mode_of_payment": self.mode, "amount": -50000},
                 ]
             )
 
     def test_exact_payment_is_accepted(self):
-        rows = self._validate([{"mode_of_payment": "Cash", "amount": 112000}])
+        rows = self._validate([{"mode_of_payment": self.mode, "amount": 112000}])
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["mode_of_payment"], self.mode)
         self.assertEqual(rows[0]["amount"], 112000)
 
 
@@ -1702,8 +2654,7 @@ class TestOpeningIsCashOnly(FrappeTestCase):
             )
 
     def test_gate_form_uses_cash_modes_only(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertIn("this.ctx.cash_modes", page.script)
 
 
@@ -1732,14 +2683,22 @@ class TestClosingAtZero(FrappeTestCase):
         self.assertTrue(all(r["opening_amount"] == 0 for r in rows))
 
     def test_form_prefills_zero_only_without_sales(self):
-        """Savdo bo'lsa maydon bo'sh qoladi — ko'r sanoq buzilmasin."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
-        self.assertIn('cint(data.total_invoices) ? "" : "0"', page.script)
+        """Savdo bo'lsa maydon bo'sh qoladi — ko'r sanoq buzilmasin.
+
+        Maydon HECH QACHON tayyor qiymat bilan chizilmaydi (`0` faqat
+        placeholder). Bo'sh maydon `0` deb qabul qilinishi esa FAQAT chek
+        yozilmagan smenada (`allowEmpty`); savdo bo'lgan smenada bo'sh
+        maydon rad etiladi va kassir sanashga majbur bo'ladi.
+        """
+        page = cashier_page()
+        step = js_method(page.script, "renderCountStep(data, first) {")
+
+        self.assertIn('value="" placeholder="0"', step)
+        self.assertIn("const allowEmpty = !cint(data.total_invoices);", step)
+        self.assertIn('String(input.value).trim() === "" && !allowEmpty', step)
 
     def test_error_message_mentions_zero(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertIn("0 yozing", page.script)
 
 
@@ -1764,8 +2723,7 @@ class TestCashierSeesKitchenUpdates(FrappeTestCase):
         self.assertIn('"kitchen_item": EVENT_ITEM', source)
 
     def test_page_subscribes_to_kitchen_channel(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.assertIn("events.kitchen_item", page.script)
 
     def test_event_carries_branch_and_invoice(self):
@@ -2230,22 +3188,32 @@ class TestCashierPageCancelButton(FrappeTestCase):
     """Kassa sahifasida bekor qilish tugmasi va stolsiz buyurtma."""
 
     def setUp(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
-        self.script = page.script
+        self.script = cashier_page().script
 
     def test_page_has_a_cancel_action(self):
-        self.assertIn('data-action="cancel-order"', self.script)
-        self.assertIn("cancelOrder(detail, button)", self.script)
+        self.assertIn('id: "cancel-order"', self.script)
+        self.assertIn("screen.cancelOrder(detail, button)", self.script)
+        self.assertIn("cancelOrder(detail) {", self.script)
 
     def test_cancel_asks_for_a_reason(self):
-        self.assertIn("api.order.cancel_order", self.script)
-        self.assertIn('fieldname: "reason"', self.script)
+        """Sabab MAJBURIY: tayyor sabablardan biri yoki «Boshqa…» (matn)."""
+        form = js_method(self.script, "cancelOrder(detail) {")
+        self.assertIn("api.order.cancel_order", form)
+        self.assertIn('name: "reason"', form)
+        self.assertIn("required: true", form)
+        self.assertIn("other:", form)
+        self.assertIn('__("Boshqa…")', form)
+
+        for preset in ("Mijoz fikridan qaytdi", "Ofitsant xatosi", "Uzoq kutdi"):
+            self.assertIn(f'__("{preset}")', self.script)
 
     def test_button_state_comes_from_the_server(self):
         """Tugma holati frontendda HISOBLANMAYDI (TZ §17)."""
         self.assertIn("bill.cancellation", self.script)
         self.assertIn("cancellation.requires_supervisor", self.script)
+        block = js_slot_item(self.script, "cancel-order")
+        self.assertIn("cancellation.allowed", block)
+        self.assertIn("blocked_reason", block)
 
     def test_orders_without_a_table_can_be_opened(self):
         self.assertIn("selectOrder(invoice)", self.script)
@@ -2367,8 +3335,7 @@ class TestShiftGateForUnauthorizedUser(FrappeTestCase):
     """
 
     def setUp(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.script = page.script
 
     def test_only_the_operator_is_blocked_by_the_gate(self):
@@ -2382,7 +3349,8 @@ class TestShiftGateForUnauthorizedUser(FrappeTestCase):
         self.assertIn("shift_operators", self.script)
 
     def test_close_button_is_hidden_for_unauthorized_user(self):
-        self.assertIn("isOpen && canOperate", self.script)
+        menu = _read(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "ui", "menu.js"))
+        self.assertIn("shift.open && canOperate", js_slot_item(menu, "close-shift"))
 
 
 class TestBulkClosingMatchesErpnext(FrappeTestCase):
@@ -2852,8 +3820,7 @@ class TestMoneyFormatting(FrappeTestCase):
 
     def test_cashier_page_does_not_use_frappe_currency_format(self):
         """`format_currency()` saytning `#,###.##` sozlamasiga tayanadi."""
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
 
         self.assertNotIn("format_currency(flt(value)", page.script)
         # Minglik ajratgich — probel.
@@ -2896,8 +3863,7 @@ class TestAmountInputsAreGrouped(FrappeTestCase):
     """
 
     def setUp(self):
-        page = frappe.get_doc("Page", "restaurant-cashier")
-        page.load_assets()
+        page = cashier_page()
         self.script = page.script
 
     def test_no_amount_field_is_a_number_input(self):

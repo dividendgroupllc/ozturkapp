@@ -16,13 +16,16 @@ javob beradi. Stol, buyurtma va hisob mantig'i alohida modullarda:
 """
 
 import json
+import math
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from ozturkapp.ozturkapp.setup import bill_split_setup, virtual_keyboard_setup
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, table_status
+from ozturkapp.ozturkapp.setup import bill_split_setup, cashier_features, virtual_keyboard_setup
+from ozturkapp.ozturkapp.utils import (
+    cashier_billing, cashier_permissions, print_queue, shift_report, table_status,
+)
 from ozturkapp.ozturkapp.utils.cashier_realtime import EVENT_FLOOR, EVENT_ORDER
 from ozturkapp.ozturkapp.utils.kitchen_realtime import EVENT_ITEM
 from ozturkapp.ozturkapp.utils.notifications import EVENT_NOTIFY
@@ -75,6 +78,12 @@ def get_cashier_context():
         # Kassani yopish va to'lov summasi maydonlarida ekran klaviaturasi —
         # POS Profile'da yoqilgan bo'lsagina ko'rinadi.
         "enable_virtual_keyboard": virtual_keyboard_setup.is_enabled(scope.pos_profile),
+        # BARCHA yoqish/o'chirish bayroqlari bitta joyda (`setup/cashier_features.py`).
+        # Frontend yangi funksiyani shu lug'atdan o'qiydi; server esa har amalda
+        # `cashier_features.assert_enabled()` bilan majburlaydi.
+        "features": cashier_features.get_features(scope.pos_profile),
+        # Chegaralar va foizlar (kassir chegirma chegarasi, choychaqa tugmalari, ...).
+        "feature_settings": cashier_features.get_settings(scope.pos_profile),
         "permissions": {
             "can_bill": _can_bill(scope.pos_profile),
             "is_supervisor": cashier_permissions.has_supervisor_role(),
@@ -323,10 +332,7 @@ def _opening_balance_details(balance_details, pos_profile: str) -> list:
                 _("'{0}' naqd to'lov usuli emas — ochilishda kiritilmaydi").format(mode),
                 title=_("Noto'g'ri to'lov usuli"),
             )
-        amount = flt((row or {}).get("opening_amount"))
-        if amount < 0:
-            frappe.throw(_("Summa manfiy bo'lishi mumkin emas"))
-        entered[mode] = amount
+        entered[mode] = _cash_amount((row or {}).get("opening_amount"))
 
     missing = set(allowed) - set(entered)
     if missing:
@@ -341,6 +347,24 @@ def _opening_balance_details(balance_details, pos_profile: str) -> list:
     ]
 
 
+#: Kassir kiritadigan naqd summaning eng katta qiymati (Currency ustuni chegarasidan past).
+MAX_CASH_AMOUNT = 10 ** 11
+
+
+def _cash_amount(value) -> float:
+    """Kassir kiritgan naqd summa: son, cheklangan, manfiy emas.
+
+    `flt("nan")` -> nan `< 0` tekshiruvidan o'tib, bazada tushunarsiz xato berardi;
+    `1e30` esa Currency ustunini to'ldirib yuboradi.
+    """
+    amount = flt(value)
+    if not math.isfinite(amount) or abs(amount) > MAX_CASH_AMOUNT:
+        frappe.throw(_("Summa noto'g'ri kiritilgan"), title=_("Summa noto'g'ri"))
+    if amount < 0:
+        frappe.throw(_("Summa manfiy bo'lishi mumkin emas"))
+    return amount
+
+
 #: Kassani yopishdan oldin majburiy qayta sanash vaqti (soniya).
 #: Kassir bu vaqt ichida qo'lidagi pulni qayta sanaydi.
 CLOSING_COUNTDOWN_SECONDS = 60
@@ -352,11 +376,25 @@ def _cash_modes(pos_profile: str) -> list:
     Bank/karta summalari terminal yozuvlaridan kelib chiqadi va kassir
     ularni kiritmaydi — ular avtomatik to'ldiriladi.
     """
-    modes = []
-    for method in cashier_billing.get_payment_methods(pos_profile):
-        if (method.get("type") or "").strip().lower() == "cash":
-            modes.append(method["mode_of_payment"])
-    return modes
+    return cashier_billing.cash_modes(pos_profile)
+
+
+def _lock_shift_for_closing(shift_name: str):
+    """Smenani yopish uchun qulf: ikki bir vaqtdagi `close_shift` (qayta bosish, tarmoq
+    qayta yuborishi) ikkita `POS Closing Entry` va cheklarni IKKI MARTA konsolidatsiya
+    qilmasligi uchun.
+
+    Qulfli o'qish oxirgi tasdiqlangan holatni ko'radi (oddiy o'qish tranzaksiya
+    boshidagi eski holatni ko'rishi mumkin), shuning uchun yopilganlik ham qulf ichida
+    qayta tekshiriladi.
+    """
+    frappe.db.sql("select name from `tabPOS Opening Entry` where name = %s for update", shift_name)
+    closed = frappe.db.sql(
+        "select name from `tabPOS Closing Entry` where pos_opening_entry = %s and docstatus < 2 for update",
+        shift_name,
+    )
+    if closed:
+        frappe.throw(_("Bu smena allaqachon yopilgan"), title=_("Smena yopiq"))
 
 
 def _open_order_count(scope) -> int:
@@ -426,6 +464,12 @@ def close_shift(counted_cash):
 
     Kutilayotgan summalar va naqd bo'lmagan usullar SERVERDA to'ldiriladi —
     mijozdan kelgan qiymatlarga ishonilmaydi.
+
+    Returns:
+        dict: `createPosClosing` natijasi (kassirga kutilgan summa va farqsiz —
+        `_withhold_cash_figures`), `shift` va `z_report_queued`: yopilgandan
+        KEYIN Z-hisobot chop etish navbatiga tushdimi (`shift_reports` yoqilgan
+        va printer bor bo'lsa). Chop etish yopilishni hech qachon to'xtatmaydi.
     """
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
@@ -434,6 +478,7 @@ def close_shift(counted_cash):
     shift = _get_shift(scope)
     if not shift.get("open"):
         frappe.throw(_("Ochiq smena yo'q"), title=_("Smena yopiq"))
+    _lock_shift_for_closing(shift["name"])
 
     # To'lanmagan buyurtma qolgan bo'lsa smenani yopish MUMKIN EMAS —
     # aks holda o'sha buyurtmalar hisobotdan tushib qoladi.
@@ -506,7 +551,85 @@ def close_shift(counted_cash):
         payment_reconciliation=reconciliation,
     )
     result["shift"] = _get_shift(scope)
+    result["z_report_queued"] = _queue_z_report(scope, result)
+    if not cashier_permissions.has_supervisor_role():
+        _withhold_cash_figures(result)
     return result
+
+
+#: `_queue_z_report` savepoint nomi.
+_Z_REPORT_SAVEPOINT = "ozturk_queue_z_report"
+
+
+def _queue_z_report(scope, closing_result: dict) -> bool:
+    """Z-hisobotni navbatga qo'yadi — YOPISH MUVAFFAQIYATLI bo'lgandan KEYIN.
+
+    Bu funksiya yopilish tugagach chaqiriladi va HECH QACHON xato bermaydi:
+    printer o'chiq, agent oflayn yoki hisobot tuzilmay qolsa ham smena
+    yopilgan bo'lib qoladi (yopish qaytarilmaydi va yiqilmaydi). Faqat
+    hisobotning o'z yozuvlari savepoint orqali qaytariladi.
+
+    Returns:
+        `True` — chop etish topshirig'i navbatga tushdi.
+    """
+    closing = closing_result.get("name") if closing_result.get("status") == "closed" else None
+    if not closing or not cashier_features.is_enabled(scope.pos_profile, "shift_reports"):
+        return False
+
+    try:
+        frappe.db.savepoint(_Z_REPORT_SAVEPOINT)
+        report = shift_report.build_report(shift_report.KIND_Z, scope, closing=closing)
+        return bool(print_queue.enqueue_shift_report(report, scope))
+    except Exception:
+        message = f"{closing}\n\n{frappe.get_traceback()}"
+        try:
+            # Avval qaytaramiz, KEYIN yozamiz — aks holda Error Log yozuvi
+            # ham savepoint bilan birga yo'qolardi.
+            frappe.db.rollback(save_point=_Z_REPORT_SAVEPOINT)
+            frappe.log_error(title="Z-hisobotni navbatga qo'yib bo'lmadi", message=message)
+        except Exception:
+            frappe.logger("ozturk_print").exception("Z-hisobot xatosi yozilmadi: %s", closing)
+        return False
+
+
+def _withhold_cash_figures(result: dict):
+    """Kassirga qaytadigan javobdan kutilgan summa va farqni olib tashlaydi.
+
+    `createPosClosing` (Desktop POS bilan umumiy) `z_report_data` da
+    kutilgan naqd, farq va savdo jamini qaytaradi. Kassa sahifasi ularni
+    ishlatmaydi, lekin javob brauzerga boradi va u yerda o'qib olinadi —
+    ko'r sanoq faqat ekran bilan cheklanib qolmasligi kerak. Kassirga o'zi
+    sanagan summa qoladi.
+    """
+    report = result.get("z_report_data")
+    if not report:
+        return
+    for key in ("total_sales", "expected_cash", "cash_diff"):
+        report.pop(key, None)
+    report["payments"] = [
+        {
+            "mode_of_payment": row.get("mode_of_payment"),
+            "closing_amount": row.get("closing_amount"),
+        }
+        for row in report.get("payments") or []
+    ]
+
+
+@frappe.whitelist()
+def get_shift_report(kind):
+    """X (oraliq, ochiq smena) yoki Z (oxirgi yopilgan smena) hisoboti.
+
+    KO'R SANOQ: kassir kutilgan summa, farq va savdo jamini ko'rmaydi
+    (`restricted: true`, qiymatlar `None`); menejer to'liq hisobotni oladi.
+    Batafsil: `utils/shift_report.py`.
+
+    Args:
+        kind: "X" yoki "Z".
+    """
+    cashier_permissions.require_cashier()
+    scope = cashier_permissions.resolve_scope()
+    cashier_features.assert_enabled(scope.pos_profile, "shift_reports")
+    return shift_report.build_report(kind, scope)
 
 
 def _parse_counted_cash(counted_cash, pos_profile: str) -> dict:
@@ -540,10 +663,7 @@ def _parse_counted_cash(counted_cash, pos_profile: str) -> dict:
                 _("'{0}' naqd to'lov usuli emas — kassir uni kiritmaydi").format(mode),
                 title=_("Noto'g'ri to'lov usuli"),
             )
-        value = flt(amount)
-        if value < 0:
-            frappe.throw(_("Summa manfiy bo'lishi mumkin emas"))
-        parsed[mode] = value
+        parsed[mode] = _cash_amount(amount)
 
     missing = allowed - set(parsed)
     if missing:

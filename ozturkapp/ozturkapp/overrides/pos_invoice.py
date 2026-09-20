@@ -31,7 +31,8 @@ kerak bo'lsa QAYTA band qiladi. `ury` manbasiga tegilmaydi (TZ §32).
 QOIDA
 =====
     Klasterda boshqa to'lanmagan chek qolgan bo'lsa -> stol BAND qoladi
-    Aks holda                                       -> stol BO'SHAYDI
+    Aks holda                                       -> stol BO'SHAYDI va
+                                                       birlashtirish tarqaladi
 """
 
 import frappe
@@ -66,11 +67,17 @@ def _reconcile_tables(doc):
         )
         return
 
+    # Klaster ham tarqatiladi (`merged_with = None`) — URY'ning o'z
+    # `release_merge_cluster_tables()` i ham shunday qiladi. Aks holda
+    # to'langan buyurtmaning stollari abadiy "birlashtirilgan" qolib, keyingi
+    # buyurtma asosiy stolga o'tirganda sherik stolni ham o'ziga tortardi
+    # (`custom_merged_tables`) va sherik stolni ko'chirish/birlashtirish
+    # uchun ishlatib bo'lmasdi.
     for member in cluster:
         frappe.db.set_value(
             "URY Table",
             member,
-            {"occupied": 0, "latest_invoice_time": None},
+            {"occupied": 0, "latest_invoice_time": None, "merged_with": None},
             update_modified=False,
         )
 
@@ -114,7 +121,10 @@ def _open_invoices_for(tables: list, exclude: str = None) -> list:
 
     names = set(frappe.get_all("POS Invoice", filters=filters, pluck="name"))
 
-    # Birlashtirilgan stollar CSV orqali bog'langan cheklar.
+    # Birlashtirilgan stollar CSV orqali bog'langan cheklar. `LIKE` faqat
+    # nomzodlarni tanlaydi; haqiqiy moslik CSV bo'laklari bo'yicha: "Table-1"
+    # "Table-10" birlashtirilgan chekni "ochiq chek" deb hisoblamasligi kerak
+    # (aks holda to'langan stol abadiy band qolardi).
     for table in tables:
         merged_filters = {
             "docstatus": 0,
@@ -125,6 +135,10 @@ def _open_invoices_for(tables: list, exclude: str = None) -> list:
         if frappe.db.has_column("POS Invoice", "custom_cancelled"):
             merged_filters["custom_cancelled"] = 0
 
-        names.update(frappe.get_all("POS Invoice", filters=merged_filters, pluck="name"))
+        for row in frappe.get_all(
+            "POS Invoice", filters=merged_filters, fields=["name", "custom_merged_tables"]
+        ):
+            if table in parse_merged_with(row.custom_merged_tables):
+                names.add(row.name)
 
     return sorted(names)

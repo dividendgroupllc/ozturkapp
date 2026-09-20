@@ -1,0 +1,247 @@
+/*
+ * Kassa oynasi — joylashuv: yuqori panel, «⋯» menyusi, tanlov tugmalari, ikki ustun.
+ *
+ * Kassa oddiy Desk sahifasi: navbar va sahifa sarlavhasi HAR DOIM ko'rinadi (to'liq
+ * ekran rejimi ATAYLAB olib tashlangan). Ilova balandligi Desk paneli ostida qolgan
+ * joy — `--rc-offset` ni JS o'lchaydi (`core/layout.js: syncOffset`), sahifa aylanmaydi,
+ * ustunlar ichkarida aylanadi.
+ *
+ * O'LCHAMLAR (baza 1366x768; 1024x768 .. 1920x1080 da ham ishlaydi)
+ *   yuqori panel  52px   zallar | stol holati | smena, kassir, tez tugmalar, soat, «⋯»
+ *   o'ng panel    ~36%, eng kami 340px
+ *
+ * KENGLIK SINFLARI (JS o'lchagan, `core/layout.js`; oyna kengligi emas, ilovaning O'Z kengligi)
+ *   `.rc-root[data-wide="1"]`   ilova >= 1200px: o'ng panel bo'sh turganda faol buyurtmalar
+ *                               ro'yxatini ko'rsatadi, «Stollar | Buyurtmalar» almashtirgichi yo'q
+ *   `.rc-root[data-wide="0"]`   tor: almashtirgich chap ustun tepasida, o'ng panel yo'l-yo'riq
+ *   `.rc-root[data-short="1"]`  ilova balandligi < 640px: zichroq bo'shliqlar
+ *   `.rc-root[data-compact="N"]` yuqori panel sig'maganda (N = 1..5) kamroq muhim qismlar
+ *                               ketma-ket yig'iladi: 1 kassir nomi · 2 filtr yozuvi (tanlangandan tashqari) ·
+ *                               3 tez tugma yozuvi · 4 zallar soni va «Kassa ochiq» yozuvi · 5 zallar aylantiriladi
+ */
+
+/* ═══ Desk sahifasi ichida ═════════════════════════════════════ */
+
+/* Faqat kassa sahifasi: Desk konteyneri (max-width ~1290px) kassani o'rtada qisib
+   qo'ymasin — sahifa sarlavhasi va navbar joyida, faqat ish maydoni to'liq enga ochiladi. */
+#page-restaurant-cashier .container { max-width: none; }
+
+/* ═══ Ilova balandligi ═════════════════════════════════════════ */
+
+/* Desk sarlavhasidan pastdagi qolgan joy. `--rc-offset` ni JS o'lchaydi. */
+.rc-root[data-state="ready"] {
+	height: calc(100vh - var(--rc-offset, 130px));
+	height: calc(100dvh - var(--rc-offset, 130px));
+	min-height: 440px;
+	background: var(--rc-surface);
+	border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg);
+	overflow: hidden;
+}
+.rc-app { flex-direction: column; height: 100%; min-height: 0; }
+
+/* ═══ Yuqori panel (52px) ══════════════════════════════════════ */
+
+.rc-topbar {
+	position: relative; flex: 0 0 auto;
+	display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
+	min-height: 52px; padding: 0 10px 0 8px;
+	background: var(--rc-surface);
+	border-bottom: 1px solid var(--rc-border);
+}
+.rc-topbar__spacer { flex: 1 1 0; min-width: 0; }
+
+/* Smena holati: kichik «tabletka» — rang + nuqta + matn. */
+.rc-shift {
+	display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto;
+	height: 32px; padding: 0 13px; border-radius: 999px;
+	font-size: 13px; font-weight: 700; white-space: nowrap;
+}
+.rc-shift::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.rc-shift--open   { color: var(--rc-available-ink); background: var(--rc-available-soft); }
+.rc-shift--closed { color: var(--rc-occupied-ink); background: var(--rc-occupied-soft); }
+.rc-cashier {
+	min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	font-size: 14px; font-weight: 600; color: var(--rc-muted);
+}
+.rc-clock { flex: 0 0 auto; padding: 0 2px; font-size: 17px; font-weight: 700; color: var(--rc-text); }
+
+.rc-live { display: inline-flex; align-items: center; flex: 0 0 auto; padding: 0 2px; }
+.rc-live__dot {
+	display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+	background: var(--rc-available);
+	box-shadow: 0 0 0 3px var(--rc-available-soft);
+}
+.rc-live--down .rc-live__dot { background: var(--rc-occupied); box-shadow: 0 0 0 3px var(--rc-occupied-soft); }
+
+/* Tez tugmalar (`topbar.quick`) — «⋯» ning chap tomonida, 48px+ nishon. */
+.rc-topquick { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.rc-topquick__btn {
+	display: flex; align-items: center; justify-content: center; gap: 7px;
+	min-width: var(--rc-touch); min-height: var(--rc-touch); padding: 0 14px;
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 14px; font-weight: 700; white-space: nowrap; cursor: pointer;
+	box-shadow: var(--rc-shadow-1);
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-topquick__btn:active { filter: brightness(.9); }
+.rc-topquick__btn--primary { background: var(--rc-accent); border-color: var(--rc-accent); color: #fff; }
+.rc-topquick__btn[aria-disabled="true"] { opacity: .5; }
+.rc-topquick__icon { font-size: 19px; line-height: 1; font-weight: 800; }
+
+.rc-menu-btn {
+	flex: 0 0 auto; width: var(--rc-touch); height: var(--rc-touch);
+	border: 1px solid var(--rc-line); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 26px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.rc-menu-btn[aria-expanded="true"] { background: var(--rc-sunken); }
+
+/* «⋯» menyusi. */
+.rc-menu {
+	position: absolute; top: calc(100% + 4px); right: 8px; z-index: 30;
+	width: 320px; max-width: calc(100vw - 16px);
+	background: var(--rc-surface); border: 1px solid var(--rc-border);
+	border-radius: var(--rc-radius-lg); box-shadow: var(--rc-shadow-3);
+	overflow: hidden;
+}
+.rc-menu__items { display: flex; flex-direction: column; max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); overflow-y: auto; }
+.rc-menu__item {
+	display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 12px;
+	min-height: 56px; padding: 8px 16px;
+	border: 0; border-bottom: 1px solid var(--rc-border);
+	background: transparent; color: var(--rc-text);
+	font-size: 16px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.rc-menu__item:hover:not(:disabled) { background: var(--rc-sunken); }
+.rc-menu__item:disabled { opacity: .5; cursor: not-allowed; }
+.rc-menu__item--danger { color: var(--rc-occupied-ink); }
+.rc-menu__state { font-size: 13px; font-weight: 700; color: var(--rc-muted); }
+.rc-menu__hint { grid-column: 1 / -1; font-size: 12px; font-weight: 400; color: var(--rc-muted); }
+.rc-menu__foot { padding: 8px 16px; font-size: 12px; color: var(--rc-muted); font-family: monospace; background: var(--rc-sunken); }
+
+/* ═══ Tanlov tugmalari (tabletkalar) ═══════════════════════════ */
+/*
+ * Zal, stol holati, buyurtma filtri va ko'rinish almashtirgichi BIR xil ko'rinishda:
+ * oddiy holat — yengil chegara; tanlangan — ko'k tusli fon + ko'k matn + ko'k chegara
+ * (qora to'ldirilgan «tabletka» yo'q). Nishon balandligi 48px.
+ */
+.rc-room, .rc-filter, .rc-tab, .rc-viewtab {
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto;
+	min-height: var(--rc-touch); padding: 0 14px;
+	border: 1px solid var(--rc-line); border-radius: 999px;
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer;
+	transition: background-color .12s, border-color .12s;
+	-webkit-tap-highlight-color: transparent;
+}
+.rc-room:hover, .rc-filter:hover, .rc-tab:hover, .rc-viewtab:hover { background: var(--rc-sunken); }
+.rc-room[aria-pressed="true"], .rc-tab[aria-pressed="true"], .rc-viewtab[aria-selected="true"],
+.rc-filter--ALL[aria-pressed="true"] {
+	border-color: var(--rc-accent); background: var(--rc-accent-soft); color: var(--rc-accent-ink);
+}
+.rc-room__count, .rc-filter__count, .rc-tab__count, .rc-viewtab__count {
+	min-width: 24px; padding: 1px 7px; text-align: center;
+	background: var(--rc-sunken); color: var(--rc-muted); border-radius: 999px;
+	font-size: 12px; font-weight: 700; line-height: 1.5;
+}
+.rc-room[aria-pressed="true"] .rc-room__count, .rc-tab[aria-pressed="true"] .rc-tab__count,
+.rc-viewtab[aria-selected="true"] .rc-viewtab__count, .rc-filter[aria-pressed="true"] .rc-filter__count {
+	background: var(--rc-surface); color: inherit;
+}
+
+/* ═══ Zallar va stol holati (yuqori panelda) ══════════════════ */
+
+/* Yuqori panel sig'masa `data-compact=5` da zallar siqilib aylantiriladi (JS o'lchaydi). */
+.rc-rooms { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.rc-rooms::-webkit-scrollbar { display: none; }
+
+.rc-filters { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; padding-left: 10px; border-left: 1px solid var(--rc-border); }
+.rc-filter { padding: 0 11px; }
+.rc-filter__mark { font-size: 11px; }
+.rc-filter--AVAILABLE .rc-filter__mark { color: var(--rc-available); }
+.rc-filter--RESERVED  .rc-filter__mark { color: var(--rc-reserved); }
+.rc-filter--OCCUPIED  .rc-filter__mark { color: var(--rc-occupied); }
+.rc-filter--AVAILABLE[aria-pressed="true"] { border-color: var(--rc-available); background: var(--rc-available-soft); color: var(--rc-available-ink); }
+.rc-filter--RESERVED[aria-pressed="true"]  { border-color: var(--rc-reserved);  background: var(--rc-reserved-soft);  color: var(--rc-reserved-ink); }
+.rc-filter--OCCUPIED[aria-pressed="true"]  { border-color: var(--rc-occupied);  background: var(--rc-occupied-soft);  color: var(--rc-occupied-ink); }
+
+/* ═══ Ogohlantirishlar (bir qatorli) ═══════════════════════════ */
+
+.rc-warnings { flex: 0 0 auto; }
+.rc-warnings:empty { display: none; }
+.rc-warning {
+	display: flex; align-items: center; gap: 8px;
+	min-height: var(--rc-touch); padding: 0 4px 0 12px;
+	background: var(--rc-reserved-soft); border-bottom: 1px solid var(--rc-reserved);
+	color: var(--rc-reserved-ink); font-size: 13px; font-weight: 600;
+}
+.rc-warning__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-warning__x {
+	flex: 0 0 auto; width: var(--rc-touch); height: var(--rc-touch); border: 0; background: transparent;
+	color: var(--rc-reserved-ink); font-size: 22px; cursor: pointer;
+}
+
+/* ═══ Ikki ustun ═══════════════════════════════════════════════ */
+
+.rc-main {
+	flex: 1 1 auto; min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) clamp(340px, 36%, 600px);
+}
+
+.rc-left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+/* Stollar | Buyurtmalar — faqat tor ekranda. Keng ekranda o'ng panel bo'sh turganda
+   buyurtmalar ro'yxatini o'zi ko'rsatadi, almashtirgich kerak emas. */
+.rc-viewtabs { flex: 0 0 auto; display: flex; gap: 6px; padding: 8px 12px 4px; }
+.rc-root[data-wide="1"] .rc-viewtabs { display: none; }
+.rc-viewtab { flex: 1; padding: 0 14px; font-size: 15px; font-weight: 700; }
+.rc-bell--tab { padding: 2px 8px; border-radius: 999px; background: var(--rc-reserved-soft); color: var(--rc-reserved-ink); }
+
+.rc-view { display: none; flex: 1 1 auto; min-height: 0; position: relative; flex-direction: column; }
+.rc-left[data-view="floor"]  .rc-view--floor,
+.rc-left[data-view="orders"] .rc-view--orders { display: flex; }
+/* Keng ekranda ro'yxat o'ng panelda — chapda doim zal rejasi. */
+.rc-root[data-wide="1"] .rc-view--orders { display: none; }
+.rc-root[data-wide="1"] .rc-left .rc-view--floor { display: flex; }
+
+/* ═══ Yuqori panel sig'maganda (`data-compact`) ════════════════ */
+/* JS (`core/layout.js: syncCompact`) panel kengligini o'lchaydi va eng kam muhim qismlarni
+   birma-bir yig'adi: hech narsa ustma-ust tushmaydi. Belgi + son har doim qoladi. */
+
+/* 1 — kassir nomi */
+.rc-root[data-compact="1"] .rc-cashier, .rc-root[data-compact="2"] .rc-cashier,
+.rc-root[data-compact="3"] .rc-cashier, .rc-root[data-compact="4"] .rc-cashier,
+.rc-root[data-compact="5"] .rc-cashier { display: none; }
+
+/* 2 — filtr yozuvi (faqat tanlangani yozuv bilan qoladi; boshqalarda belgi + son, `title`da nom) */
+.rc-root[data-compact="2"] .rc-filter:not([aria-pressed="true"]) .rc-filter__label,
+.rc-root[data-compact="3"] .rc-filter:not([aria-pressed="true"]) .rc-filter__label,
+.rc-root[data-compact="4"] .rc-filter:not([aria-pressed="true"]) .rc-filter__label,
+.rc-root[data-compact="5"] .rc-filter:not([aria-pressed="true"]) .rc-filter__label { display: none; }
+.rc-root[data-compact="2"] .rc-filter, .rc-root[data-compact="3"] .rc-filter,
+.rc-root[data-compact="4"] .rc-filter, .rc-root[data-compact="5"] .rc-filter { padding: 0 9px; }
+.rc-root[data-compact="2"] .rc-room, .rc-root[data-compact="3"] .rc-room,
+.rc-root[data-compact="4"] .rc-room, .rc-root[data-compact="5"] .rc-room { padding: 0 11px; }
+
+/* 3 — tez tugma yozuvi (ikonka qoladi) */
+.rc-root[data-compact="3"] .rc-topquick__label, .rc-root[data-compact="4"] .rc-topquick__label,
+.rc-root[data-compact="5"] .rc-topquick__label { display: none; }
+.rc-root[data-compact="3"] .rc-topquick__btn, .rc-root[data-compact="4"] .rc-topquick__btn,
+.rc-root[data-compact="5"] .rc-topquick__btn { padding: 0; width: var(--rc-touch); }
+
+/* 4 — zallar soni va «Kassa ochiq» yozuvi (yopiq smena yozuvi QOLADI: u ogohlantirish) */
+.rc-root[data-compact="4"] .rc-room__count, .rc-root[data-compact="5"] .rc-room__count { display: none; }
+.rc-root[data-compact="4"] .rc-shift--open, .rc-root[data-compact="5"] .rc-shift--open { font-size: 0; padding: 0 11px; }
+
+/* 5 — zallar aylantiriladi (o'ng chetda xira chiziq: yana bor) */
+.rc-root[data-compact="5"] .rc-rooms {
+	flex: 0 1 auto; min-width: 96px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+	-webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+	mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+/* Past ekran (ilova balandligi < 640px): bo'shliqlar zichroq, nishon o'lchami saqlanadi. */
+.rc-root[data-short="1"] .rc-viewtabs { padding-top: 4px; padding-bottom: 2px; }

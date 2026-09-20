@@ -13,7 +13,17 @@ HAYOT SIKLI
 
 `payload` — TAYYOR ESC/POS baytlar (base64). Chek formati serverda
 (`utils/escpos.py`) tuziladi, agent faqat baytlarni printerga uzatadi.
-Shunda formatni o'zgartirish uchun monoblokka tegish shart emas.
+Shunda formatni o'zgartirish uchun monoblokka tegish shart emas — yangi
+topshiriq turi (`Drawer`, `Shift Report`) ham agentni yangilamasdan ishlaydi.
+
+`payload` `permlevel = 1`: X/Z hisobotning menejer nusxasida kutilgan summa
+va farq bor, kassir uni shu hujjatdan o'qib olmasligi kerak (ko'r sanoq).
+`reason` — g'aladon topshirig'i uchun sabab (savdosiz ochilish hisobotga tushadi).
+
+`payload` filtr orqali ham o'qilmasin: Frappe ro'yxat filtrida o'qib bo'lmaydigan
+maydonni tekshirmaydi (`payload like '%...'` — bir belgidan-bir belgi taxmin), shuning
+uchun hisobot topshiriqlari menejer bo'lmagan foydalanuvchiga ro'yxatda UMUMAN
+ko'rinmaydi (`get_permission_query_conditions`).
 
 Mantiq `utils/print_queue.py` da; bu klass faqat holat o'tishlarini
 tekshiradi.
@@ -48,3 +58,15 @@ class OzturkPrintJob(Document):
             frappe.throw(
                 _("Printer '{0}' boshqa filialga ({1}) tegishli").format(self.printer, printer_branch)
             )
+
+
+#: Hisobot topshiriqlarini (menejer nusxasida kutilgan summa bor) ko'ra oladigan rollar.
+REPORT_READER_ROLES = {"System Manager", "URY Manager", "Print Agent"}
+
+
+def get_permission_query_conditions(user=None, doctype=None):
+    """Ro'yxat/filtr/hisoblagich so'rovlariga qo'shiladigan shart (`hooks.py`)."""
+    user = user or frappe.session.user
+    if user == "Administrator" or REPORT_READER_ROLES.intersection(frappe.get_roles(user)):
+        return ""
+    return "`tabOzturk Print Job`.`job_type` != 'Shift Report'"

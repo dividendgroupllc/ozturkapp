@@ -1,0 +1,14 @@
+/*
+ * Kassa oynasi — uslublar yig'masi (`bench build --app ozturkapp`).
+ *
+ * Bo'laklar `cashier/` papkasida oddiy CSS fayllar; bu fayl faqat ularni
+ * TARTIB bilan birlashtiradi. Funksiya modullari o'z uslubini
+ * `cashier_<nom>.bundle.css` deb alohida yig'madan beradi (README).
+ */
+
+@import "cashier/base";
+@import "cashier/layout";
+@import "cashier/floor";
+@import "cashier/panel";
+@import "cashier/modal";
+@import "cashier/kit";

@@ -22,15 +22,23 @@ kassir, kirishgan bo'lsa faqat menejer.
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, time_diff_in_seconds
+from frappe.utils import cint, flt, getdate
 
 from ozturkapp.ozturkapp.utils import (
     cashier_billing,
     cashier_permissions,
     kitchen_status,
     order_cancel,
+    order_items,
     table_status,
 )
+
+#: Kassa tarixi bir so'rovda qaytaradigan eng ko'p chek. Chegarasiz `limit` bilan
+#: bir so'rov butun filial tarixini xotiraga yuklardi.
+MAX_PAID_ROWS = 500
+
+#: Kassa tarixidagi smena tanlagichi ko'rsatadigan eng so'nggi smenalar soni.
+MAX_HISTORY_SHIFTS = 60
 
 
 @frappe.whitelist()
@@ -69,9 +77,10 @@ def get_active_orders(room=None, status=None, limit=100):
     elif status == "billed":
         orders = [order for order in orders if cint(order.invoice_printed)]
 
-    orders = orders[: cint(limit) or 100]
+    orders = orders[: max(cint(limit), 0) or 100]
 
     kitchen = _kitchen_states([order.name for order in orders])
+    labels = _user_labels(order.waiter for order in orders)
     now = frappe.utils.now_datetime()
 
     return [
@@ -80,11 +89,10 @@ def get_active_orders(room=None, status=None, limit=100):
             "table": order.restaurant_table,
             "merged_tables": order.custom_merged_tables,
             "room": order.custom_restaurant_room,
-            "order_type": order.order_type,
             "customer": order.customer,
             "customer_name": order.customer_name or order.customer,
             "waiter": order.waiter,
-            "waiter_name": cashier_billing._user_label(order.waiter),
+            "waiter_name": labels.get(order.waiter, ""),
             "pax": cint(order.no_of_pax),
             "amount": flt(order.rounded_total) or flt(order.grand_total),
             "billed": bool(cint(order.invoice_printed)),
@@ -93,10 +101,8 @@ def get_active_orders(room=None, status=None, limit=100):
             if cint(order.invoice_printed)
             else _("Ochiq"),
             "order_number": order.custom_ury_order_number or order.custom_ticket_number,
-            "opened_at": str(order.creation or ""),
-            "elapsed_minutes": int(
-                max(0, time_diff_in_seconds(now, order.creation)) // 60
-            ),
+            # order_type, opened_at, elapsed_minutes, bill_requested(+_at), delivery
+            **table_status.order_visibility(order, now),
             "comments": order.custom_comments,
             "kitchen": kitchen.get(order.name, {}),
         }
@@ -104,38 +110,210 @@ def get_active_orders(room=None, status=None, limit=100):
     ]
 
 
+def _user_labels(users) -> dict:
+    """{foydalanuvchi: to'liq ism} — BITTA so'rovda.
+
+    Har bir qator uchun `cashier_billing._user_label()` chaqirish ro'yxat
+    uzunligiga teng so'rov (N+1) berardi.
+    """
+    users = sorted({user for user in users if user})
+    if not users:
+        return {}
+    names = dict(
+        frappe.db.sql(
+            "select name, full_name from `tabUser` where name in %s", (tuple(users),)
+        )
+    )
+    return {user: names.get(user) or user for user in users}
+
+
+def _shift_end(opening, closed_at):
+    """Smena tugagan vaqt; smena hali davom etayotgan bo'lsa `None`.
+
+    Yakuniy `POS Closing Entry` bor bo'lsa — uning `period_end_date`i (Z-hisobot
+    ham, yopilish solishtiruvi ham aynan shu oynani ishlatadi). Yo'q bo'lsa-yu
+    smena `Closed` bo'lsa (ko'p kassirli rejimda `Sub POS Closing` smenani yakuniy
+    hujjatdan oldin `Closed` qiladi) — keyingi smena ochilguncha; keyingisi ham
+    bo'lmasa oyna ochiq qoladi.
+    """
+    if closed_at:
+        return closed_at
+    if opening.status == "Open":
+        return None
+    return frappe.db.get_value(
+        "POS Opening Entry",
+        {
+            "pos_profile": opening.pos_profile,
+            "docstatus": 1,
+            "period_start_date": [">", opening.period_start_date],
+        },
+        "period_start_date",
+        order_by="period_start_date asc",
+    )
+
+
+def _shift_row(opening, closed_at, labels: dict) -> dict:
+    end = _shift_end(opening, closed_at)
+    return {
+        "name": opening.name,
+        "user": opening.user,
+        "user_name": labels.get(opening.user, opening.user),
+        "opened_at": str(opening.period_start_date or ""),
+        "closed_at": str(end) if end else None,
+        # `status` emas: yopilish hujjati bilan tasdiqlangan smena ochiq hisoblanmaydi.
+        "open": opening.status == "Open" and not closed_at,
+    }
+
+
+def _history_shifts(scope, only=None) -> list:
+    """Kassa tarixi uchun smenalar — yangisi birinchi, har birining vaqt oynasi bilan.
+
+    Args:
+        only: berilsa — faqat shu smena (cheklangan kassir uchun hozirgi ochiq smena).
+    """
+    filters = {"pos_profile": scope.pos_profile, "docstatus": 1}
+    if only:
+        filters["name"] = only
+    openings = frappe.get_all(
+        "POS Opening Entry",
+        filters=filters,
+        fields=["name", "user", "status", "pos_profile", "period_start_date"],
+        order_by="period_start_date desc, creation desc",
+        limit_page_length=MAX_HISTORY_SHIFTS,
+    )
+    if not openings:
+        return []
+
+    closings = dict(
+        frappe.get_all(
+            "POS Closing Entry",
+            filters={"pos_opening_entry": ["in", [o.name for o in openings]], "docstatus": 1},
+            fields=["pos_opening_entry", "period_end_date"],
+            as_list=True,
+        )
+    )
+    labels = _user_labels(o.user for o in openings)
+    return [_shift_row(o, closings.get(o.name), labels) for o in openings]
+
+
+def _shift_window(scope, shift) -> tuple:
+    """Tanlangan smenaning `(boshi, oxiri)` vaqti; oxiri `None` — smena davom etyapti."""
+    shift = order_items.clean_text(shift, 140, _("Smena"))
+    opening = frappe.db.get_value(
+        "POS Opening Entry",
+        shift,
+        ["name", "user", "status", "pos_profile", "docstatus", "period_start_date"],
+        as_dict=True,
+    )
+    if not opening or opening.docstatus != 1:
+        frappe.throw(_("'{0}' smenasi topilmadi").format(shift), frappe.DoesNotExistError)
+    if opening.pos_profile != scope.pos_profile:
+        raise cashier_permissions.CashierPermissionError(_("Bu smena boshqa kassaga tegishli"))
+
+    closed_at = frappe.db.get_value(
+        "POS Closing Entry",
+        {"pos_opening_entry": opening.name, "docstatus": 1},
+        "period_end_date",
+    )
+    return opening.period_start_date, _shift_end(opening, closed_at)
+
+
+def _window_condition(start, end) -> tuple:
+    """Smena oynasining SQL sharti va parametrlari: `start <= chek vaqti <= end`."""
+    stamp = "timestamp(posting_date, posting_time)"
+    condition, params = f"{stamp} >= %(start)s", {"start": start}
+    if end:
+        condition += f" AND {stamp} <= %(end)s"
+        params["end"] = end
+    return condition, params
+
+
+def _allowed_shift(scope):
+    """Shu so'rovchi tarixda ko'ra oladigan YAGONA smena.
+
+    Oddiy kassir faqat hozirgi ochiq smenani ko'radi — oldingi (yopilgan) smenalar
+    tarixini emas. Bu server tomonida majburlanadi (TZ §17): tugmani yashirish
+    yetarli emas, chunki `get_paid_orders` smena va sanani argument sifatida oladi.
+    Smena bo'yicha ko'rinish qoidasi Z-hisobotnikiga o'xshash: cheklovsiz faqat
+    menejer (`has_supervisor_role`).
+
+    Returns:
+        `None` — cheklov yo'q (menejer); `""` — kassir, lekin ochiq smena yo'q
+        (ko'rsatadigan hech narsa yo'q); aks holda ochiq smena nomi.
+    """
+    if cashier_permissions.has_supervisor_role():
+        return None
+    return cashier_permissions.open_shift_name(scope)
+
+
 @frappe.whitelist()
 def get_paid_order_filter_options():
     """Kassa tarixi filtrlari uchun — filialda haqiqatan uchragan stol va
-    ofitsiantlar ro'yxati (bo'sh/ishlatilmagan variantlarsiz)."""
+    ofitsiantlar ro'yxati (bo'sh/ishlatilmagan variantlarsiz) hamda smenalar
+    (`shifts`, yangisi birinchi; `open` — davom etayotgani)."""
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
 
-    rows = frappe.get_all(
-        "POS Invoice",
-        filters={"branch": scope.branch, "docstatus": 1},
-        fields=["restaurant_table", "waiter"],
+    allowed = _allowed_shift(scope)
+    if allowed == "":
+        return {"tables": [], "waiters": [], "shifts": []}
+
+    # Cheklangan kassirga stol va ofitsiantlar ham FAQAT hozirgi smenadagilar:
+    # oldingi smenalardagi nomlar ro'yxat orqali oshkor bo'lmasin.
+    params = {"branch": scope.branch}
+    window = ""
+    if allowed:
+        condition, window_params = _window_condition(*_shift_window(scope, allowed))
+        window = f" AND {condition}"
+        params.update(window_params)
+
+    # DISTINCT bazada: filialning BARCHA to'langan cheklarini Python'ga
+    # yuklab, keyin takrorlarini olib tashlash yillar davomida sekinlashardi.
+    tables = frappe.db.sql_list(
+        f"""
+        SELECT DISTINCT restaurant_table FROM `tabPOS Invoice`
+        WHERE branch = %(branch)s AND docstatus = 1 AND IFNULL(restaurant_table, '') != ''{window}
+        ORDER BY restaurant_table
+        """,
+        params,
+    )
+    waiter_users = frappe.db.sql_list(
+        f"""
+        SELECT DISTINCT waiter FROM `tabPOS Invoice`
+        WHERE branch = %(branch)s AND docstatus = 1 AND IFNULL(waiter, '') != ''{window}
+        """,
+        params,
     )
 
-    tables = sorted({r.restaurant_table for r in rows if r.restaurant_table})
-
-    waiters = [
-        {"value": w, "label": cashier_billing._user_label(w)}
-        for w in sorted({r.waiter for r in rows if r.waiter})
-    ]
+    labels = _user_labels(waiter_users)
+    waiters = [{"value": w, "label": labels[w]} for w in sorted(waiter_users)]
     waiters.sort(key=lambda w: w["label"])
 
-    return {"tables": tables, "waiters": waiters}
+    return {"tables": tables, "waiters": waiters, "shifts": _history_shifts(scope, only=allowed)}
 
 
 @frappe.whitelist()
-def get_paid_orders(date_from=None, date_to=None, search=None, table=None, waiter=None, limit=100):
+def get_paid_orders(
+    date_from=None, date_to=None, search=None, table=None, waiter=None, limit=100, shift=None
+):
     """Kassa tarixi — bergiliy davrda to'langan cheklar ro'yxati.
 
     Ko'rish uchun (masalan qayta chop etish) — hech narsa yaratmaydi yoki
     o'zgartirmaydi.
 
+    OLDINGI SMENALAR
+    ================
+    Oddiy kassir FAQAT hozirgi ochiq smenani ko'radi (ochiq smena bo'lmasa — bo'sh
+    ro'yxat): boshqa `shift` yoki sana yuborsa ham natija o'zgarmaydi, boshqa
+    smena so'ralsa esa `CashierPermissionError`. Oldingi smenalarni faqat
+    menejer (`URY Manager`, `System Manager`) ko'radi.
+
     Args:
+        shift: `POS Opening Entry` nomi. Berilsa cheklar smena ochilgan vaqtdan
+            yopilgan vaqtigacha (ochiq smenada — hozirgacha) olinadi va sana
+            filtri e'tiborga olinmaydi. Vaqt oralig'i sanadan emas, aynan
+            soatgacha aniq: smena yarim tundan oshsa yoki bir kunda ikki smena
+            bo'lsa ham cheklar o'z smenasida turadi.
         date_from, date_to: `YYYY-MM-DD`. Bo'sh bo'lsa — bugungi kun.
         search: chek raqami bo'yicha qidiruv (faqat raqam).
         table: aniq stol bo'yicha filtr.
@@ -145,44 +323,76 @@ def get_paid_orders(date_from=None, date_to=None, search=None, table=None, waite
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
 
+    # Kirish qiymatlari cheklovdan OLDIN tekshiriladi: kassir uchun sana e'tiborsiz
+    # qoladi, lekin noto'g'ri sana yoki juda uzun qidiruv baribir rad etilishi kerak.
     today = frappe.utils.today()
-    date_from = date_from or today
-    date_to = date_to or today
+    date_from = getdate(date_from or today)
+    date_to = getdate(date_to or today)
+    # Oddiy matnga keltiriladi: HTTP orqali ro'yxat kelsa SQL'ga `IN (...)` bo'lib ketmasin.
+    shift = order_items.clean_text(shift, 140, _("Smena"))
+    table = order_items.clean_text(table, 140, _("Stol"))
+    waiter = order_items.clean_text(waiter, 140, _("Ofitsiant"))
+    search = order_items.clean_text(search, 60, _("Qidiruv"))
 
-    filters = {
+    allowed = _allowed_shift(scope)
+    if allowed is not None:
+        if not allowed:
+            return []
+        if shift and shift != allowed:
+            raise cashier_permissions.CashierPermissionError(
+                _("Oldingi smenalar tarixini faqat menejer ko'ra oladi")
+            )
+        # Sana ham e'tiborga olinmaydi: cheklov faqat smena oynasi bilan.
+        shift = allowed
+
+    # Shartlar — doimiy matnlar, qiymatlar esa `params` orqali (SQL'ga qo'shilmaydi).
+    conditions = ["branch = %(branch)s", "docstatus = 1"]
+    params = {
         "branch": scope.branch,
-        "docstatus": 1,
-        "posting_date": ["between", [date_from, date_to]],
+        "limit": min(max(cint(limit), 0) or 100, MAX_PAID_ROWS),
     }
+
+    if shift:
+        condition, window_params = _window_condition(*_shift_window(scope, shift))
+        conditions.append(condition)
+        params.update(window_params)
+    else:
+        conditions.append("posting_date between %(date_from)s and %(date_to)s")
+        params["date_from"] = date_from
+        params["date_to"] = date_to
+
     if table:
-        filters["restaurant_table"] = table
+        conditions.append("restaurant_table = %(table)s")
+        params["table"] = table
     if waiter:
-        filters["waiter"] = waiter
+        conditions.append("waiter = %(waiter)s")
+        params["waiter"] = waiter
 
-    or_filters = None
     if search:
-        like = f"%{search}%"
-        or_filters = {
-            "name": ["like", like],
-            "restaurant_table": ["like", like],
-            "customer_name": ["like", like],
-        }
+        conditions.append(
+            "(name like %(like)s or restaurant_table like %(like)s or customer_name like %(like)s)"
+        )
+        params["like"] = f"%{search}%"
 
-    rows = frappe.get_all(
-        "POS Invoice",
-        filters=filters,
-        or_filters=or_filters,
-        fields=[
-            "name", "restaurant_table", "custom_merged_tables", "customer_name",
-            "waiter", "cashier", "posting_date", "posting_time",
-            "rounded_total", "grand_total", "order_type",
-        ],
-        order_by="posting_date desc, posting_time desc",
-        limit_page_length=cint(limit) or 100,
+    where = " AND ".join(conditions)
+    rows = frappe.db.sql(
+        f"""
+        SELECT name, restaurant_table, custom_merged_tables, customer_name,
+               waiter, cashier, posting_date, posting_time,
+               rounded_total, grand_total, order_type,
+               is_return, return_against
+        FROM `tabPOS Invoice`
+        WHERE {where}
+        ORDER BY posting_date DESC, posting_time DESC
+        LIMIT %(limit)s
+        """,
+        params,
+        as_dict=True,
     )
     if not rows:
         return []
 
+    labels = _user_labels([r.waiter for r in rows] + [r.cashier for r in rows])
     payments = frappe.get_all(
         "Sales Invoice Payment",
         filters={"parent": ["in", [r.name for r in rows]], "parenttype": "POS Invoice"},
@@ -200,12 +410,16 @@ def get_paid_orders(date_from=None, date_to=None, search=None, table=None, waite
             "table": r.restaurant_table,
             "merged_tables": r.custom_merged_tables,
             "customer_name": r.customer_name,
-            "waiter_name": cashier_billing._user_label(r.waiter),
-            "cashier_name": cashier_billing._user_label(r.cashier),
+            "waiter_name": labels.get(r.waiter, ""),
+            "cashier_name": labels.get(r.cashier, ""),
             "order_type": r.order_type,
             "date": str(r.posting_date or ""),
             "time": str(r.posting_time or "")[:8],
             "amount": flt(r.rounded_total) or flt(r.grand_total),
+            # Qaytarish cheki manfiy summa bilan shu ro'yxatda turadi — frontend
+            # uni «QAYTARISH» deb ajratib ko'rsatishi va asl chekka bog'lashi uchun.
+            "is_return": bool(cint(r.is_return)),
+            "return_against": r.return_against or None,
             "payments": payments_by_invoice.get(r.name, []),
         }
         for r in rows

@@ -29,7 +29,7 @@ so'rov: stollar, ochiq cheklar, bronlar.
 """
 
 import frappe
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, now_datetime, time_diff_in_seconds
 
 AVAILABLE = "AVAILABLE"
 RESERVED = "RESERVED"
@@ -115,6 +115,7 @@ OPEN_ORDER_FIELDS = (
     "grand_total",
     "rounded_total",
     "net_total",
+    "total",
     "order_type",
     "invoice_printed",
     "custom_ury_order_number",
@@ -125,6 +126,25 @@ OPEN_ORDER_FIELDS = (
     "modified",
     "owner",
 )
+
+#: Boshqa setup modullari yaratadigan maydonlar (ofitsantning hisob so'rovi,
+#: kassadan yetkazib berish). Ular hali yaratilmagan saytda ustun bo'lmaydi —
+#: usiz SQL `Unknown column` xatosini berardi, shuning uchun faqat mavjudlari
+#: so'raladi (`_order_fields`).
+OPTIONAL_ORDER_FIELDS = (
+    "custom_bill_requested",
+    "custom_bill_requested_at",
+    "custom_delivery_phone",
+    "custom_delivery_address",
+)
+
+
+def _order_fields() -> list:
+    return list(OPEN_ORDER_FIELDS) + [
+        field
+        for field in OPTIONAL_ORDER_FIELDS
+        if frappe.db.has_column("POS Invoice", field)
+    ]
 
 
 def get_open_orders(branch: str, tables: list = None) -> list:
@@ -140,7 +160,7 @@ def get_open_orders(branch: str, tables: list = None) -> list:
     orders = frappe.get_all(
         "POS Invoice",
         filters=filters,
-        fields=list(OPEN_ORDER_FIELDS),
+        fields=_order_fields(),
         order_by="creation asc",
     )
 
@@ -188,6 +208,66 @@ def count_orders_per_table(orders: list) -> dict:
             if table:
                 counts[table] = counts.get(table, 0) + 1
     return counts
+
+
+def tables_of(order) -> list:
+    """Chek band qilgan barcha stollar: asosiy stol + birlashtirilganlari."""
+    tables = [order.get("restaurant_table")]
+    tables.extend(parse_merged_with(order.get("custom_merged_tables")))
+    return list(dict.fromkeys(table for table in tables if table))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Kassir ekrani uchun ko'rinish maydonlari (hisob so'rovi, vaqt, yetkazib berish)
+# ═══════════════════════════════════════════════════════════════════
+
+#: Buyurtmasi yo'q stol uchun bir xil shakl — frontend kalit bor-yo'qligini
+#: tekshirib o'tirmaydi.
+NO_ORDER_VISIBILITY = {
+    "bill_requested": False,
+    "bill_requested_at": None,
+    "opened_at": None,
+    "elapsed_minutes": None,
+    "order_type": None,
+    "delivery": None,
+}
+
+
+def elapsed_minutes(created, now=None) -> int:
+    """Buyurtma ochilganiga necha daqiqa bo'ldi."""
+    if not created:
+        return 0
+    return int(max(0, time_diff_in_seconds(now or now_datetime(), created)) // 60)
+
+
+def delivery_of(order):
+    """Yetkazib berish ma'lumoti: `{"phone", "address"}` yoki `None`."""
+    phone = (order.get("custom_delivery_phone") or "").strip()
+    address = (order.get("custom_delivery_address") or "").strip()
+    if not (phone or address):
+        return None
+    return {"phone": phone, "address": address}
+
+
+def order_visibility(order, now=None) -> dict:
+    """Kassir ekraniga chiqadigan qo'shimcha maydonlar (TZ: 4-shartnoma).
+
+    `bill_requested` — ofitsant hisob so'ragan VA hisob hali chiqarilmagan.
+    Hisob chiqarilgach so'rov o'z ma'nosini yo'qotadi: kassir uni bajardi.
+    """
+    billed = bool(cint(order.get("invoice_printed")))
+    requested = bool(cint(order.get("custom_bill_requested"))) and not billed
+
+    return {
+        "bill_requested": requested,
+        "bill_requested_at": (str(order.get("custom_bill_requested_at") or "") or None)
+        if requested
+        else None,
+        "opened_at": str(order.get("creation") or ""),
+        "elapsed_minutes": elapsed_minutes(order.get("creation"), now),
+        "order_type": order.get("order_type"),
+        "delivery": delivery_of(order),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -510,6 +590,7 @@ def build_floor_state(branch: str, room: str = None) -> dict:
     reservation_map = get_reservation_provider()(branch, table_names)
 
     counts = {status: 0 for status in STATUSES}
+    now = now_datetime()
 
     for table in tables:
         cluster = clusters.get(table.name, [table.name])
@@ -523,7 +604,8 @@ def build_floor_state(branch: str, room: str = None) -> dict:
         table["cluster"] = cluster
         table["is_merged"] = len(cluster) > 1
         table["open_order_count"] = order_counts.get(table.name, 0)
-        table["order"] = _thin_order(order) if order else None
+        table["order"] = _thin_order(order, now) if order else None
+        table.update(order_visibility(order, now) if order else NO_ORDER_VISIBILITY)
         table["reservation"] = _thin_reservation(reservation) if reservation else None
         # `occupied` bayrog'i keltirilgan holat bilan mos kelmasa — kassir
         # buni ko'rishi kerak (ma'lumot buzilganini bildiradi).
@@ -545,11 +627,14 @@ def build_floor_state(branch: str, room: str = None) -> dict:
     }
 
 
-def _thin_order(order) -> dict:
+def _thin_order(order, now=None) -> dict:
     """Zal rejasida ko'rsatiladigan minimal buyurtma ma'lumoti."""
     return {
         "name": order.name,
         "amount": flt(order.rounded_total) or flt(order.grand_total),
+        # Taomlar summasi (chegirma va xizmat haqisiz) — ofitsant ilovasi faqat
+        # shuni ko'radi: `amount` xizmat haqi va chegirmani ham o'z ichiga oladi.
+        "items_total": flt(order.total),
         "waiter": order.waiter,
         "customer": order.customer,
         "customer_name": order.customer_name or order.customer,
@@ -557,7 +642,7 @@ def _thin_order(order) -> dict:
         "order_type": order.order_type,
         "billed": bool(cint(order.invoice_printed)),
         "order_number": order.custom_ury_order_number or order.custom_ticket_number,
-        "opened_at": str(order.creation or ""),
+        **order_visibility(order, now),
     }
 
 

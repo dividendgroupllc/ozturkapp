@@ -24,11 +24,13 @@ BUYRUQLAR (Epson ESC/POS, Xprinter/Rongta/Gprinter mos)
     ESC E n       qalin (1/0)
     GS  ! n       shrift o'lchami (0x00 oddiy, 0x11 2x kenglik+balandlik, 0x01 2x balandlik)
     GS  V 66 0    qisman kesish (oldin qog'oz suriladi)
+    ESC p m t1 t2 g'aladon impulsi (printerning DK portiga ulangan kassa g'aladoni)
 """
 
 from __future__ import annotations
 
 import base64
+import re
 from datetime import datetime
 
 from frappe.utils import cint, flt, get_datetime
@@ -38,6 +40,22 @@ GS = b"\x1d"
 
 #: Sanoq ustunlari: Font A da 80mm -> 48, 58mm -> 32 belgi.
 COLUMNS = {"80": 48, "58": 32}
+
+#: Choychaqa soliq qatorining nomi (`Sales Taxes and Charges.description`). Chekda
+#: tip qatori AYNAN shu nom bo'yicha taniladi; `cashier_billing.TIPS_DESCRIPTION`
+#: bilan bir xil bo'lishi shart (bu fayl `ozturkapp` modullariga bog'liq emas,
+#: shuning uchun qiymat takrorlanadi va testda tenglashtiriladi).
+TIP_LABEL = "Choychaqa"
+
+#: G'aladon impulsi (`ESC p m t1 t2`). `Ozturk Printer` da g'aladon pini uchun
+#: maydon yo'q, shuning uchun bu yerda modul konstantasi: 0 — DK-1 (2-pin,
+#: deyarli barcha RJ11 g'aladonlar), 1 — DK-2 (5-pin). Impuls uzunligi
+#: millisekundda; printer buyrug'i uni 2 ms birlikda oladi (`t1 = ms / 2`).
+#: 50 ms yoqilgan / 500 ms tanaffus — Epson hujjatidagi odatiy qiymat, g'aladon
+#: solenoidini kuydirmaydi va qulfni ishonchli ochadi.
+DRAWER_PIN = 0
+DRAWER_ON_MS = 50
+DRAWER_OFF_MS = 500
 
 #: O'zbek lotin apostroflari — cp866/cp1251 da yo'q, oddiy apostrofga almashtiriladi.
 _APOSTROPHES = {
@@ -115,12 +133,30 @@ def _pick_codepage(ch: str, active: str, primary: str, allow_switch: bool = True
     return None
 
 
+#: Bitta chop etiladigan matn (izoh, sabab, manzil) uchun eng ko'p belgi. Kassir/ofitsant
+#: yuz minglab belgi kiritib printerni qog'ozga to'ldirib yubormasin va topshiriq
+#: `payload` i bazani shishirmasin. Haqiqiy izohlar bundan ancha qisqa.
+MAX_TEXT_CHARS = 600
+
+#: Yangi qator (`wrap` shu bo'yicha bo'ladi) dan boshqa barcha boshqaruv belgilari.
+_CONTROL_CHARS = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
+
+
 def normalize(text) -> str:
-    """Kodlashda yo'qoladigan tipografik belgilarni oddiy belgilarga almashtirish."""
+    """Kodlashda yo'qoladigan tipografik belgilarni oddiy belgilarga almashtirish.
+
+    BOSHQARUV BELGILARI OLIB TASHLANADI (bo'shliqqa almashadi). Chekka bosiladigan
+    har bir matn (taom izohi, chegirma/harakat sababi, mijoz manzili, ...) kassir
+    yoki ofitsant kiritgan; unga `ESC p 0 25 250` (g'aladon impulsi) yoki `GS V`
+    (kesish) baytlari yashirilsa, printer buni buyruq sifatida bajarardi —
+    g'aladon hech qanday izsiz (`Ozturk Print Job` da Drawer yozuvisiz) ochilardi.
+    Generator o'zining buyruqlarini `Receipt` orqali bevosita baytlar bilan yozadi,
+    matn esa faqat shu funksiyadan o'tadi.
+    """
     s = "" if text is None else str(text)
     for src, dst in _APOSTROPHES.items():
         s = s.replace(src, dst)
-    return s
+    return _CONTROL_CHARS.sub(" ", s)
 
 
 def encode_text(text: str, codepage: str, codepage_number_: int | None = None,
@@ -309,7 +345,7 @@ class Receipt:
 
     @staticmethod
     def wrap(text: str, width: int) -> list:
-        text = normalize(text)
+        text = normalize(text)[:MAX_TEXT_CHARS]
         if width <= 0:
             return [text]
         out = []
@@ -361,15 +397,29 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
 
     `bill` — `utils/cashier_billing.build_bill()` natijasi (barcha summalar
     ERPNext'dan). `header` — {"line1", "line2", "footer"}.
+
+    IXTIYORIY KALITLAR
+    ==================
+    `discount_percent`, `discount_reason`, `tip`, `delivery`, `is_return`,
+    `return_against` — hisob-kitob qatlami qo'shadi; bo'lmasa chek eskicha
+    chiqadi. Hech biri bo'lmaganda ham chek YIQILMASLIGI shart: kassa
+    cheki chiqmasa mijoz ketib qoladi.
     """
     header = header or {}
     r = _receipt_for(printer)
     cols = r.columns
+    is_return = bool(cint(bill.get("is_return")))
 
     title = header.get("line1") or bill.get("restaurant") or bill.get("company") or "CHEK"
     r.text(title, align="center", bold=True, size="double")
     if header.get("line2"):
         r.text(header["line2"], align="center")
+    if is_return:
+        # Qaytarish cheki oddiy chekdan bir qarashda ajralishi kerak: kassir
+        # va mijoz uni sotuv cheki bilan adashtirmasin.
+        r.text("QAYTARISH", align="center", bold=True, size="double")
+        if bill.get("return_against"):
+            r.text(f"Asl chek: {bill['return_against']}", align="center")
     r.feed(1)
 
     r.line(fmt_dt(bill.get("opened_at")))
@@ -379,42 +429,64 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
         r.line(f"Ofitsiant: {bill.get('waiter_name')}")
     if bill.get("cashier_name"):
         r.line(f"Kassir: {bill.get('cashier_name')}")
+    delivery = bill.get("delivery")
+    if isinstance(delivery, dict) and (delivery.get("phone") or delivery.get("address")):
+        r.line("Yetkazib berish")
+        if delivery.get("phone"):
+            r.line(f"Telefon: {delivery['phone']}")
+        if delivery.get("address"):
+            r.line(f"Manzil: {delivery['address']}")
     r.rule()
 
-    # Ustunlar: nomi | soni | narx | summa
-    if cols >= 48:
-        widths = [cols - 26, 5, 10, 11]
-    else:
-        widths = [cols - 16, 4, 0, 12]  # 58mm: narx ustuni yo'q
+    # Ustunlar: nomi | soni | summa. Narx ustuni ATAYLAB yo'q — mijozga
+    # soni va summasi yetarli; bo'shagan joy nom ustuniga beriladi
+    # (80mm: 31 belgi), uzun taom nomlari kamroq bo'linadi.
+    qty_w, amount_w = (5, 12) if cols >= 48 else (4, 12)
+    widths = [cols - qty_w - amount_w, qty_w, amount_w]
+    aligns = ["left", "right", "right"]
     r.bold(True)
-    r.table_row(["Nomi", "Soni", "Narx" if widths[2] else "", "Summa"], widths,
-                ["left", "right", "right", "right"])
+    r.table_row(["Nomi", "Soni", "Summa"], widths, aligns)
     r.bold(False)
     r.rule()
     for item in bill.get("items") or []:
         r.table_row(
             [item.get("item_name") or item.get("item_code") or "",
              fmt_qty(item.get("qty")),
-             money(item.get("rate")) if widths[2] else "",
              money(item.get("amount"))],
-            widths, ["left", "right", "right", "right"],
+            widths, aligns,
         )
         if item.get("comment"):
             r.line(f"   * {item['comment']}")
     r.rule()
 
     r.pair("Jami:", money(bill.get("total")))
+
+    # Choychaqa ERPNext'da oddiy soliq qatori (tax row) — `taxes` ichida ham
+    # keladi, `tip` kaliti bilan ham. Ikki marta bosilmasligi uchun soliq
+    # qatori tsiklda o'tkazib yuboriladi va bitta qator bilan chiqariladi.
+    tip = flt(bill.get("tip"))
     for tax in bill.get("taxes") or []:
         label = tax.get("description") or ""
+        if tax.get("is_tip") or label.strip().lower() == TIP_LABEL.lower():
+            tip = tip or flt(tax.get("amount"))
+            continue
         if tax.get("is_service_charge"):
             rate = flt(bill.get("service_charge_rate") or tax.get("rate"))
             label = f"Xizmat haqi {fmt_qty(rate)}%" if rate else "Xizmat haqi"
         r.pair(f"{label}:", money(tax.get("amount")))
-    if flt(bill.get("discount")):
-        r.pair("Chegirma:", "-" + money(bill.get("discount")))
+
+    discount = flt(bill.get("discount"))
+    if discount:
+        percent = flt(bill.get("discount_percent"))
+        label = f"Chegirma {fmt_qty(percent)}%" if percent else "Chegirma"
+        r.pair(f"{label}:", money(-discount))
+        if bill.get("discount_reason"):
+            r.line(f"  ({bill['discount_reason']})")
+    if tip:
+        r.pair(f"{TIP_LABEL}:", money(tip))
     r.rule()
-    r.size("tall").pair("JAMI TO'LOV:", money(bill.get("rounded_total") or bill.get("grand_total")),
-                        bold=True)
+    r.size("tall").pair("QAYTARILADI:" if is_return else "JAMI TO'LOV:",
+                        money(bill.get("rounded_total") or bill.get("grand_total")), bold=True)
     r.size("normal")
 
     if bill.get("paid") and bill.get("payments"):
@@ -504,6 +576,139 @@ def build_test(printer, label: str = "") -> bytes:
     r.rule()
     r.pair("Jami:", money(123456.5))
     r.text("OK", align="center", bold=True)
+    return r.finish()
+
+
+def build_drawer_pulse(pin: int = DRAWER_PIN, on_ms: int = DRAWER_ON_MS,
+                       off_ms: int = DRAWER_OFF_MS) -> bytes:
+    """G'aladonni ochadigan `ESC p m t1 t2` buyrug'i.
+
+    FAQAT impuls: `ESC @`, matn, kesish YO'Q. Agent baytlarni printerga
+    aynan shunday uzatadi, shuning uchun bu ishlash uchun agentni
+    yangilash shart emas. Printer holatiga tegilmaydi (kod jadvali, shrift
+    o'zgarmaydi) — keyingi chek odatdagidek chiqadi.
+    """
+    m = 1 if cint(pin) == 1 else 0
+    t1 = min(max(cint(on_ms) // 2, 1), 255)
+    t2 = min(max(cint(off_ms) // 2, 1), 255)
+    return ESC + b"p" + bytes([m, t1, t2])
+
+
+def _hhmm(value) -> str:
+    return get_datetime(value).strftime("%H:%M") if value else ""
+
+
+def build_shift_report(report: dict, printer, header: dict | None = None) -> bytes:
+    """Smena hisoboti: X (oraliq, smena ochiq) yoki Z (smena yopilgan).
+
+    `report` — `utils/shift_report.build_report()` natijasi. Bu yerda
+    HECH NARSA HISOBLANMAYDI, faqat chiqariladi.
+
+    KO'R SANOQ
+    ==========
+    `report["restricted"]` bo'lsa (kassir uchun) savdo jami, naqd pul
+    aylanmasi, kutilgan summa va farq hisobotda UMUMAN yo'q — server ularni
+    `None` qilib yuboradi va bu yerda ular uchun qator ham chizilmaydi.
+    Chekka chiqqan qog'oz ham ko'r sanoqni buzmasligi kerak.
+    """
+    header = header or {}
+    r = _receipt_for(printer)
+    kind = str(report.get("kind") or "X").upper()
+    restricted = bool(report.get("restricted"))
+
+    r.text(header.get("line1") or report.get("restaurant") or report.get("company") or "HISOBOT",
+           align="center", bold=True, size="double")
+    r.text(f"{kind}-HISOBOT", align="center", bold=True, size="double")
+    r.text("Oraliq hisobot - smena ochiq" if kind == "X" else "Smena yopilgan", align="center")
+    r.feed(1)
+
+    cashier = report.get("cashier") or {}
+    r.line(f"Kassir: {cashier.get('full_name') or cashier.get('user') or ''}")
+    r.line(f"Smena: {report.get('pos_opening_entry') or ''}")
+    r.line(f"Ochilgan: {fmt_dt(report.get('period_start'))}")
+    r.line(f"{'Hozir' if kind == 'X' else 'Yopilgan'}: {fmt_dt(report.get('period_end'))}")
+    r.rule()
+
+    counts = report.get("counts") or {}
+    r.pair("Cheklar soni:", str(cint(counts.get("invoices"))))
+    r.pair("Qaytarishlar:", str(cint(counts.get("returns"))))
+    r.pair("Bekor qilingan buyurtma:", str(cint(counts.get("cancelled_orders"))))
+    r.pair("G'aladon (savdosiz):", str(cint(counts.get("drawer_no_sale"))))
+    r.rule()
+
+    sales = report.get("sales") or {}
+    if restricted:
+        r.line("Savdo va naqd pul summalari menejer hisobotida.")
+    else:
+        r.pair("Yalpi savdo:", money(sales.get("gross_sales")))
+        if flt(sales.get("discounts")):
+            r.pair("Chegirma:", money(-flt(sales.get("discounts"))))
+        r.pair("Xizmat haqi:", money(sales.get("service_charge")))
+        if flt(sales.get("tips")):
+            r.pair(f"{TIP_LABEL}:", money(sales.get("tips")))
+        if flt(sales.get("other_taxes")):
+            r.pair("Boshqa soliqlar:", money(sales.get("other_taxes")))
+        if flt(sales.get("rounding")):
+            r.pair("Yaxlitlash:", money(sales.get("rounding")))
+        r.pair("Sotuv jami:", money(sales.get("sales_total")))
+        if flt(sales.get("returns_total")):
+            r.pair("Qaytarishlar:", money(-flt(sales.get("returns_total"))))
+        r.size("tall").pair("SOF SAVDO:", money(sales.get("net_total")), bold=True)
+        r.size("normal")
+    r.rule()
+
+    payments = report.get("payments") or []
+    if payments:
+        r.bold(True).line("TO'LOV USULLARI")
+        r.bold(False)
+        for pay in payments:
+            name = pay.get("mode_of_payment") or ""
+            count = cint(pay.get("sales_count"))
+            if pay.get("net_amount") is None:
+                r.pair(f"{name}:", f"{count} ta")
+                continue
+            r.pair(f"{name} ({count}):", money(pay.get("net_amount")))
+            if flt(pay.get("refund_amount")):
+                r.line(f"  shundan qaytarish: {money(pay.get('refund_amount'))}")
+        r.rule()
+
+    movements = report.get("cash_movements") or {}
+    if cint(movements.get("count")):
+        r.bold(True).line("KASSA HARAKATI")
+        r.bold(False)
+        r.pair("Kirim:", money(movements.get("total_in")))
+        r.pair("Chiqim:", money(-flt(movements.get("total_out"))))
+        for item in movements.get("items") or []:
+            sign = "+" if item.get("kind") == "In" else "-"
+            r.line(f"{_hhmm(item.get('posting_datetime'))} {sign}{money(item.get('amount'))} "
+                   f"{item.get('category') or ''}")
+            if item.get("reason"):
+                r.line(f"   {item['reason']}")
+        r.rule()
+
+    cash = report.get("cash") or {}
+    r.bold(True).line("NAQD PUL")
+    r.bold(False)
+    r.pair("Boshlang'ich:", money(cash.get("opening")))
+    if cash.get("counted") is not None:
+        r.pair("Sanalgan:", money(cash.get("counted")))
+    if cash.get("expected") is not None:
+        r.pair("Kutilgan:", money(cash.get("expected")))
+    if cash.get("difference") is not None:
+        r.pair("Farq:", money(cash.get("difference")), bold=True)
+    r.rule()
+
+    openings = report.get("drawer_openings") or []
+    if openings:
+        r.bold(True).line("G'ALADON (SAVDOSIZ)")
+        r.bold(False)
+        for item in openings:
+            r.line(f"{_hhmm(item.get('time'))} {item.get('user_name') or ''}: "
+                   f"{item.get('reason') or ''}")
+        r.rule()
+
+    r.line(f"Chop etdi: {report.get('printed_by') or ''}")
+    r.line(fmt_dt(report.get("generated_at")))
     return r.finish()
 
 

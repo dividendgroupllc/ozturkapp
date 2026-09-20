@@ -35,6 +35,16 @@ doc_events = {
 		# To'lovdan keyin stol holatini YAKUNIY hal qiladi. `ury` dan keyin
 		# ishlaydi va uning shartsiz bo'shatishini to'g'rilaydi (TZ §23).
 		"on_submit": "ozturkapp.ozturkapp.overrides.pos_invoice.on_submit",
+		# URY kassirga POS Invoice'da write/submit/cancel bergan: qaytarish, tasdiq izi,
+		# chegirma va bekor qilish qoidalari generic REST orqali chetlab o'tilmasin.
+		# Faqat oddiy kassirga qo'llanadi (utils/cashier_billing.py).
+		"validate": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_changes",
+		"before_update_after_submit": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_audit",
+		"before_cancel": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_cancel",
+	},
+	"User": {
+		# Menejer PIN-kodi (`custom_pos_pin`) faqat 4–8 raqam bo'lsin.
+		"validate": "ozturkapp.ozturkapp.utils.manager_approval.validate_pin_format",
 	},
 	"URY Table": {
 		# Desk orqali qo'lda tahrirlash (layout, o'rindiqlar soni, ...).
@@ -61,6 +71,10 @@ doc_events = {
 		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_opening_change",
 	},
 	"POS Closing Entry": {
+		# Kassir yopilishni qo'lda yozib kutilgan summani/cheklarni soxtalashtira olmasin va
+		# yopilishni bekor qilib qayta sanamasin (utils/pos_closing.py).
+		"validate": "ozturkapp.ozturkapp.utils.pos_closing.guard_closing_entry",
+		"before_cancel": "ozturkapp.ozturkapp.utils.pos_closing.guard_closing_cancel",
 		"on_submit": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_closing_change",
 		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_closing_change",
 	},
@@ -312,6 +326,13 @@ jinja = {
 # has_permission = {
 # 	"Event": "frappe.desk.doctype.event.event.has_permission",
 # }
+
+permission_query_conditions = {
+	# Menejer hisoboti (kutilgan summa) `payload` da turadi. Maydon kassirga
+	# ko'rinmaydi, lekin ro'yxat filtri (`payload like ...`) unga ishlardi —
+	# harflab o'qib olish mumkin edi. Hisobot topshiriqlari kassirga ko'rinmaydi.
+	"Ozturk Print Job": "ozturkapp.ozturkapp.doctype.ozturk_print_job.ozturk_print_job.get_permission_query_conditions",
+}
 
 # DocType Class
 # ---------------

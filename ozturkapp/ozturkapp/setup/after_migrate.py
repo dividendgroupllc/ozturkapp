@@ -32,6 +32,11 @@ def run():
 	from ozturkapp.ozturkapp.setup.bill_split_setup import setup as setup_bill_split
 	from ozturkapp.ozturkapp.setup.virtual_keyboard_setup import setup as setup_virtual_keyboard
 	from ozturkapp.ozturkapp.setup.print_setup import setup as setup_printing
+	from ozturkapp.ozturkapp.setup.cashier_features import setup as setup_cashier_features
+	from ozturkapp.ozturkapp.utils.manager_approval import setup as setup_manager_approval
+	from ozturkapp.ozturkapp.setup.cashier_billing_setup import setup as setup_cashier_billing
+	from ozturkapp.ozturkapp.setup.cashier_orders_setup import setup as setup_cashier_orders
+	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
 
 	tasks = [
 		create_fields,
@@ -62,6 +67,18 @@ def run():
 		setup_virtual_keyboard,
 		# Chop etish navbati — `Print Agent` roli va agent foydalanuvchisi.
 		setup_printing,
+		# Kassa funksiyalari reestri — POS Profile'dagi yoqish/o'chirish
+		# bayroqlari (chegirma, aralash to'lov, stol ko'chirish, ...).
+		# `setup_virtual_keyboard` dan KEYIN: maydonlar shundan keyin joylashadi.
+		setup_cashier_features,
+		# Menejer PIN maydoni (`User.custom_pos_pin`).
+		setup_manager_approval,
+		# Quyidagi uchtasi — har bir yo'nalishning O'Z maydonlari. Ular
+		# `setup_cashier_features` dan KEYIN turadi (POS Profile maydonlari
+		# ularga bog'liq bo'lishi mumkin).
+		setup_cashier_billing,
+		setup_cashier_orders,
+		setup_cashier_shift,
 	]
 	for fn in tasks:
 		try:

@@ -1,0 +1,251 @@
+/*
+ * Buyurtma oynasi, stol/mijoz tanlash va panel ma'lumot bloki (`.rc-orders-*`).
+ *
+ * O'LCHAMLAR (baza 1366x768; 1024x768 .. 1920x1080 da ham ishlaydi)
+ *   Oyna ekrandan oshmaydi; sahifa aylanmaydi. Chapda menyu, o'ngda savat —
+ *   ikkalasi ichkarida ALOHIDA aylanadi, yuborish tugmasi pastda qotirilgan.
+ *   Ekran klaviaturasi ochilsa (oyna pastida) o'ng ustun butunligicha aylanadi:
+ *   maydonga fokus tushganda u ko'rinadigan joyga suriladi.
+ * Hamma bosiladigan element kamida `--rc-touch` (48px).
+ */
+
+/* ═══ Oyna ═════════════════════════════════════════════════════ */
+
+.rc-dialog.rc-orders-dlg {
+	width: 100%;
+	max-width: min(1180px, calc(100vw - 24px));
+	height: min(calc(100vh - 24px), 880px);
+	height: min(calc(100dvh - 24px), 880px);
+}
+.rc-orders-dlg .rc-dialog__body { display: flex; padding: 0; overflow: hidden; }
+.rc-orders-dlg .rc-dialog__foot { padding: 8px 12px; }
+.rc-orders-dlg .rc-dialog__foot [data-action="cancel"] { flex: 0 0 28%; }
+.rc-orders-loading { margin: auto; font-weight: 600; color: var(--rc-muted); }
+
+.rc-orders-grid {
+	flex: 1 1 auto; min-width: 0; min-height: 0;
+	display: grid;
+	grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr);
+	grid-template-rows: minmax(0, 1fr);
+}
+
+/* ═══ Menyu (chap) ═════════════════════════════════════════════ */
+
+.rc-orders-menu {
+	display: flex; flex-direction: column; min-width: 0; min-height: 0;
+	border-right: 1px solid var(--rc-border);
+}
+.rc-orders-bar {
+	flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+	padding: 8px 10px; border-bottom: 1px solid var(--rc-border);
+}
+.rc-orders-search { flex: 0 0 168px; width: 168px; }
+.rc-orders-courses {
+	flex: 1 1 auto; min-width: 0; display: flex; gap: 6px;
+	overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.rc-orders-courses::-webkit-scrollbar { display: none; }
+.rc-orders-course {
+	flex: 0 0 auto; min-height: var(--rc-touch); padding: 0 16px;
+	border: 2px solid var(--rc-border); border-radius: 999px;
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 15px; font-weight: 700; white-space: nowrap; cursor: pointer;
+}
+.rc-orders-course[aria-pressed="true"] {
+	border-color: var(--rc-accent); background: var(--rc-accent-soft); color: var(--rc-accent-ink);
+}
+
+.rc-orders-items {
+	flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
+	display: grid; align-content: start; gap: 8px;
+	grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+.rc-orders-items--loading { opacity: .5; pointer-events: none; }
+.rc-orders-items > .rc-empty { grid-column: 1 / -1; }
+
+.rc-orders-card {
+	position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
+	min-height: 84px; padding: 10px 12px; text-align: left;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.rc-orders-card:active { filter: brightness(.92); }
+.rc-orders-card__name {
+	padding-right: 28px; font-size: 15px; font-weight: 700; line-height: 1.2;
+	display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+	overflow-wrap: anywhere;
+}
+.rc-orders-card__price { font-size: 14px; font-weight: 600; color: var(--rc-muted); }
+.rc-orders-card__star { color: var(--rc-reserved-ink); }
+.rc-orders-card__qty {
+	display: none; position: absolute; top: 6px; right: 6px;
+	min-width: 28px; height: 28px; padding: 0 7px; border-radius: 999px;
+	align-items: center; justify-content: center;
+	background: var(--rc-accent); color: #fff; font-size: 14px; font-weight: 800;
+}
+.rc-orders-card:not([data-qty="0"]) { border-color: var(--rc-accent); background: var(--rc-accent-soft); }
+.rc-orders-card:not([data-qty="0"]) .rc-orders-card__qty { display: inline-flex; }
+
+/* ═══ Savat (o'ng) ═════════════════════════════════════════════ */
+
+.rc-orders-cart {
+	display: flex; flex-direction: column; min-width: 0; min-height: 0;
+	overflow-y: auto; background: var(--rc-surface);
+}
+
+.rc-orders-setup {
+	flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px;
+	padding: 10px; border-bottom: 1px solid var(--rc-border);
+}
+.rc-orders-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.rc-orders-type {
+	min-height: var(--rc-touch); padding: 4px 6px;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 14px; font-weight: 700; line-height: 1.15; cursor: pointer;
+}
+.rc-orders-type[aria-pressed="true"] { border-color: var(--rc-accent); background: var(--rc-accent); color: #fff; }
+
+.rc-orders-row { display: flex; align-items: stretch; gap: 8px; }
+.rc-orders-row--delivery .rc-orders-phone { flex: 0 0 40%; width: 40%; min-width: 0; font-size: 16px; }
+.rc-orders-row--delivery .rc-orders-address { flex: 1 1 auto; width: auto; min-width: 0; font-size: 16px; }
+
+.rc-orders-pick {
+	flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px;
+	min-height: var(--rc-touch); padding: 4px 12px; text-align: left;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text); cursor: pointer;
+}
+.rc-orders-pick small {
+	flex: 0 0 auto; font-size: 12px; font-weight: 700;
+	color: var(--rc-muted); text-transform: uppercase; letter-spacing: .04em;
+}
+.rc-orders-pick strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.rc-orders-pick--empty { border-style: dashed; }
+.rc-orders-pick--empty strong { color: var(--rc-accent-ink); }
+.rc-orders-field--invalid { border-color: var(--rc-occupied); background: var(--rc-occupied-soft); }
+.rc-orders-clear {
+	flex: 0 0 var(--rc-touch); border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-muted); font-size: 26px; line-height: 1; cursor: pointer;
+}
+
+.rc-orders-stepper { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.rc-orders-stepper button {
+	width: var(--rc-touch); height: var(--rc-touch);
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 26px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.rc-orders-stepper span {
+	display: flex; flex-direction: column; align-items: center; justify-content: center;
+	min-width: 52px; line-height: 1.05;
+}
+.rc-orders-stepper small { font-size: 10px; font-weight: 700; color: var(--rc-muted); text-transform: uppercase; }
+.rc-orders-stepper strong { font-size: 19px; }
+
+.rc-orders-strip { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 2px 4px; }
+.rc-orders-strip strong { font-size: 17px; }
+.rc-orders-strip span { font-weight: 600; color: var(--rc-muted); }
+
+/* Buyurtmadagi taomlar (tahrirlash rejimi). */
+.rc-orders-existing {
+	flex: 0 1 auto; max-height: 44%; overflow-y: auto; padding: 0 10px 6px;
+	border-bottom: 1px solid var(--rc-border);
+}
+.rc-orders-heading {
+	position: sticky; top: 0; z-index: 1; padding: 8px 0 4px;
+	background: var(--rc-surface); color: var(--rc-muted);
+	font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+}
+.rc-orders-ex { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px dashed var(--rc-border); }
+.rc-orders-ex:last-child { border-bottom: 0; }
+.rc-orders-ex__main { flex: 1 1 auto; min-width: 0; }
+.rc-orders-ex__name { font-size: 15px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.rc-orders-ex__sub { font-size: 13px; color: var(--rc-muted); }
+.rc-orders-ex .rc-btn { flex: 0 0 auto; min-width: 88px; padding: 4px 8px; font-size: 13px; }
+
+/* Savat qatorlari. */
+.rc-orders-lines { flex: 1 1 0; min-height: 96px; overflow-y: auto; padding: 0 10px; }
+.rc-orders-line { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--rc-border); }
+.rc-orders-line__main {
+	flex: 1 1 auto; min-width: 0; min-height: 60px; padding: 4px 2px;
+	display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+	border: 0; background: transparent; color: var(--rc-text); text-align: left; cursor: pointer;
+}
+.rc-orders-line__name { font-size: 15px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.rc-orders-line__sub {
+	max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	font-size: 13px; color: var(--rc-muted);
+}
+.rc-orders-line__sub em { font-style: normal; font-weight: 600; color: var(--rc-accent-ink); }
+.rc-orders-line__hint { color: var(--rc-accent-ink); }
+.rc-orders-qty { flex: 0 0 auto; display: flex; align-items: center; }
+.rc-orders-qty button {
+	width: var(--rc-touch); height: var(--rc-touch);
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text);
+	font-size: 26px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.rc-orders-qty span { min-width: 38px; text-align: center; font-size: 18px; font-weight: 800; }
+.rc-orders-empty {
+	display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+	height: 100%; min-height: 96px; color: var(--rc-muted); text-align: center;
+}
+.rc-orders-empty span { font-size: 30px; opacity: .55; }
+.rc-orders-empty p { margin: 0; font-size: 14px; font-weight: 600; }
+
+/* Ekran klaviaturasi ochiq bo'lganda ustun aylanadi — jami summa va izoh maydoni pastda ko'rinib tursin. */
+.rc-orders-foot {
+	position: sticky; bottom: 0; z-index: 2;
+	flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px;
+	padding: 8px 10px 10px; border-top: 1px solid var(--rc-border); background: var(--rc-sunken);
+}
+.rc-orders-total { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rc-orders-total span { font-size: 13px; font-weight: 700; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .04em; }
+.rc-orders-total strong { font-size: 24px; font-weight: 800; }
+
+/* ═══ Stol tanlash ═════════════════════════════════════════════ */
+
+.rc-orders-tables__group + .rc-orders-tables__group { margin-top: 14px; }
+.rc-orders-tables__room {
+	display: flex; justify-content: space-between; margin: 0 0 8px;
+	font-size: 13px; font-weight: 800; color: var(--rc-muted); text-transform: uppercase; letter-spacing: .05em;
+}
+.rc-orders-tables__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.rc-orders-tables__table {
+	display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+	min-height: 66px;
+}
+.rc-orders-tables__table strong { font-size: 18px; overflow-wrap: anywhere; }
+.rc-orders-tables__table small { font-size: 12px; font-weight: 600; color: var(--rc-muted); }
+
+/* ═══ Mijoz tanlash ════════════════════════════════════════════ */
+
+.rc-orders-cust { display: flex; flex-direction: column; gap: 10px; }
+.rc-orders-cust__list { display: flex; flex-direction: column; gap: 6px; }
+.rc-orders-cust__row {
+	display: flex; align-items: center; justify-content: space-between; gap: 12px;
+	min-height: 56px; padding: 8px 14px; text-align: left;
+	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
+	background: var(--rc-surface); color: var(--rc-text); font-size: 16px; cursor: pointer;
+}
+.rc-orders-cust__row:hover { border-color: var(--rc-accent); }
+.rc-orders-cust__row span { white-space: nowrap; font-weight: 600; color: var(--rc-muted); }
+
+/* ═══ Panel ma'lumot bloki (`panel.info`) ══════════════════════ */
+
+.rc-orders-info__row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Manzil to'liq o'qilishi kerak (kuryer uchun) — ikki qatorgacha o'raladi. */
+.rc-orders-info__row--address {
+	white-space: normal; overflow-wrap: anywhere;
+	display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+
+/* ═══ Kichik ekran (1024px) ════════════════════════════════════ */
+
+@media (max-width: 1100px) {
+	.rc-orders-grid { grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr); }
+	.rc-orders-search { flex-basis: 132px; width: 132px; }
+	.rc-orders-items { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+}

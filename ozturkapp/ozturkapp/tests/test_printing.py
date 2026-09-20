@@ -164,6 +164,25 @@ class TestEscpos(FrappeTestCase):
         self.assertGreater(raw.count(b"\x1ba\x01"), 0)
         self.assertEqual(raw.count(b"\x1ba\x02"), 0)
 
+    def test_build_bill_80mm_no_price_column(self):
+        """Kassa cheki: Nomi | Soni | Summa — narx ustuni chiqmaydi."""
+        printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
+        bill = {
+            "items": [{"item_name": "CLOSED PIDE", "qty": 2, "rate": 249000, "amount": 498000}],
+            "total": 498000, "taxes": [], "discount": 0,
+            "grand_total": 498000, "rounded_total": 498000, "paid": False, "payments": [],
+        }
+        txt = _strip_escpos(escpos.build_bill(
+            bill, printer, {"line1": "TEST", "line2": "Uzbekistan"})).decode("cp866")
+        self.assertIn("Uzbekistan", txt)
+        self.assertNotIn("Narx", txt)
+        self.assertNotIn("249 000", txt)            # dona narxi chekda yo'q
+        self.assertIn("498 000", txt)
+        header = next(l for l in txt.splitlines() if l.startswith("Nomi"))
+        self.assertTrue(header.rstrip().endswith("Summa"), header)
+        for line in txt.splitlines():
+            self.assertLessEqual(len(line), 48, line)
+
     def test_build_bill_58mm(self):
         printer = {"paper_width": "58", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
         bill = {
