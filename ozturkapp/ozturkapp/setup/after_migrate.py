@@ -34,6 +34,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.print_setup import setup as setup_printing
 	from ozturkapp.ozturkapp.setup.cashier_features import setup as setup_cashier_features
 	from ozturkapp.ozturkapp.utils.manager_approval import setup as setup_manager_approval
+	from ozturkapp.ozturkapp.utils.item_naming import setup as setup_item_naming
 	from ozturkapp.ozturkapp.setup.cashier_billing_setup import setup as setup_cashier_billing
 	from ozturkapp.ozturkapp.setup.cashier_orders_setup import setup as setup_cashier_orders
 	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
@@ -73,6 +74,10 @@ def run():
 		setup_cashier_features,
 		# Menejer PIN maydoni (`User.custom_pos_pin`).
 		setup_manager_approval,
+		# Item kodi avtomatik (ITEM-####) — `item_code` faqat o'qiladi.
+		# `ury` ning Item sozlamalari (`item_code.reqd=1`) migrate paytida
+		# qayta yoziladi, shuning uchun bu shu yerda, migrate OXIRIDA turadi.
+		setup_item_naming,
 		# Quyidagi uchtasi — har bir yo'nalishning O'Z maydonlari. Ular
 		# `setup_cashier_features` dan KEYIN turadi (POS Profile maydonlari
 		# ularga bog'liq bo'lishi mumkin).

@@ -84,6 +84,17 @@ doc_events = {
 	"URY Menu": {
 		"on_update": "ozturkapp.ozturkapp.utils.menu_realtime.on_menu_change",
 	},
+	# ── Item kodi ──────────────────────────────────────────────────
+	# Kod avtomatik: ITEM-####. Foydalanuvchi kiritmaydi va o'zgartira
+	# olmaydi. Batafsil: utils/item_naming.py
+	"Item": {
+		"before_naming": "ozturkapp.ozturkapp.utils.item_naming.assign_item_code",
+	},
+	"Stock Settings": {
+		# ERPNext uni saqlaganda `item_code` ni majburiy qilib qo'yadi —
+		# kod bo'sh bo'lgani uchun yangi Item saqlanmay qolardi.
+		"on_update": "ozturkapp.ozturkapp.utils.item_naming.on_stock_settings_update",
+	},
 	"BOM": {
 		# Taom tannarxi (`Item.valuation_rate`) retseptdan olinadi — POS
 		# smenani yopganda stok provodkasi shu maydondan narx oladi.

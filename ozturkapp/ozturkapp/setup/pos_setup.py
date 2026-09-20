@@ -19,6 +19,11 @@ Yaratiladigan zanjir:
 MUHIM — menyu tovarlari BU YERDA YARATILMAYDI. Skript bazadagi mavjud
 `Готовый продукт` daraxti ostidagi tovarlarni o'qib menyuga qo'shadi. Ya'ni
 tovarlar avval ERPNext'ga import qilingan bo'lishi kerak.
+
+DIQQAT: Item kodlari `ITEM-####` ga o'tkazilgan (`utils/item_naming.py`),
+`ITEM_PRICES` esa eski kodlar (taom nomlari) bilan yozilgan — endi unga hech
+narsa mos kelmaydi. Menyuga yangi qo'shiladigan tovarlar `standard_rate`
+(yo'q bo'lsa 0) bilan tushadi; narxni menyuda UI orqali kiriting.
 """
 
 import frappe

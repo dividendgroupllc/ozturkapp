@@ -52,6 +52,11 @@ DIQQAT
 Miqdorlar va narxlar BOSHLANG'ICH qiymat — oshpaz bilan tekshirilishi va
 haqiqiy retseptga moslanishi kerak. Narxlar UZS'da, o'lchov birligiga
 nisbatan (masalan go'sht: 1 gramm uchun 120 so'm).
+
+ESKIRGAN: Item kodlari `ITEM-####` ga o'tkazilgan (`utils/item_naming.py`),
+`RAW_MATERIALS` va `RECIPES` esa eski kodlar (`RM-FLOUR`, `LAHMACUN`) bilan
+yozilgan. Skriptni qayta ishga tushirmang: xomashyoni kod bo'yicha topa
+olmay, har birining dublikatini yaratadi. Yangi retseptni Desk orqali kiriting.
 """
 
 import frappe
