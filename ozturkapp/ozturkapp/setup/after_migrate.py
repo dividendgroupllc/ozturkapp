@@ -38,6 +38,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.cashier_billing_setup import setup as setup_cashier_billing
 	from ozturkapp.ozturkapp.setup.cashier_orders_setup import setup as setup_cashier_orders
 	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
+	from ozturkapp.ozturkapp.setup.kot_failsafe_setup import setup as setup_kot_failsafe
 
 	tasks = [
 		create_fields,
@@ -84,6 +85,11 @@ def run():
 		setup_cashier_billing,
 		setup_cashier_orders,
 		setup_cashier_shift,
+		# URY'ning `kotValidationThread` jobi har daqiqada yiqiladi (u
+		# `kot_naming_series` ni o'qiydi, saytda esa `custom_kot_naming_series`).
+		# Nomni tuzatish XAVFLI: bo'lingan chek uchun soxta `Duplicate` KOT
+		# chiqadi — shuning uchun job to'xtatiladi (sababi setup modulida).
+		setup_kot_failsafe,
 	]
 	for fn in tasks:
 		try:
