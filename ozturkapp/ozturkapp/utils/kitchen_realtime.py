@@ -116,12 +116,16 @@ def on_kot_submit(doc, method=None):
         doc.get("production"), doc.get("invoice"),
     )
 
-    # YANGI BUYURTMA CHOP ETILMAYDI — ataylab. Restoranda chek faqat ikki
-    # joyda chiqadi: oshpaz taomni "Tayyor" qilganda (`api/kitchen.py`,
-    # `enqueue_item_ticket`) va kassada (`api/printing.py: print_bill`).
-    # Buyurtma oshxonaga ekran va bildirishnoma orqali yetadi (pastda).
-    # Qaytarish kerak bo'lsa: `print_queue.enqueue_kot(doc)` shu yerda
-    # chaqiriladi — funksiya va `escpos.build_kot` joyida turibdi.
+    # YANGI BUYURTMA -> OSHXONA PRINTERI (tarmoq printeri, agent orqali).
+    # Chekda stol, ofitsiant va taomlar ro'yxati chiqadi (`escpos.build_kot`).
+    # Stansiyaga `Ozturk Printer` biriktirilmagan bo'lsa hech narsa
+    # bo'lmaydi. Xato bo'lsa ham KOT oqimi TO'XTAMAYDI — Error Log'ga yoziladi.
+    try:
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        print_queue.enqueue_kot(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "kitchen_realtime: print_queue.enqueue_kot")
 
     # YANGI BUYURTMA -> OSHXONAGA xabar.
     #

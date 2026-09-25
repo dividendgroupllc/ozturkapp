@@ -760,12 +760,9 @@ class TestStaffNotifications(FrappeTestCase):
             "notifications.order_placed", inspect.getsource(kitchen_realtime.on_kot_submit)
         )
 
-    def test_new_order_is_not_printed(self):
-        """Ofitsiant zakaz berganda chek CHIQMAYDI.
-
-        Chek faqat ikki joyda: oshpaz "Tayyor" bosganda va kassada.
-        Izohda `enqueue_kot` nomi tilga olinadi, shuning uchun matn emas —
-        AST bo'yicha haqiqiy CHAQIRUV yo'qligi tekshiriladi.
+    def test_new_order_is_printed(self):
+        """Ofitsiant yoki kassa zakaz berganda oshxona printeriga chek CHIQADI
+        (stol + taomlar). AST bo'yicha haqiqiy CHAQIRUV borligi tekshiriladi.
         """
         import ast
         import inspect
@@ -779,7 +776,7 @@ class TestStaffNotifications(FrappeTestCase):
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
         }
-        self.assertNotIn("enqueue_kot", calls)
+        self.assertIn("enqueue_kot", calls)
         self.assertIn("order_placed", calls)        # bildirishnoma joyida qoldi
 
     def test_bill_request_notifies_cashier(self):
