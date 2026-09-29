@@ -134,7 +134,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 				<div class="sd-kpis"></div>
 				<div class="sd-charts">
 					<div class="sd-card">
-						<div class="sd-card-title">${__("Kunlik sotuv va chegirma")}</div>
+						<div class="sd-card-title">${__("Kunlik sotuv va chegirma")} <span class="sd-daily-note text-muted"></span></div>
 						<div class="sd-chart-daily"></div>
 					</div>
 					<div class="sd-card">
@@ -215,6 +215,16 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		return format_currency(flt(v), this.data.currency, 0);
 	}
 
+	// Grafik o'qi uchun: 3000000 → "3 mln", 250000 → "250 ming".
+	short_money(v) {
+		const n = flt(v), a = Math.abs(n);
+		const fmt = (x) => String(+x.toFixed(1)).replace(".", ",");
+		if (a >= 1e9) return fmt(n / 1e9) + " mlrd";
+		if (a >= 1e6) return fmt(n / 1e6) + " mln";
+		if (a >= 1e3) return fmt(n / 1e3) + " ming";
+		return String(n);
+	}
+
 	num(v) {
 		return format_number(flt(v), null, flt(v) % 1 ? 2 : 0);
 	}
@@ -248,6 +258,12 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		const $daily = this.$root.find(".sd-chart-daily").empty();
 		const $top = this.$root.find(".sd-chart-top").empty();
 
+		// Uzun davrda ustunlar siqilib, sanalar ustma-ust tushadi — oxirgi 10 kun.
+		const days = daily.slice(-10);
+		this.$root.find(".sd-daily-note").text(
+			this.data.items.length && daily.length > days.length ? __("(oxirgi {0} kun)", [days.length]) : ""
+		);
+
 		if (!this.data.items.length) {
 			$daily.html(this.empty_state());
 			$top.html(this.empty_state());
@@ -259,13 +275,13 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			height: 260,
 			colors: ["#2490ef", "#e24c4c"],
 			data: {
-				labels: daily.map((d) => frappe.datetime.str_to_user(d.date).slice(0, 5)),
+				labels: days.map((d) => frappe.datetime.str_to_user(d.date).slice(0, 5)),
 				datasets: [
-					{ name: __("Sof sotuv"), chartType: "bar", values: daily.map((d) => flt(d.net_amount)) },
-					{ name: __("Chegirma"), chartType: "line", values: daily.map((d) => flt(d.discount)) },
+					{ name: __("Sof sotuv"), chartType: "bar", values: days.map((d) => flt(d.net_amount)) },
+					{ name: __("Chegirma"), chartType: "line", values: days.map((d) => flt(d.discount)) },
 				],
 			},
-			axisOptions: { xIsSeries: 1, xAxisMode: "tick" },
+			axisOptions: { xIsSeries: 1, xAxisMode: "tick", shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
 			barOptions: { spaceRatio: 0.4 },
 			lineOptions: { regionFill: 0, dotSize: 3 },
 			tooltipOptions: { formatTooltipY: (v) => this.money(v) },
@@ -371,7 +387,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		};
 
 		const body = rows.map((r, i) => `<tr>${cols.map((c) =>
-			`<td class="text-${c.align || "right"}">${cell(c, r, i)}</td>`).join("")}</tr>`).join("");
+			`<td class="text-${c.align || "right"} sd-col-${c.field}">${cell(c, r, i)}</td>`).join("")}</tr>`).join("");
 
 		// Jami qatori qidiruvga qarab — ko'rinib turgan qatorlar yig'indisi.
 		const sum = (f) => rows.reduce((s, r) => s + flt(r[f]), 0);

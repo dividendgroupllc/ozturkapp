@@ -180,11 +180,20 @@
 
 .sd-table th,
 .sd-table td {
-	padding: 9px 12px;
+	padding: 8px 8px;
 	border-bottom: 1px solid var(--sd-border);
 	white-space: nowrap;
 	vertical-align: middle;
 }
+
+.sd-table th:first-child,
+.sd-table td:first-child { padding-left: 12px; }
+.sd-table th:last-child,
+.sd-table td:last-child { padding-right: 12px; }
+
+/* Sarlavhalar va mahsulot nomi o'raladi — gorizontal scroll chiqmasin. */
+.sd-table thead th { white-space: normal; line-height: 1.3; }
+.sd-table td.sd-col-item_name { white-space: normal; min-width: 160px; }
 
 .sd-table thead th {
 	position: sticky;
