@@ -73,7 +73,7 @@ _DRAWER_SAVEPOINT = "ozturk_kick_drawer"
 
 PRINTER_FIELDS = [
     "name", "printer_name", "branch", "role", "production_unit", "ip_address", "port",
-    "paper_width", "codepage", "codepage_number", "cut_paper",
+    "paper_width", "codepage", "codepage_number", "allow_codepage_switch", "cut_paper",
     "header_line_1", "header_line_2", "footer_text",
 ]
 

@@ -328,8 +328,9 @@ def get_currency(company=None):
     return currency or frappe.defaults.get_global_default("currency") or "UZS"
 
 
-def format_money(amount, currency):
-    return f"{fmt_money(amount or 0, precision=0)} {currency}"
+def format_money(amount):
+    # Kompaniya bitta valyutada — valyuta belgisi/kodi ko'rsatilmaydi.
+    return fmt_money(amount or 0, precision=0)
 
 
 def format_minutes(minutes):

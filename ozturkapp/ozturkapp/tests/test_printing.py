@@ -128,6 +128,8 @@ class TestEscpos(FrappeTestCase):
         raw = r.finish()
         self.assertTrue(raw.startswith(b"\x1b@\x1bt\x11"))
         self.assertTrue(raw.endswith(b"\x1dV\x42\x00"))
+        # Kesish buyrug'i qog'ozni o'zi suradi — oldidan bo'sh qator (qog'oz isrofi) yo'q.
+        self.assertFalse(raw.endswith(b"\n\n\x1dV\x42\x00"))
         txt = _strip_escpos(raw).decode("cp866")
         self.assertIn("SARLAVHA", txt)
         line = [l for l in txt.splitlines() if l.startswith("Jami:")][0]
@@ -153,6 +155,9 @@ class TestEscpos(FrappeTestCase):
         txt = _decode_escpos(raw)
         self.assertIn("Lag'mon", txt)
         self.assertIn("STOL: 5", txt)
+        # Qog'oz tejash: raqam va vaqt bitta qatorda, sana chiqmaydi.
+        self.assertIn("Buyurtma: 7  |  13:20", txt)
+        self.assertNotIn("10.09.2026", txt)
 
     def test_item_ticket_is_centered(self):
         printer = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
@@ -265,6 +270,19 @@ class TestPrintQueue(FrappeTestCase):
             "role": "Oshxona", "ip_address": "192.0.2.11", "port": 9100,
         })
         self.assertRaises(frappe.ValidationError, kitchen_no_unit.insert)
+
+    def test_printer_codepage_switch_flag_reaches_receipt(self):
+        # `Ozturk Printer` dagi bayroq chek quruvchigacha yetib borishi shart:
+        # u `PRINTER_FIELDS` da bo'lmasa, yoqilgan bo'lsa ham e'tiborsiz qolardi
+        # (Kassa chekida "ÖzTürk" -> "OzTurk").
+        frappe.db.set_value("Ozturk Printer", self.printer, "allow_codepage_switch", 1)
+        try:
+            printer = print_queue.cashier_printer(TEST_BRANCH)
+            self.assertTrue(escpos._receipt_for(printer).allow_switch)
+            raw = escpos.build_bill({"items": [], "total": 0}, printer, {"line1": "ÖzTürk"})
+            self.assertIn("Ö".encode("cp437"), raw)
+        finally:
+            frappe.db.set_value("Ozturk Printer", self.printer, "allow_codepage_switch", 0)
 
     def test_enqueue_pull_ack_cycle(self):
         job = print_queue.enqueue_test(self.printer, "unit")

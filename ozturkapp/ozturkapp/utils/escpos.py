@@ -335,9 +335,13 @@ class Receipt:
         return self
 
     def finish(self) -> bytes:
-        self._buf += b"\n\n\n"
         if self.cut:
+            # `GS V 66 n` qog'ozni o'zi kesish joyigacha suradi — oldidan bo'sh
+            # qator qo'shilsa oxirgi yozuv ostida ortiqcha qog'oz sarflanadi.
             self._buf += GS + b"V" + b"\x42" + b"\x00"
+        else:
+            # Kesgichsiz printer: qo'lda yirtish uchun yozuv tishdan o'tsin.
+            self._buf += b"\n\n\n"
         return bytes(self._buf)
 
     def finish_b64(self) -> str:
@@ -521,9 +525,10 @@ def build_kot(kot: dict, printer) -> bytes:
     r.text(station.upper(), align=align, bold=True, size="double")
     if kot.get("type") and kot["type"] not in ("Order", "New Order"):
         r.text(str(kot["type"]).upper(), align=align, bold=True)
-    r.feed(1)
-    r.text(f"Buyurtma: {kot.get('order_number') or kot.get('kot') or ''}", align=align)
-    r.text(fmt_dt(kot.get("time")), align=align)
+    # Qog'oz tejash: raqam va vaqt bitta qatorda, sanasiz — oshxonaga
+    # bugungi buyurtmaning vaqti yetarli.
+    r.text(f"Buyurtma: {kot.get('order_number') or kot.get('kot') or ''}  |  "
+           f"{_hhmm(kot.get('time') or datetime.now())}", align=align)
     if kot.get("table"):
         r.text(f"STOL: {kot['table']}", align=align, bold=True, size="tall")
     if kot.get("waiter"):

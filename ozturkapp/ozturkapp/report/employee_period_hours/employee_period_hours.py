@@ -399,12 +399,12 @@ def get_data(filters):
         },
         {
             "label": _("Soatlik stavka"),
-            "value": format_money(hourly_rate, currency),
+            "value": format_money(hourly_rate),
             "datatype": "Data"
         },
         {
             "label": _("💰 JAMI MAOSH"),
-            "value": format_money(total_earnings, currency),
+            "value": format_money(total_earnings),
             "datatype": "Data",
             "indicator": "green"
         }

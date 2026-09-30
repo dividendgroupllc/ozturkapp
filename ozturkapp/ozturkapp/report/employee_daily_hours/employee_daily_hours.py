@@ -28,7 +28,6 @@ from ozturkapp.ozturkapp.report.employee_hours_utils import (
     format_money,
     format_time,
     get_allowed_employees,
-    get_currency,
     get_day_result,
     get_holiday_dates,
     get_holiday_list,
@@ -168,7 +167,6 @@ def get_data(filters):
     hourly_rate = flt(emp.get("hourly_rate") or 0)
     designation = emp.get("designation") or ""
     company = emp.get("company") or ""
-    currency = get_currency(company)
 
     holiday_list = get_holiday_list(emp.get("holiday_list"), company)
     is_holiday = selected_date in get_holiday_dates(holiday_list, selected_date, selected_date)
@@ -271,8 +269,8 @@ def get_data(filters):
         data.append({
             "row_num": "",
             "time": "💰 Daromad",
-            "log_type": format_money(earnings, currency),
-            "description": f"Stavka: {format_money(hourly_rate, currency)}/soat",
+            "log_type": format_money(earnings),
+            "description": f"Stavka: {format_money(hourly_rate)}/soat",
             "duration": ""
         })
 

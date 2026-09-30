@@ -39,6 +39,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.cashier_orders_setup import setup as setup_cashier_orders
 	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
 	from ozturkapp.ozturkapp.setup.kot_failsafe_setup import setup as setup_kot_failsafe
+	from ozturkapp.ozturkapp.setup.currency_setup import setup as setup_currency
 
 	tasks = [
 		create_fields,
@@ -90,6 +91,8 @@ def run():
 		# Nomni tuzatish XAVFLI: bo'lingan chek uchun soxta `Duplicate` KOT
 		# chiqadi — shuning uchun job to'xtatiladi (sababi setup modulida).
 		setup_kot_failsafe,
+		# Kompaniya bitta valyutada — "лв" (UZS belgisi) hech qayerda chiqmaydi.
+		setup_currency,
 	]
 	for fn in tasks:
 		try:
