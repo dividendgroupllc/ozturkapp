@@ -12,8 +12,12 @@ frappe.query_reports["Employee Daily Hours"] = {
             // Faqat to'liq HR huquqiga ega foydalanuvchilar uchun ko'rinadi
             hidden: !(frappe.user.has_role("System Manager") || frappe.user.has_role("HR Manager")),
             on_change: function() {
-                frappe.query_report.set_filter_value("employee", "");
-                frappe.query_report.refresh();
+                // Xodim tanlangan bo'lsa - tozalash o'zi refresh qiladi
+                if (frappe.query_report.get_filter_value("employee")) {
+                    frappe.query_report.set_filter_value("employee", "");
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {
@@ -55,16 +59,37 @@ frappe.query_reports["Employee Daily Hours"] = {
             return `<strong style="background: #f5f5f5; padding: 4px 8px;">${value}</strong>`;
         }
         
-        // Status ranglari
-        if (column.fieldname === "log_type") {
-            if (data.log_type && data.log_type.includes("Normada")) {
+        // Barcha xodimlar jadvali - Holat ustuni
+        if (column.fieldname === "status" && data.status) {
+            const st = String(data.status).toLowerCase();
+            if (st.includes("normada")) {
                 return `<span style="color: green; font-weight: bold;">${value}</span>`;
             }
-            if (data.log_type && (data.log_type.includes("qayd etilmagan") || data.log_type.includes("yo'q"))) {
+            if (st.includes("qayd etilmagan") || st.includes("yo'q")) {
+                return `<span style="color: red;">${value}</span>`;
+            }
+            if (st.includes("ishda")) {
+                return `<span style="color: #007bff;">${value}</span>`;
+            }
+            if (st.includes("dam olish")) {
+                return `<span style="color: #6c757d;">${value}</span>`;
+            }
+        }
+
+        // Status ranglari
+        if (column.fieldname === "log_type") {
+            const lt = String(data.log_type || "").toLowerCase();
+            if (lt.includes("normada")) {
+                return `<span style="color: green; font-weight: bold;">${value}</span>`;
+            }
+            if (lt.includes("qayd etilmagan") || lt.includes("yo'q")) {
                 return `<span style="color: red; font-weight: bold;">${value}</span>`;
             }
+            if (lt.includes("ishda") || lt.includes("dam olish")) {
+                return `<span style="color: #007bff; font-weight: bold;">${value}</span>`;
+            }
             if (data.time && data.time.includes("Ish vaqti")) {
-                const match = value.match(/(\d+):(\d+)/);
+                const match = String(value).match(/(\d+):(\d+)/);
                 if (match) {
                     const hours = parseInt(match[1]);
                     if (hours >= 8) {
@@ -83,6 +108,7 @@ frappe.query_reports["Employee Daily Hours"] = {
         
         // Log turlari uchun rang
         if (column.fieldname === "log_type" && data.row_num && !isNaN(data.row_num)) {
+            value = String(value);
             if (value.includes("KELDI")) {
                 return `<span style="color: #28a745;">${value}</span>`;
             }
@@ -111,24 +137,22 @@ frappe.query_reports["Employee Daily Hours"] = {
     },
 
     onload: function(report) {
-        // Bir marta refresh (faqat birinchi yuklashda)
-        if (!report._initial_loaded) {
-            report._initial_loaded = true;
-            setTimeout(function() {
+        // Filtr qiymati o'zgarsa - o'zi refresh qiladi; o'zgarmasa - qo'lda
+        const set_date = function(value) {
+            if (frappe.query_report.get_filter_value("date") === value) {
                 frappe.query_report.refresh();
-            }, 300);
-        }
-        
+            } else {
+                frappe.query_report.set_filter_value("date", value);
+            }
+        };
+
         // Avtomatik yuklash tugmalari
         report.page.add_inner_button(__("Bugun"), function() {
-            frappe.query_report.set_filter_value("date", frappe.datetime.get_today());
-            frappe.query_report.refresh();
+            set_date(frappe.datetime.get_today());
         });
-        
+
         report.page.add_inner_button(__("Kecha"), function() {
-            const yesterday = frappe.datetime.add_days(frappe.datetime.get_today(), -1);
-            frappe.query_report.set_filter_value("date", yesterday);
-            frappe.query_report.refresh();
+            set_date(frappe.datetime.add_days(frappe.datetime.get_today(), -1));
         });
     }
 };

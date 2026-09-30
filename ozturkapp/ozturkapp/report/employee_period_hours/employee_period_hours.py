@@ -6,151 +6,161 @@ Davriy Ish Vaqti Hisoboti (Employee Period Hours Report)
 Xodimning tanlangan davr uchun kunlik ish vaqti va maosh hisoboti
 + Designation (lavozim) ko'rsatiladi
 + Company filter faqat admin uchun
++ Dam olish kunlari - Holiday List bo'yicha (bo'lmasa har kun ish kuni)
+
+Hisob-kitob mantiqi: ozturkapp.ozturkapp.report.employee_hours_utils
 """
 
 import frappe
 from frappe import _
 from frappe.utils import getdate, add_days, date_diff, flt
 
-from ozturkapp.ozturkapp.utils.helpers import has_full_hr_access
-from datetime import datetime, timedelta, time as dt_time
+from ozturkapp.ozturkapp.report.employee_hours_utils import (
+    STATUS_IN_PROGRESS,
+    STATUS_MISSING_IN,
+    STATUS_MISSING_OUT,
+    STATUS_NO_LOG,
+    STATUS_OK,
+    analyze_logs,
+    fetch_logs,
+    format_minutes,
+    format_money,
+    get_allowed_employees,
+    get_currency,
+    get_day_result,
+    get_holiday_dates,
+    get_holiday_list,
+    validate_employee,
+)
 
 
 def execute(filters=None):
     if not filters:
         filters = {}
-    
+
     if not filters.get("from_date"):
         frappe.throw(_("Boshlanish sanasini tanlang"))
     if not filters.get("to_date"):
         frappe.throw(_("Tugash sanasini tanlang"))
-    
+
     # Agar xodim tanlanmagan bo'lsa - barcha xodimlar jadvali (har kun ustunda)
     if not filters.get("employee"):
         columns, data = get_all_employees_report(filters)
         return columns, data, None, None, None
-    
+
     # Xodim tanlangan - batafsil hisobot
+    validate_employee(filters.get("employee"))
     columns = get_columns()
     data, report_summary, chart = get_data(filters)
-    
+
     return columns, data, None, chart, report_summary
+
+
+def get_date_list(from_date, to_date):
+    dates = []
+    current_date = from_date
+    while current_date <= to_date:
+        dates.append(current_date)
+        current_date = add_days(current_date, 1)
+    return dates
+
+
+def get_date_label(d, from_date, to_date):
+    """Davr bir necha oyni qamrasa - oy ham ko'rsatiladi"""
+    if (from_date.year, from_date.month) != (to_date.year, to_date.month):
+        return d.strftime("%d.%m")
+    return d.strftime("%d")
 
 
 def get_all_employees_report(filters):
     """Barcha xodimlar uchun davriy hisobot - har kun alohida ustun"""
     from_date = getdate(filters.get("from_date"))
     to_date = getdate(filters.get("to_date"))
-    company = filters.get("company")
-    
+
     # Validatsiya
     if from_date > to_date:
         frappe.throw(_("Boshlanish sanasi tugash sanasidan keyin bo'lishi mumkin emas"))
-    
+
     days_count = date_diff(to_date, from_date) + 1
     if days_count > 31:
         frappe.throw(_("Maksimum 31 kun tanlash mumkin (jadval uchun)"))
-    
-    # User permission tekshirish - filial manager faqat o'z filialini ko'radi
-    user = frappe.session.user
-    if not has_full_hr_access(user):
-        # User permission bo'yicha company olish
-        user_company = frappe.db.get_value(
-            "User Permission",
-            {"user": user, "allow": "Company"},
-            "for_value"
-        )
-        if user_company:
-            company = user_company
-    
-    # Xodimlarni olish (permission bilan)
-    emp_filters = {"status": "Active"}
-    if company:
-        emp_filters["company"] = company
-    
-    employees = frappe.get_list(
-        "Employee",
-        filters=emp_filters,
-        fields=["name", "employee_name", "designation", "company", "hourly_rate"],
-        order_by="employee_name",
-        ignore_permissions=has_full_hr_access(user)
-    )
-    
-    if not employees:
-        return [], []
-    
+
     # Ustunlarni yaratish
     columns = [
         {"label": _("F.I.O"), "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
     ]
-    
-    # Har bir sana uchun ustun
+
     dates = []
-    current_date = from_date
-    while current_date <= to_date:
-        date_str = current_date.strftime("%d.%m")
+    for current_date in get_date_list(from_date, to_date):
         date_key = current_date.strftime("%Y%m%d")
+        date_str = current_date.strftime("%d.%m")
         dates.append({"date": current_date, "key": date_key, "label": date_str})
-        
         columns.append({
             "label": date_str,
             "fieldname": f"d_{date_key}",
             "fieldtype": "Data",
-            "width": 110,
+            "width": 120,
         })
-        
-        current_date = add_days(current_date, 1)
-    
+
     # Jami ustuni
     columns.append({"label": _("Jami"), "fieldname": "total_hours", "fieldtype": "Data", "width": 80})
-    
-    # Barcha loglarni olish
-    search_start = datetime.combine(add_days(from_date, -1), dt_time(12, 0, 0))
-    search_end = datetime.combine(add_days(to_date, 1), dt_time(12, 0, 0))
-    
-    all_logs = frappe.db.sql("""
-        SELECT employee, time, log_type, checkin_reason
-        FROM `tabEmployee Checkin`
-        WHERE time >= %s AND time <= %s
-        ORDER BY time ASC
-    """, (search_start, search_end), as_dict=True)
-    
-    # Loglarni employee bo'yicha guruhlash
-    logs_by_employee = {}
-    for log in all_logs:
-        if log.employee not in logs_by_employee:
-            logs_by_employee[log.employee] = []
-        logs_by_employee[log.employee].append(log)
-    
+
+    employees = get_allowed_employees(filters.get("company"))
+
+    if not employees:
+        frappe.msgprint(
+            _("Tanlangan filial bo'yicha faol xodimlar topilmadi"),
+            title=_("Ma'lumot yo'q"),
+            indicator="orange",
+        )
+        return columns, []
+
+    # Faqat tanlangan xodimlar loglari (bir so'rovda), xodim bo'yicha guruhlangan
+    logs_by_employee = fetch_logs([e.name for e in employees], from_date, to_date)
+    holiday_cache = {}
+
     data = []
-    
-    for idx, emp in enumerate(employees, 1):
-        emp_logs = logs_by_employee.get(emp.name, [])
-        
+
+    for emp in employees:
+        analysis = analyze_logs(logs_by_employee.get(emp.name, []))
+        holidays = get_holiday_dates(
+            get_holiday_list(emp.holiday_list, emp.company), from_date, to_date, holiday_cache
+        )
+
         row = {
             "employee_name": emp.employee_name,
         }
-        
+
         total_worked = 0
-        
+
         # Har bir kun uchun
         for d in dates:
-            day_result = calculate_day(emp_logs, d["date"])
-            
-            if day_result["worked_minutes"] > 0:
-                first_in = day_result["first_in"].strftime("%H:%M") if day_result["first_in"] else ""
-                last_out = day_result["last_out"].strftime("%H:%M") if day_result["last_out"] else ""
-                
-                # To'liq format: "08:30-17:45"
-                row[f"d_{d['key']}"] = f"{first_in}-{last_out}"
-                total_worked += day_result["worked_minutes"]
-            else:
-                row[f"d_{d['key']}"] = "—"
-        
+            day_result = get_day_result(analysis, d["date"])
+            row[f"d_{d['key']}"] = format_matrix_cell(day_result, d["date"], d["date"] in holidays)
+            total_worked += day_result["worked_minutes"]
+
         row["total_hours"] = format_minutes(total_worked) if total_worked > 0 else "—"
         data.append(row)
-    
+
     return columns, data
+
+
+def format_matrix_cell(day_result, day, is_holiday):
+    """Jadval katakchasi: "08:30-17:45", "22:00-06:00 (+1)", "09:00-?", "?-18:00", "—", "Dam" """
+    status = day_result["status"]
+    first_in = day_result["first_in"].strftime("%H:%M") if day_result["first_in"] else "?"
+
+    if status == STATUS_OK:
+        lo = day_result["last_out"]
+        last_out = lo.strftime("%H:%M")
+        if lo.date() != day:
+            last_out += f" (+{(lo.date() - day).days})"
+        return f"{first_in}-{last_out}"
+    if status in (STATUS_MISSING_OUT, STATUS_IN_PROGRESS):
+        return f"{first_in}-?"
+    if status == STATUS_MISSING_IN:
+        return f"?-{day_result['last_out'].strftime('%H:%M')}"
+    return "Dam" if is_holiday else "—"
 
 
 def get_columns():
@@ -196,13 +206,14 @@ def get_columns():
             "label": _("Maosh"),
             "fieldname": "earnings",
             "fieldtype": "Currency",
+            "options": "currency",
             "width": 120
         },
         {
             "label": _("Holat"),
             "fieldname": "status",
             "fieldtype": "Data",
-            "width": 120
+            "width": 140
         }
     ]
 
@@ -211,128 +222,115 @@ def get_data(filters):
     employee = filters.get("employee")
     from_date = getdate(filters.get("from_date"))
     to_date = getdate(filters.get("to_date"))
-    
+
     # Validatsiya
     if from_date > to_date:
         frappe.throw(_("Boshlanish sanasi tugash sanasidan keyin bo'lishi mumkin emas"))
-    
+
     if date_diff(to_date, from_date) > 62:
         frappe.throw(_("Maksimum 2 oy (62 kun) tanlash mumkin"))
-    
-    # Xodim ma'lumotlari (designation qo'shildi)
+
+    # Xodim ma'lumotlari
     emp = frappe.db.get_value(
         "Employee",
         employee,
-        ["employee_name", "designation", "hourly_rate", "company"],
+        ["employee_name", "designation", "hourly_rate", "company", "holiday_list"],
         as_dict=True
     ) or {}
-    
+
     employee_name = emp.get("employee_name") or employee
     designation = emp.get("designation") or ""
     hourly_rate = flt(emp.get("hourly_rate") or 0)
     company = emp.get("company") or ""
-    
-    # Xodim ismi (designation alohida ko'rsatiladi)
-    employee_display = employee_name
-    
-    # Loglarni olish
-    search_start = datetime.combine(add_days(from_date, -1), dt_time(12, 0, 0))
-    search_end = datetime.combine(add_days(to_date, 1), dt_time(12, 0, 0))
-    
-    logs = frappe.db.sql("""
-        SELECT name, time, log_type, checkin_reason
-        FROM `tabEmployee Checkin`
-        WHERE employee = %s AND time >= %s AND time <= %s
-        ORDER BY time ASC
-    """, (employee, search_start, search_end), as_dict=True)
-    
+    currency = get_currency(company)
+
+    holidays = get_holiday_dates(
+        get_holiday_list(emp.get("holiday_list"), company), from_date, to_date
+    )
+
+    # Loglarni olish va tahlil (kunlik hisobot bilan bir xil mantiq)
+    logs = fetch_logs([employee], from_date, to_date).get(employee, [])
+    analysis = analyze_logs(logs)
+
     # Kun nomlari
     day_names = {
         0: "Dushanba",
-        1: "Seshanba", 
+        1: "Seshanba",
         2: "Chorshanba",
         3: "Payshanba",
         4: "Juma",
         5: "Shanba",
         6: "Yakshanba"
     }
-    
+
     data = []
     total_worked = 0
     total_breaks = 0
     total_earnings = 0.0
     days_worked = 0
-    days_total = 0
-    
+    working_days = 0
+
     # Chart uchun ma'lumotlar
     chart_labels = []
     chart_worked = []
-    
-    current_date = from_date
-    while current_date <= to_date:
-        days_total += 1
-        day_result = calculate_day(logs, current_date)
-        
-        # Kun nomi
+
+    for current_date in get_date_list(from_date, to_date):
+        day_result = get_day_result(analysis, current_date)
+
         day_name = day_names.get(current_date.weekday(), "")
-        is_weekend = current_date.weekday() >= 5
-        
+        is_holiday = current_date in holidays
+        if not is_holiday:
+            working_days += 1
+
         # Keldi vaqti
-        first_in_str = "—"
-        if day_result["first_in"]:
-            first_in_str = day_result["first_in"].strftime("%H:%M")
-        
+        first_in_str = day_result["first_in"].strftime("%H:%M") if day_result["first_in"] else "—"
+
         # Ketdi vaqti
-        last_out_str = "—"
         if day_result["last_out"]:
             lo = day_result["last_out"]
-            if lo.date() != current_date:
-                last_out_str = lo.strftime("%d-%m %H:%M")
-            else:
-                last_out_str = lo.strftime("%H:%M")
-        
-        # Ishlagan vaqt
-        worked_str = format_minutes(day_result["worked_minutes"])
+            last_out_str = lo.strftime("%d-%m %H:%M") if lo.date() != current_date else lo.strftime("%H:%M")
+        elif day_result["status"] in (STATUS_MISSING_OUT, STATUS_IN_PROGRESS):
+            last_out_str = "?"
+        else:
+            last_out_str = "—"
+
+        worked_minutes = day_result["worked_minutes"]
+        worked_str = format_minutes(worked_minutes) if worked_minutes > 0 else "—"
         breaks_str = format_minutes(day_result["break_minutes"]) if day_result["break_minutes"] > 0 else "—"
-        
+
         # Kunlik maosh
-        worked_hours = day_result["worked_minutes"] / 60.0
-        daily_earnings = worked_hours * hourly_rate
-        
-        # Holat
-        status = get_status_display(day_result["status"], is_weekend)
-        
+        daily_earnings = worked_minutes / 60.0 * hourly_rate
+
         row = {
             "date": current_date,
             "day_name": day_name,
             "first_in": first_in_str,
             "last_out": last_out_str,
-            "worked": worked_str if day_result["worked_minutes"] > 0 else "—",
+            "worked": worked_str,
             "breaks": breaks_str,
             "earnings": daily_earnings if daily_earnings > 0 else None,
-            "status": status,
-            "is_weekend": is_weekend,
-            "worked_minutes": day_result["worked_minutes"]
+            "currency": currency,
+            "status": get_status_display(day_result["status"], is_holiday),
+            "is_holiday": is_holiday,
+            "worked_minutes": worked_minutes
         }
-        
+
         data.append(row)
-        
+
         # Jami hisob
-        if day_result["worked_minutes"] > 0:
-            total_worked += day_result["worked_minutes"]
+        if worked_minutes > 0:
+            total_worked += worked_minutes
             total_breaks += day_result["break_minutes"]
             total_earnings += daily_earnings
             days_worked += 1
-        
+
         # Chart uchun
-        chart_labels.append(current_date.strftime("%d"))
-        chart_worked.append(round(day_result["worked_minutes"] / 60, 1))
-        
-        current_date = add_days(current_date, 1)
-    
+        chart_labels.append(get_date_label(current_date, from_date, to_date))
+        chart_worked.append(round(worked_minutes / 60, 1))
+
     # Bo'sh qator
     data.append({})
-    
+
     # JAMI qatori
     data.append({
         "date": None,
@@ -342,14 +340,15 @@ def get_data(filters):
         "worked": format_minutes(total_worked),
         "breaks": format_minutes(total_breaks) if total_breaks > 0 else "—",
         "earnings": total_earnings,
+        "currency": currency,
         "status": "",
         "is_total": True
     })
-    
+
     # O'rtacha
     avg_worked = total_worked / days_worked if days_worked > 0 else 0
     avg_earnings = total_earnings / days_worked if days_worked > 0 else 0
-    
+
     data.append({
         "date": None,
         "day_name": "📈 O'rtacha:",
@@ -358,15 +357,16 @@ def get_data(filters):
         "worked": format_minutes(int(avg_worked)),
         "breaks": "",
         "earnings": avg_earnings if avg_earnings > 0 else None,
+        "currency": currency,
         "status": "/kun",
         "is_total": True
     })
-    
-    # Report summary (yuqorida ko'rinadi) - Designation alohida qator
+
+    # Report summary (yuqorida ko'rinadi)
     report_summary = [
         {
             "label": _("Xodim"),
-            "value": employee_display,
+            "value": employee_name,
             "datatype": "Data",
             "indicator": "blue"
         },
@@ -387,9 +387,9 @@ def get_data(filters):
         },
         {
             "label": _("Ishlagan kunlar"),
-            "value": f"{days_worked} / {days_total}",
+            "value": f"{days_worked} / {working_days}",
             "datatype": "Data",
-            "indicator": "green" if days_worked >= days_total * 0.8 else "orange"
+            "indicator": "green" if days_worked >= working_days * 0.8 else "orange"
         },
         {
             "label": _("Jami soat"),
@@ -399,17 +399,17 @@ def get_data(filters):
         },
         {
             "label": _("Soatlik stavka"),
-            "value": frappe.format_value(hourly_rate, {"fieldtype": "Currency"}),
+            "value": format_money(hourly_rate, currency),
             "datatype": "Data"
         },
         {
             "label": _("💰 JAMI MAOSH"),
-            "value": total_earnings,
-            "datatype": "Currency",
+            "value": format_money(total_earnings, currency),
+            "datatype": "Data",
             "indicator": "green"
         }
     ]
-    
+
     # Chart
     chart = {
         "data": {
@@ -428,114 +428,22 @@ def get_data(filters):
         },
         "height": 200
     }
-    
+
     return data, report_summary, chart
 
 
-def calculate_day(all_logs, selected_date):
-    """Kunlik ish vaqtini hisoblash"""
-    
-    next_day = add_days(selected_date, 1)
-    
-    result = {
-        "first_in": None,
-        "last_out": None,
-        "worked_minutes": 0,
-        "break_minutes": 0,
-        "status": "NO_LOG"
-    }
-    
-    # Bugungi loglar
-    today_logs = [l for l in all_logs if l.time.date() == selected_date]
-    
-    # Ertangi ertalabki loglar (tungi smena uchun)
-    next_early = [l for l in all_logs 
-                  if l.time.date() == next_day 
-                  and l.time.hour < 12]
-    
-    # IN loglar (RETURN emas)
-    in_logs = [l for l in today_logs 
-               if l.log_type == "IN" and l.checkin_reason != "RETURN"]
-    
-    # OUT loglar (TEMP_OUT emas)
-    out_logs = [l for l in today_logs + next_early 
-                if l.log_type == "OUT" and l.checkin_reason != "TEMP_OUT"]
-    
-    if not in_logs:
-        if out_logs:
-            result["last_out"] = out_logs[-1].time
-            result["status"] = "MISSING_IN"
-        return result
-    
-    # First IN
-    result["first_in"] = min(in_logs, key=lambda x: x.time).time
-    
-    # Last OUT
-    if out_logs:
-        result["last_out"] = max(out_logs, key=lambda x: x.time).time
-    
-    # Ish vaqtini hisoblash
-    if result["first_in"] and result["last_out"]:
-        total_delta = result["last_out"] - result["first_in"]
-        total_minutes = int(total_delta.total_seconds() / 60)
-        
-        # Tanaffuslarni hisoblash
-        break_minutes = calculate_breaks(today_logs)
-        result["break_minutes"] = break_minutes
-        
-        # Sof ish vaqti
-        result["worked_minutes"] = max(0, total_minutes - break_minutes)
-        result["status"] = "OK"
-    elif result["first_in"] and not result["last_out"]:
-        result["status"] = "MISSING_OUT"
-    
-    return result
-
-
-def calculate_breaks(logs):
-    """Tanaffus vaqtini hisoblash"""
-    break_minutes = 0
-    
-    temp_outs = sorted(
-        [l for l in logs if l.checkin_reason == "TEMP_OUT"],
-        key=lambda x: x.time
-    )
-    returns = sorted(
-        [l for l in logs if l.checkin_reason == "RETURN"],
-        key=lambda x: x.time
-    )
-    
-    used = set()
-    for to in temp_outs:
-        for i, ret in enumerate(returns):
-            if i not in used and ret.time > to.time:
-                delta = ret.time - to.time
-                break_minutes += int(delta.total_seconds() / 60)
-                used.add(i)
-                break
-    
-    return break_minutes
-
-
-def format_minutes(minutes):
-    """Minutlarni HH:MM formatga"""
-    if minutes <= 0:
-        return "00:00"
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours:02d}:{mins:02d}"
-
-
-def get_status_display(status, is_weekend=False):
+def get_status_display(status, is_holiday=False):
     """Holatni o'zbek tilida"""
-    if status == "OK":
+    if status == STATUS_OK:
         return "✅ Normada"
-    elif status == "MISSING_OUT":
+    elif status == STATUS_MISSING_OUT:
         return "⚠️ Chiqmagan"
-    elif status == "MISSING_IN":
+    elif status == STATUS_IN_PROGRESS:
+        return "🔵 Ishda"
+    elif status == STATUS_MISSING_IN:
         return "⚠️ Kelmagan"
-    elif status == "NO_LOG":
-        if is_weekend:
+    elif status == STATUS_NO_LOG:
+        if is_holiday:
             return "🔵 Dam olish"
         return "⬜ Log yo'q"
     return status

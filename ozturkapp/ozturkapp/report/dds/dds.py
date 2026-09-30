@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import escape_html, flt
 
 
 CATEGORY_MAP = {
@@ -29,9 +29,13 @@ CATEGORY_LABELS = {
 
 
 def execute(filters=None):
+    filters = frappe._dict(filters or {})
+    if not filters.get("from_date") or not filters.get("to_date"):
+        frappe.throw(_("Сана дан ва Сана гача majburiy"))
+
     columns = get_columns()
-    data, expense_summaries = get_data(filters)
-    summary_html = get_summary_html(data, expense_summaries)
+    data, expense_summaries, balances = get_data(filters)
+    summary_html = get_summary_html(data, expense_summaries, balances)
     return columns, data, summary_html
 
 
@@ -47,69 +51,73 @@ def get_columns():
     ]
 
 
+INVOICE_PARTY = {
+    # voucher_type: (party_type, party field, party name field)
+    "Sales Invoice": ("Customer", "customer", "customer_name"),
+    "POS Invoice": ("Customer", "customer", "customer_name"),
+    "Purchase Invoice": ("Supplier", "supplier", "supplier_name"),
+}
+
+
 def get_data(filters):
+    balances = {"opening": 0, "closing": 0, "is_filtered": False}
+
     cash_accounts = get_cash_accounts(filters)
     if not cash_accounts:
-        return [], {}
+        return [], {}, balances
 
     opening_balance = get_opening_balance(cash_accounts, filters)
     transactions = get_transactions(cash_accounts, filters)
 
-    pe_vouchers = [r.voucher_no for r in transactions if r.voucher_type == "Payment Entry"]
-    je_vouchers = [r.voucher_no for r in transactions if r.voucher_type == "Journal Entry"]
+    pe_vouchers = list({r.voucher_no for r in transactions if r.voucher_type == "Payment Entry"})
+    je_vouchers = list({r.voucher_no for r in transactions if r.voucher_type == "Journal Entry"})
     all_vouchers = pe_vouchers + je_vouchers
 
     pe_info = get_payment_entry_info_batch(pe_vouchers)
     je_info = get_journal_entry_info_batch(je_vouchers)
     je_remarks = get_journal_entry_remarks_batch(je_vouchers)
+    inv_info = get_invoice_info_batch(transactions)
 
-    # --- YANGI: Kassa hujjati (nom + izoh) batch olish ---
+    # Kassa hujjati (nom + izoh) batch olish
     kassa_map = get_kassa_map_batch(all_vouchers)
+
+    # Keshlar (N+1 so'rovlarni kamaytirish uchun)
+    ctx = frappe._dict(
+        cash_accounts=set(cash_accounts),
+        mop_by_account=get_mop_by_account_map(),
+        account_cache={},
+        party_name_cache={},
+    )
 
     data = []
 
     # Filterlar
     filter_party_type = filters.get("party_type")
     filter_party = filters.get("party")
-    category_filter_val = filters.get("category")
-    filter_category = CATEGORY_MAP.get(category_filter_val)
-    # Maxsus dividend filtri: "Divident Akmal"/"Divident Elyor" (CATEGORY_MAP da yo'q)
-    # -> faqat o'sha aniq dividend hisobi qatorlari ko'rsatiladi.
-    dividend_name_filter = category_filter_val if (category_filter_val and not filter_category) else None
+    filter_category = CATEGORY_MAP.get(filters.get("category"))
+    balances["is_filtered"] = bool(filter_party_type or filter_party or filter_category)
 
     expense_summaries = {}
     balance = opening_balance
-    total_kirim = 0
-    total_chiqim = 0
 
     for row in transactions:
         kirim = flt(row.debit_in_account_currency)
         chiqim = flt(row.credit_in_account_currency)
 
-        info = resolve_transaction_info(row, pe_info, je_info, cash_accounts)
+        # Kassa qoldig'i har doim butun kassa bo'yicha hisoblanadi
+        balance += kirim - chiqim
+
+        info = resolve_transaction_info(row, pe_info, je_info, inv_info, ctx)
 
         # Category filter
         if filter_category and info["category"] != filter_category:
-            balance += kirim - chiqim
             continue
-
-        # Aniq dividend hisobi filtri (Divident Akmal / Divident Elyor)
-        if dividend_name_filter:
-            if info["category"] != "dividend" or strip_category_prefix(info["description"]) != dividend_name_filter:
-                balance += kirim - chiqim
-                continue
 
         # Party filter
         if filter_party_type and info.get("party_type") != filter_party_type:
-            balance += kirim - chiqim
             continue
         if filter_party and info.get("party") != filter_party:
-            balance += kirim - chiqim
             continue
-
-        balance += kirim - chiqim
-        total_kirim += kirim
-        total_chiqim += chiqim
 
         # Xarajatlarni guruhlash
         if info["category"] == "expense":
@@ -125,10 +133,12 @@ def get_data(filters):
             "direction": "Кирим" if kirim else "Чиқим",
             "description": strip_category_prefix(info["description"]),
             "category": info["category"],
+            "party_type": info.get("party_type"),
+            "party": info.get("party"),
             "summa": kirim if kirim else chiqim,
-            # --- YANGI: kassa izohi birinchi, fallback PE/JE ---
-            "remarks": get_remarks(row, pe_info, je_remarks, kassa_map),
-            # --- YANGI: Документ ustuni Kassa hujjatini ko'rsatadi ---
+            # kassa izohi birinchi, fallback PE/JE/faktura
+            "remarks": get_remarks(row, pe_info, je_remarks, kassa_map, inv_info),
+            # Документ ustuni Kassa hujjatini ko'rsatadi
             "kassa_doc": (kassa_map.get(row.voucher_no) or {}).get("name"),
             "voucher_type": row.voucher_type,
             "voucher_no": row.voucher_no,
@@ -136,14 +146,10 @@ def get_data(filters):
             "chiqim": chiqim or None,
         })
 
-    final_data = list(data)
+    balances["opening"] = opening_balance
+    balances["closing"] = balance
 
-    # opening_balance va closing balance ni summary HTML uchun saqlash
-    if final_data:
-        final_data[0]["_opening_balance"] = opening_balance
-        final_data[-1]["_closing_balance"] = balance
-
-    return final_data, expense_summaries
+    return data, expense_summaries, balances
 
 
 def get_cash_accounts(filters):
@@ -223,6 +229,7 @@ def get_journal_entry_info_batch(voucher_nos):
         FROM `tabJournal Entry Account` jea
         LEFT JOIN `tabAccount` acc ON acc.name = jea.account
         WHERE jea.parent IN %s
+        ORDER BY jea.parent, jea.idx
     """, (voucher_nos,), as_dict=True)
 
     result = {}
@@ -242,6 +249,50 @@ def get_journal_entry_remarks_batch(voucher_nos):
     """, (voucher_nos,), as_dict=True)
 
     return {e.name: (e.user_remark or "") for e in entries}
+
+
+def get_invoice_info_batch(transactions):
+    """Sales/POS/Purchase Invoice (POS to'lovi, qaytim) uchun kontragentni olish.
+    Qaytaradi: {voucher_no: {"party_type", "party", "party_name", "remarks"}}"""
+    by_type = {}
+    for r in transactions:
+        if r.voucher_type in INVOICE_PARTY:
+            by_type.setdefault(r.voucher_type, set()).add(r.voucher_no)
+
+    result = {}
+    for vt, names in by_type.items():
+        party_type, party_field, name_field = INVOICE_PARTY[vt]
+        rows = frappe.get_all(
+            vt,
+            filters={"name": ["in", list(names)]},
+            fields=["name", f"{party_field} as party", f"{name_field} as party_name", "remarks"],
+        )
+        for r in rows:
+            result[r.name] = frappe._dict(
+                party_type=party_type,
+                party=r.party,
+                party_name=r.party_name,
+                remarks=r.remarks or "",
+            )
+    return result
+
+
+def get_mop_by_account_map():
+    """default_account -> Mode of Payment nomi.
+    Bir hisob bir nechta MoP ga biriktirilgan bo'lsa: avval yoqilgan (enabled) MoP,
+    so'ng nom bo'yicha tartib — natija deterministik bo'ladi."""
+    rows = frappe.db.sql("""
+        SELECT mopa.default_account, mopa.parent, IFNULL(mop.enabled, 0) AS enabled
+        FROM `tabMode of Payment Account` mopa
+        LEFT JOIN `tabMode of Payment` mop ON mop.name = mopa.parent
+        WHERE IFNULL(mopa.default_account, '') != ''
+        ORDER BY enabled DESC, mopa.parent
+    """, as_dict=True)
+
+    result = {}
+    for r in rows:
+        result.setdefault(r.default_account, r.parent)
+    return result
 
 
 def get_kassa_map_batch(voucher_nos):
@@ -270,7 +321,7 @@ def get_kassa_map_batch(voucher_nos):
     return result
 
 
-def get_remarks(row, pe_info, je_remarks, kassa_map=None):
+def get_remarks(row, pe_info, je_remarks, kassa_map=None, inv_info=None):
     """
     Izoh olish tartibi:
     1. Kassa.primechaniya (voucher_no bog'langan Kassa)
@@ -292,6 +343,11 @@ def get_remarks(row, pe_info, je_remarks, kassa_map=None):
     if row.voucher_type == "Journal Entry" and voucher in je_remarks:
         return je_remarks[voucher] or ""
 
+    # 4. Fallback: Sales/POS/Purchase Invoice
+    if inv_info and voucher in inv_info:
+        remarks = inv_info[voucher].get("remarks") or ""
+        return "" if remarks == "No Remarks" else remarks
+
     return ""
 
 
@@ -302,10 +358,10 @@ def strip_category_prefix(desc):
     return desc
 
 
-def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
+def resolve_transaction_info(row, pe_info, je_info, inv_info, ctx):
     # 1. GL Entry'da party bor
     if row.party_type and row.party:
-        party_name = get_party_name(row.party_type, row.party)
+        party_name = get_party_name(row.party_type, row.party, ctx)
         display_name = party_name or row.party
         return {
             "description": display_name,
@@ -314,13 +370,24 @@ def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
             "party": row.party,
         }
 
-    # 2. Payment Entry
+    # 2. Sales/POS/Purchase Invoice (POS to'lovi va qaytim — kontragent fakturadan)
+    if row.voucher_type in INVOICE_PARTY and row.voucher_no in inv_info:
+        inv = inv_info[row.voucher_no]
+        if inv.party:
+            return {
+                "description": inv.party_name or inv.party,
+                "category": get_category_from_party_type(inv.party_type),
+                "party_type": inv.party_type,
+                "party": inv.party,
+            }
+
+    # 3. Payment Entry
     if row.voucher_type == "Payment Entry" and row.voucher_no in pe_info:
         pe = pe_info[row.voucher_no]
         if pe.payment_type == "Internal Transfer":
             return {"description": "Перемещение", "category": "transfer", "party_type": None, "party": None}
         if pe.party_type and pe.party:
-            party_name = get_party_name(pe.party_type, pe.party)
+            party_name = get_party_name(pe.party_type, pe.party, ctx)
             display_name = party_name or pe.party
             return {
                 "description": display_name,
@@ -329,13 +396,13 @@ def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
                 "party": pe.party,
             }
 
-    # 3. Journal Entry
+    # 4. Journal Entry
     if row.voucher_type == "Journal Entry" and row.voucher_no in je_info:
         for acc in je_info[row.voucher_no]:
-            if acc.account in cash_accounts:
+            if acc.account in ctx.cash_accounts:
                 continue
             if acc.party_type and acc.party:
-                party_name = get_party_name(acc.party_type, acc.party)
+                party_name = get_party_name(acc.party_type, acc.party, ctx)
                 return {
                     "description": party_name or acc.party,
                     "category": get_category_from_party_type(acc.party_type),
@@ -347,16 +414,20 @@ def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
             if acc.root_type == "Equity":
                 return {"description": f"Дивиденды: {acc.account_name}", "category": "dividend", "party_type": None, "party": None}
 
-    # 4. Against field (fallback)
+    # 5. Against field (fallback)
     if row.against:
-        against_account = row.against.split(",")[0].strip() if "," in row.against else row.against
+        against_account = row.against.split(",")[0].strip()
 
-        is_cash = frappe.db.get_value("Mode of Payment Account", {"default_account": against_account}, "parent")
-        if is_cash:
+        mop = ctx.mop_by_account.get(against_account)
+        if mop:
             direction = "из" if flt(row.debit_in_account_currency) > 0 else "в"
-            return {"description": f"Перемещение {direction} {is_cash}", "category": "transfer", "party_type": None, "party": None}
+            return {"description": f"Перемещение {direction} {mop}", "category": "transfer", "party_type": None, "party": None}
 
-        acc_info = frappe.db.get_value("Account", against_account, ["account_name", "root_type", "account_type"], as_dict=True)
+        if against_account not in ctx.account_cache:
+            ctx.account_cache[against_account] = frappe.db.get_value(
+                "Account", against_account, ["account_name", "root_type", "account_type"], as_dict=True
+            )
+        acc_info = ctx.account_cache[against_account]
         if acc_info:
             if acc_info.root_type == "Expense":
                 return {"description": f"Расходы: {acc_info.account_name}", "category": "expense", "party_type": None, "party": None}
@@ -380,25 +451,26 @@ def get_category_from_party_type(party_type):
     }.get(party_type, "other")
 
 
-def get_party_name(party_type, party):
+def get_party_name(party_type, party, ctx=None):
     field = {"Customer": "customer_name", "Supplier": "supplier_name", "Employee": "employee_name"}.get(party_type)
-    if field:
-        return frappe.db.get_value(party_type, party, field)
-    return party
+    if not field:
+        return party
+    cache = ctx.party_name_cache if ctx is not None else {}
+    key = (party_type, party)
+    if key not in cache:
+        cache[key] = frappe.db.get_value(party_type, party, field)
+    return cache[key]
 
 
-def get_summary_html(data, expense_summaries=None):
-    if not data:
-        return ""
+def get_summary_html(data, expense_summaries=None, balances=None):
+    balances = balances or {}
+    opening = flt(balances.get("opening"))
+    closing = flt(balances.get("closing"))
+    is_filtered = balances.get("is_filtered")
 
-    # Opening va closing balancelarni data dan olish
-    opening = 0
-    closing_balance = 0
-    for row in data:
-        if "_opening_balance" in row:
-            opening = flt(row["_opening_balance"])
-        if "_closing_balance" in row:
-            closing_balance = flt(row["_closing_balance"])
+    # Filtr faol bo'lsa: qoldiqlar butun kassa bo'yicha (filtrsiz) — yorliqda aniq ko'rsatamiz
+    opening_label = "Начальный остаток (вся касса, без фильтра)" if is_filtered else "Начальный остаток"
+    closing_label = "Конечный остаток (вся касса, без фильтра)" if is_filtered else "Конечный остаток"
 
     customer_kirim = 0
     customer_chiqim = 0
@@ -412,6 +484,8 @@ def get_summary_html(data, expense_summaries=None):
     transfer_chiqim = 0
     employee_kirim = 0
     employee_chiqim = 0
+    shareholder_kirim = 0
+    shareholder_chiqim = 0
     other_kirim = 0
     other_chiqim = 0
 
@@ -441,13 +515,17 @@ def get_summary_html(data, expense_summaries=None):
         elif category == "employee":
             employee_kirim += kirim
             employee_chiqim += chiqim
+        elif category == "shareholder":
+            shareholder_kirim += kirim
+            shareholder_chiqim += chiqim
         else:
             other_kirim += kirim
             other_chiqim += chiqim
 
-    closing = opening + (customer_kirim + supplier_kirim + expense_kirim + dividend_kirim + transfer_kirim + employee_kirim + other_kirim) - (customer_chiqim + supplier_chiqim + expense_chiqim + dividend_chiqim + transfer_chiqim + employee_chiqim + other_chiqim)
-    if closing_balance:
-        closing = closing_balance
+    total_kirim = customer_kirim + supplier_kirim + expense_kirim + dividend_kirim + transfer_kirim + employee_kirim + shareholder_kirim + other_kirim
+    total_chiqim = customer_chiqim + supplier_chiqim + expense_chiqim + dividend_chiqim + transfer_chiqim + employee_chiqim + shareholder_chiqim + other_chiqim
+
+    total_label = "Итого по фильтру" if is_filtered else "Итого за период"
 
     def fmt(val):
         return f"{flt(val):,.2f}"
@@ -459,7 +537,7 @@ def get_summary_html(data, expense_summaries=None):
     expense_sub_rows = ""
     if expense_summaries:
         for desc, totals in expense_summaries.items():
-            display_name = desc.replace("Расходы: ", "") if desc.startswith("Расходы: ") else desc
+            display_name = escape_html(strip_category_prefix(desc))
             sub_kirim = fmt(totals["kirim"]) if totals["kirim"] else "—"
             sub_chiqim = fmt(totals["chiqim"]) if totals["chiqim"] else "—"
             expense_sub_rows += f"""
@@ -492,7 +570,7 @@ def get_summary_html(data, expense_summaries=None):
             </thead>
             <tbody>
                 <tr style="background-color: #e3f2fd;">
-                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Начальный остаток</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">{opening_label}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; font-weight: bold;" colspan="2">{fmt(opening)}</td>
                 </tr>
                 <tr>
@@ -516,6 +594,11 @@ def get_summary_html(data, expense_summaries=None):
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(employee_chiqim) if employee_chiqim else '—'}</td>
                 </tr>
                 <tr>
+                    <td style="padding: 10px; border: 1px solid #ddd;">Акционеры</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #388e3c;">{fmt(shareholder_kirim) if shareholder_kirim else '—'}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(shareholder_chiqim) if shareholder_chiqim else '—'}</td>
+                </tr>
+                <tr style="background-color: #fafafa;">
                     <td style="padding: 10px; border: 1px solid #ddd;">Перемещения</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #388e3c;">{fmt(transfer_kirim) if transfer_kirim else '—'}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(transfer_chiqim) if transfer_chiqim else '—'}</td>
@@ -531,8 +614,13 @@ def get_summary_html(data, expense_summaries=None):
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(expense_chiqim) if expense_chiqim else '—'}</td>
                 </tr>
                 {expense_sub_rows}
+                <tr style="background-color: #f0f0f0; font-weight: bold;">
+                    <td style="padding: 10px; border: 1px solid #ddd;">{total_label}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #388e3c;">{fmt(total_kirim) if total_kirim else '—'}</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(total_chiqim) if total_chiqim else '—'}</td>
+                </tr>
                 <tr style="background-color: #e3f2fd; font-weight: bold;">
-                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Конечный остаток</td>
+                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">{closing_label}</td>
                     <td style="padding: 12px; border: 1px solid #ddd; text-align: right; font-weight: bold;" colspan="2">{fmt(closing)}</td>
                 </tr>
             </tbody>

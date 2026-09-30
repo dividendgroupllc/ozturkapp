@@ -27,11 +27,16 @@ frappe.query_reports["Akt Sverka"] = {
             fieldname: "party_type",
             label: __("Kontragent turi"),
             fieldtype: "Select",
-            options: "Customer\nSupplier\nEmployee",
+            options: "Customer\nSupplier\nEmployee\nShareholder",
             default: "Supplier",
             reqd: 1,
             on_change: function() {
-                frappe.query_report.set_filter_value("party", "");
+                // on_change avtomatik refresh ni almashtiradi — shuning uchun qo'lda chaqiramiz
+                if (frappe.query_report.get_filter_value("party")) {
+                    frappe.query_report.set_filter_value("party", "");
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {
@@ -59,7 +64,7 @@ frappe.query_reports["Akt Sverka"] = {
                 value = `<span style="color:#1890ff;font-weight:600;">${value}</span>`;
             }
             
-            // Jami - sariq fon
+            // Jami aylanma / Yakuniy qoldiq - sariq fon
             if (data.is_total) {
                 value = `<span style="font-weight:700;background:#fff3cd;padding:2px 6px;">${value}</span>`;
             }

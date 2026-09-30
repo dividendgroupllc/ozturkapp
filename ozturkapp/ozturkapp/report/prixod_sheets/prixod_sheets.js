@@ -26,13 +26,25 @@ frappe.query_reports["Prixod Sheets"] = {
             "label": __("Етказиб берувчи"),
             "fieldtype": "Link",
             "options": "Supplier"
+        },
+        {
+            "fieldname": "item_group",
+            "label": __("Товар гуруҳи"),
+            "fieldtype": "Link",
+            "options": "Item Group"
+        },
+        {
+            "fieldname": "item_code",
+            "label": __("Товар"),
+            "fieldtype": "Link",
+            "options": "Item"
         }
     ],
 
     "formatter": function(value, row, column, data, default_formatter) {
         value = default_formatter(value, row, column, data);
         // "ЖАМИ" qatorini qalin qilib ko'rsatish
-        if (data && data.item_name === "ЖАМИ") {
+        if (data && data.is_total) {
             value = `<b>${value}</b>`;
         }
         return value;

@@ -31,7 +31,12 @@ frappe.query_reports["Kontragent Otchet"] = {
             default: "Customer",
             reqd: 1,
             on_change: function() {
-                frappe.query_report.set_filter_value("party", "");
+                // on_change avtomatik refresh ni almashtiradi — shuning uchun qo'lda chaqiramiz
+                if (frappe.query_report.get_filter_value("party")) {
+                    frappe.query_report.set_filter_value("party", "");
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {

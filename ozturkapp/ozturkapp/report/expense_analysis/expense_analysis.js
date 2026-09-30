@@ -21,21 +21,34 @@ frappe.query_reports["Expense Analysis"] = {
 			width: "80",
 		},
 		{
+			fieldname: "company",
+			label: __("Компания"),
+			fieldtype: "Link",
+			options: "Company",
+			default: frappe.defaults.get_user_default("Company"),
+		},
+		{
+			fieldname: "root_type",
+			label: __("Тури"),
+			fieldtype: "Select",
+			options: ["Expense", "Income", "All"].join("\n"),
+			default: "Expense",
+		},
+		{
 			fieldname: "expense_account",
 			label: __("Харажат счёти"),
 			fieldtype: "Link",
 			options: "Account",
 			get_query: function () {
-				return {
-					filters: {
-						root_type: "Expense",
-						is_group: 0,
-					},
+				const company = frappe.query_report.get_filter_value("company");
+				const root_type = frappe.query_report.get_filter_value("root_type");
+				const filters = {
+					root_type: ["in", root_type === "All" || !root_type ? ["Expense", "Income"] : [root_type]],
 				};
+				if (company) filters.company = company;
+				return { filters: filters };
 			},
 		},
-
-
 		{
 			fieldname: "category",
 			label: __("Категория"),
@@ -53,6 +66,10 @@ frappe.query_reports["Expense Analysis"] = {
 			label: __("Харажат маркази"),
 			fieldtype: "Link",
 			options: "Cost Center",
+			get_query: function () {
+				const company = frappe.query_report.get_filter_value("company");
+				return { filters: company ? { company: company } : {} };
+			},
 		},
 	],
 
@@ -73,6 +90,8 @@ frappe.query_reports["Expense Analysis"] = {
 			const colors = {
 				"Payment Entry": "#1976d2",
 				"Journal Entry": "#7b1fa2",
+				"Purchase Invoice": "#ef6c00",
+				"Expense Claim": "#00897b",
 			};
 			const c = colors[data.voucher_type] || "#666";
 			value = `<span style="color: ${c}; font-size: 11px; font-weight: 600; text-transform: uppercase;">${value}</span>`;

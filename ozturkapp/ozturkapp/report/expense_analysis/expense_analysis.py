@@ -8,8 +8,8 @@ P&L'dagi barcha xarajatlarni Payment Entry va Journal Entry orqali
 tahlil qilish uchun report. Joriy davr va oldingi davr solishtirish,
 oshgan/tushgan xarajatlarni aniqlash, har bir tranzaksiyani drill-down qilish.
 
-Manba: GL Entry (account.root_type = 'Expense', debit > 0)
-       voucher_type IN ('Payment Entry', 'Journal Entry')
+Manba: GL Entry (account.root_type = 'Expense' | 'Income')
+       voucher_type IN ('Payment Entry', 'Journal Entry', 'Purchase Invoice', 'Expense Claim')
 """
 
 import frappe
@@ -18,7 +18,7 @@ from frappe.utils import flt, getdate, add_days, date_diff, formatdate, today, a
 
 
 # Qaysi voucher type'lar hisoblanadi
-ALLOWED_VOUCHER_TYPES = ("Payment Entry", "Journal Entry")
+ALLOWED_VOUCHER_TYPES = ("Payment Entry", "Journal Entry", "Purchase Invoice", "Expense Claim")
 
 # P&L account turlari (Income va Expense)
 PNL_ROOT_TYPES = ("Income", "Expense")
@@ -62,9 +62,12 @@ def apply_default_filters(filters):
     if not filters.get("from_date"):
         filters["from_date"] = add_months(filters["to_date"], -1)
 
-    # Sanalar noto'g'ri tartibda bo'lsa - almashtirish
     if getdate(filters["from_date"]) > getdate(filters["to_date"]):
-        filters["from_date"], filters["to_date"] = filters["to_date"], filters["from_date"]
+        frappe.throw(_("Бошланиш санаси тугаш санасидан катта бўлиши мумкин эмас"))
+
+    # root_type: bo'sh bo'lsa - faqat xarajatlar; "All" - Income + Expense
+    if not filters.get("root_type"):
+        filters["root_type"] = "Expense"
 
     return filters
 
@@ -155,6 +158,9 @@ def get_data(filters):
             remarks = pe_remarks.get(r.voucher_no, "") or (r.remarks or "")
         elif r.voucher_type == "Journal Entry":
             remarks = je_remarks.get(r.voucher_no, "") or (r.remarks or "")
+        else:
+            # Purchase Invoice / Expense Claim - GL Entry izohi
+            remarks = r.remarks or ""
 
         # Kassa orqali yaratilgan PE/JE'da odatda faqat shablon matn bo'ladi
         # ("Kassa: KASSA-2026-00123 - Расход") — foydalanuvchi yozgan haqiqiy
@@ -196,14 +202,8 @@ def clean_remarks(text):
 # GL ENTRY OLISH
 # ============================================================
 
-def get_gl_entries(filters, from_date, to_date):
-    """
-    P&L (Income va Expense) account'lariga tegishli GL Entry qatorlarini oladi.
-    Faqat Payment Entry va Journal Entry.
-
-    Income account: natural balance = credit - debit (musbat = daromad)
-    Expense account: natural balance = debit - credit (musbat = xarajat)
-    """
+def build_conditions(filters, from_date, to_date):
+    """get_gl_entries va get_category_breakdown uchun umumiy shartlar."""
     conditions = ["gle.is_cancelled = 0"]
     params = {
         "from_date": from_date,
@@ -212,9 +212,21 @@ def get_gl_entries(filters, from_date, to_date):
         "root_types": PNL_ROOT_TYPES,
     }
 
+    if filters.get("company"):
+        conditions.append("gle.company = %(company)s")
+        params["company"] = filters["company"]
+
     if filters.get("expense_account"):
-        conditions.append("gle.account = %(expense_account)s")
-        params["expense_account"] = filters["expense_account"]
+        # Guruh account tanlansa - barcha ichki account'lar ham
+        acc = frappe.db.get_value("Account", filters["expense_account"], ["lft", "rgt"], as_dict=True)
+        if acc:
+            conditions.append(
+                "gle.account IN (SELECT name FROM `tabAccount` WHERE lft >= %(acc_lft)s AND rgt <= %(acc_rgt)s)"
+            )
+            params.update({"acc_lft": acc.lft, "acc_rgt": acc.rgt})
+        else:
+            conditions.append("gle.account = %(expense_account)s")
+            params["expense_account"] = filters["expense_account"]
 
     if filters.get("party_type"):
         conditions.append("gle.party_type = %(party_type)s")
@@ -225,8 +237,16 @@ def get_gl_entries(filters, from_date, to_date):
         params["party"] = filters["party"]
 
     if filters.get("cost_center"):
-        conditions.append("gle.cost_center = %(cost_center)s")
-        params["cost_center"] = filters["cost_center"]
+        # Guruh cost center tanlansa - barcha ichki cost center'lar ham
+        cc = frappe.db.get_value("Cost Center", filters["cost_center"], ["lft", "rgt"], as_dict=True)
+        if cc:
+            conditions.append(
+                "gle.cost_center IN (SELECT name FROM `tabCost Center` WHERE lft >= %(cc_lft)s AND rgt <= %(cc_rgt)s)"
+            )
+            params.update({"cc_lft": cc.lft, "cc_rgt": cc.rgt})
+        else:
+            conditions.append("gle.cost_center = %(cost_center)s")
+            params["cost_center"] = filters["cost_center"]
 
     # root_type filter (Income / Expense / All)
     root_type_filter = filters.get("root_type")
@@ -243,6 +263,19 @@ def get_gl_entries(filters, from_date, to_date):
         elif cat_cfg.get("party_type"):
             conditions.append("gle.party_type = %(category_party_type)s")
             params["category_party_type"] = cat_cfg["party_type"]
+
+    return conditions, params
+
+
+def get_gl_entries(filters, from_date, to_date):
+    """
+    P&L (Income va Expense) account'lariga tegishli GL Entry qatorlarini oladi.
+    Voucher turlari: ALLOWED_VOUCHER_TYPES (PE, JE, Purchase Invoice, Expense Claim).
+
+    Income account: natural balance = credit - debit (musbat = daromad)
+    Expense account: natural balance = debit - credit (musbat = xarajat)
+    """
+    conditions, params = build_conditions(filters, from_date, to_date)
 
     where_clause = " AND ".join(conditions)
 
@@ -319,21 +352,18 @@ def get_kassa_remarks(voucher_nos):
         return {}
     voucher_nos = list(set(voucher_nos))
     rows = frappe.db.sql("""
-        SELECT payment_entry, payment_entry_receive, payment_entry_supplier,
-               journal_entry, primechaniya
+        SELECT payment_entry, journal_entry, primechaniya
         FROM `tabKassa`
         WHERE primechaniya IS NOT NULL AND primechaniya != ''
           AND (
               payment_entry IN %(vouchers)s
-              OR payment_entry_receive IN %(vouchers)s
-              OR payment_entry_supplier IN %(vouchers)s
               OR journal_entry IN %(vouchers)s
           )
     """, {"vouchers": voucher_nos}, as_dict=True)
 
     result = {}
     for r in rows:
-        for field in ("payment_entry", "payment_entry_receive", "payment_entry_supplier", "journal_entry"):
+        for field in ("payment_entry", "journal_entry"):
             voucher = r.get(field)
             if voucher:
                 result[voucher] = r.primechaniya
@@ -457,43 +487,7 @@ def get_category_breakdown(filters, from_date, to_date):
     Bir account turli party_type bilan tranzaksiyalarga ega bo'lishi mumkin —
     har birini alohida olish kerak.
     """
-    conditions = ["gle.is_cancelled = 0"]
-    params = {
-        "from_date": from_date,
-        "to_date": to_date,
-        "voucher_types": ALLOWED_VOUCHER_TYPES,
-        "root_types": PNL_ROOT_TYPES,
-    }
-
-    if filters.get("expense_account"):
-        conditions.append("gle.account = %(expense_account)s")
-        params["expense_account"] = filters["expense_account"]
-
-    if filters.get("party_type"):
-        conditions.append("gle.party_type = %(party_type)s")
-        params["party_type"] = filters["party_type"]
-
-    if filters.get("party"):
-        conditions.append("gle.party = %(party)s")
-        params["party"] = filters["party"]
-
-    if filters.get("cost_center"):
-        conditions.append("gle.cost_center = %(cost_center)s")
-        params["cost_center"] = filters["cost_center"]
-
-    root_type_filter = filters.get("root_type")
-    if root_type_filter and root_type_filter in PNL_ROOT_TYPES:
-        conditions.append("acc.root_type = %(specific_root_type)s")
-        params["specific_root_type"] = root_type_filter
-
-    category = filters.get("category")
-    if category and category in CATEGORY_FILTERS:
-        cat_cfg = CATEGORY_FILTERS[category]
-        if cat_cfg.get("no_party"):
-            conditions.append("(gle.party_type IS NULL OR gle.party_type = '')")
-        elif cat_cfg.get("party_type"):
-            conditions.append("gle.party_type = %(category_party_type)s")
-            params["category_party_type"] = cat_cfg["party_type"]
+    conditions, params = build_conditions(filters, from_date, to_date)
 
     where_clause = " AND ".join(conditions)
 

@@ -26,7 +26,8 @@ NIMA QILINADI
    nusxalangan kod qolsa, "Item allaqachon mavjud" xatosi chiqardi va maydon
    faqat o'qiladigan bo'lgani uchun uni tuzatib ham bo'lmasdi.
 2. `ITEM_PROPERTY_SETTERS` — `item_code` faqat o'qiladi, Rename o'chiriladi
-   (Rename — kodni o'zgartirishning ikkinchi yo'li).
+   (Rename — kodni o'zgartirishning ikkinchi yo'li). Hujjatlardagi Item
+   maydonlarida kod o'rniga nom ko'rsatiladi (`show_title_field_in_link`).
 3. `on_stock_settings_update` — ERPNext `Stock Settings` saqlanganda
    `item_code` ni majburiy (`reqd=1`) qilib qaytaradi. Kod bo'sh va faqat
    o'qiladigan bo'lgani uchun yangi Item saqlanmay qolardi. Shu hook uni
@@ -58,6 +59,11 @@ ITEM_PROPERTY_SETTERS = [
     # `Item.validate` bo'sh nomni kod bilan to'ldiradi — bu faqat forma uchun.)
     ("item_name", "reqd", "1", "Check"),
     (None, "allow_rename", "0", "Check"),
+    # `ITEM-####` kodini eslab qolish qiyin — barcha hujjatlardagi (Sales
+    # Invoice, BOM, Stock Entry, ...) Item maydonlarida kod o'rniga nom
+    # (`title_field = item_name`) ko'rinadi va nom bo'yicha tanlanadi.
+    (None, "title_field", "item_name", "Data"),
+    (None, "show_title_field_in_link", "1", "Check"),
 ]
 
 

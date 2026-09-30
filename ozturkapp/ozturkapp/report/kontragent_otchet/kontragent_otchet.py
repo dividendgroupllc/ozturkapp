@@ -42,12 +42,12 @@ def get_columns():
         {"label": _("Kontragent"), "fieldname": "party", "fieldtype": "Dynamic Link", "options": "party_type", "width": 180},
         {"label": _("Kompaniya"), "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 150},
         {"label": _("Akt Sverka"), "fieldname": "akt_sverka", "fieldtype": "HTML", "width": 100},
-        {"label": _("Kredit (dan oldin)"), "fieldname": "opening_credit", "fieldtype": "Currency", "width": 140},
         {"label": _("Debet (dan oldin)"), "fieldname": "opening_debit", "fieldtype": "Currency", "width": 140},
-        {"label": _("Kredit (davr)"), "fieldname": "period_credit", "fieldtype": "Currency", "width": 130},
+        {"label": _("Kredit (dan oldin)"), "fieldname": "opening_credit", "fieldtype": "Currency", "width": 140},
         {"label": _("Debet (davr)"), "fieldname": "period_debit", "fieldtype": "Currency", "width": 130},
-        {"label": _("So'nggi Kredit"), "fieldname": "closing_credit", "fieldtype": "Currency", "width": 130},
-        {"label": _("So'nggi Debet"), "fieldname": "closing_debit", "fieldtype": "Currency", "width": 130}
+        {"label": _("Kredit (davr)"), "fieldname": "period_credit", "fieldtype": "Currency", "width": 130},
+        {"label": _("So'nggi Debet"), "fieldname": "closing_debit", "fieldtype": "Currency", "width": 130},
+        {"label": _("So'nggi Kredit"), "fieldname": "closing_credit", "fieldtype": "Currency", "width": 130}
     ]
 
 
@@ -135,7 +135,12 @@ def _agg_columns():
 
 def _query_party_based(party_type, party, company, from_date, to_date):
     """Customer/Supplier/Employee/Shareholder — party asosida, company bo'yicha ajratib."""
-    conditions = ["gle.party_type = %(party_type)s", "gle.is_cancelled = 0"]
+    conditions = [
+        "gle.party_type = %(party_type)s",
+        "gle.is_cancelled = 0",
+        # to_date dan keyingi yozuvlar hisobga olinmaydi (bo'sh qatorlar chiqmasligi uchun)
+        "gle.posting_date <= %(to_date)s",
+    ]
     if party:
         conditions.append("gle.party = %(party)s")
     if company:

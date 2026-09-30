@@ -8,7 +8,7 @@ Akt Sverka (Kontragent Sverka) Report
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import escape_html, flt, getdate
 
 
 def execute(filters=None):
@@ -53,27 +53,27 @@ def get_columns():
 def get_data(filters):
     data = []
     summary = {
-        "opening_debit": 0, 
-        "opening_credit": 0, 
-        "by_voucher_type": {}, 
+        "opening_debit": 0,
+        "opening_credit": 0,
+        "opening_balance": 0,
+        "by_voucher_type": {},
         "total_debit": 0,
         "total_credit": 0,
         "closing_balance": 0
     }
-    
+
     from_date = filters.get("from_date")
 
     # 1. BOSHLANG'ICH QOLDIQ
-    opening = get_opening_balance(filters)
+    opening = flt(get_opening_balance(filters))
 
-    opening_debit = flt(opening) if opening > 0 else 0
-    opening_credit = abs(flt(opening)) if opening < 0 else 0
-    
+    opening_debit = opening if opening > 0 else 0
+    opening_credit = abs(opening) if opening < 0 else 0
+
     summary["opening_debit"] = opening_debit
     summary["opening_credit"] = opening_credit
-    summary["total_debit"] = opening_debit
-    summary["total_credit"] = opening_credit
-    
+    summary["opening_balance"] = opening
+
     data.append({
         "posting_date": from_date,
         "voucher_type": "",
@@ -82,41 +82,69 @@ def get_data(filters):
         "remarks": "",
         "debit": opening_debit,
         "credit": opening_credit,
-        "balance": flt(opening),
+        "balance": opening,
         "is_opening": 1
     })
 
-    # 2. TRANZAKSIYALAR
+    # 2. TRANZAKSIYALAR (hujjat bo'yicha guruhlangan)
     entries = get_gl_entries(filters)
-    running_balance = flt(opening)
-    
+    remarks_map = get_remarks_batch(entries)
+    running_balance = opening
+
     for e in entries:
         debit = flt(e.debit)
         credit = flt(e.credit)
         running_balance += (debit - credit)
-        
+
+        # Jami = faqat davr aylanmasi (boshlang'ich qoldiqsiz)
         summary["total_debit"] += debit
         summary["total_credit"] += credit
-        
+
         vt = e.voucher_type
         if vt not in summary["by_voucher_type"]:
             summary["by_voucher_type"][vt] = {"debit": 0, "credit": 0}
         summary["by_voucher_type"][vt]["debit"] += debit
         summary["by_voucher_type"][vt]["credit"] += credit
-        
+
         data.append({
             "posting_date": e.posting_date,
             "voucher_type": e.voucher_type,
             "voucher_type_label": get_label(e.voucher_type),
             "voucher_no": e.voucher_no,
-            "remarks": get_remarks(e.voucher_type, e.voucher_no),
+            "remarks": remarks_map.get((e.voucher_type, e.voucher_no), ""),
             "debit": debit,
             "credit": credit,
             "balance": running_balance
         })
-    
+
     summary["closing_balance"] = running_balance
-    
+
+    # 3. JAMI (davr aylanmasi) va YAKUNIY QOLDIQ qatorlari
+    closing_debit = running_balance if running_balance > 0 else 0
+    closing_credit = abs(running_balance) if running_balance < 0 else 0
+    data.append({
+        "posting_date": None,
+        "voucher_type": "",
+        "voucher_type_label": "Jami aylanma",
+        "voucher_no": "",
+        "remarks": "",
+        "debit": summary["total_debit"],
+        "credit": summary["total_credit"],
+        "balance": None,
+        "is_total": 1
+    })
+    data.append({
+        "posting_date": filters.get("to_date"),
+        "voucher_type": "",
+        "voucher_type_label": "Yakuniy qoldiq",
+        "voucher_no": "",
+        "remarks": "",
+        "debit": closing_debit,
+        "credit": closing_credit,
+        "balance": running_balance,
+        "is_total": 1
+    })
+
     return data, summary
 
 
@@ -149,33 +177,59 @@ def get_opening_balance(filters):
 
 
 def get_gl_entries(filters):
+    """GL yozuvlari hujjat (voucher) bo'yicha guruhlangan holda."""
     where_sql, params = _build_scope(filters)
     params = dict(params, from_date=filters.get("from_date"), to_date=filters.get("to_date"))
     return frappe.db.sql(f"""
-        SELECT posting_date, voucher_type, voucher_no, debit, credit
+        SELECT posting_date, voucher_type, voucher_no,
+               SUM(debit) AS debit, SUM(credit) AS credit
         FROM `tabGL Entry`
         WHERE {where_sql} AND posting_date BETWEEN %(from_date)s AND %(to_date)s
-        ORDER BY posting_date, creation
+        GROUP BY posting_date, voucher_type, voucher_no
+        ORDER BY posting_date, MIN(creation)
     """, params, as_dict=True)
 
 
-def get_remarks(voucher_type, voucher_no):
-    if not voucher_type or not voucher_no:
-        return ""
-    try:
-        if voucher_type == "Sales Invoice":
-            items = frappe.db.sql("SELECT item_name FROM `tabSales Invoice Item` WHERE parent = %s LIMIT 2", voucher_no, as_dict=True)
-            return ", ".join([i.item_name for i in items]) if items else ""
-        elif voucher_type == "Purchase Invoice":
-            items = frappe.db.sql("SELECT item_name FROM `tabPurchase Invoice Item` WHERE parent = %s LIMIT 2", voucher_no, as_dict=True)
-            return ", ".join([i.item_name for i in items]) if items else ""
-        elif voucher_type == "Payment Entry":
-            return frappe.db.get_value("Payment Entry", voucher_no, "mode_of_payment") or ""
-        elif voucher_type == "Journal Entry":
-            return frappe.db.get_value("Journal Entry", voucher_no, "user_remark") or ""
-    except:
-        pass
-    return ""
+def get_remarks_batch(entries):
+    """Izohlarni hujjat turi bo'yicha bitta so'rov bilan olish.
+    Qaytaradi: {(voucher_type, voucher_no): izoh}"""
+    by_type = {}
+    for e in entries:
+        if e.voucher_type and e.voucher_no:
+            by_type.setdefault(e.voucher_type, set()).add(e.voucher_no)
+
+    result = {}
+
+    for vt, child in (("Sales Invoice", "Sales Invoice Item"), ("Purchase Invoice", "Purchase Invoice Item")):
+        names = by_type.get(vt)
+        if not names:
+            continue
+        rows = frappe.db.sql(f"""
+            SELECT parent, item_name
+            FROM `tab{child}`
+            WHERE parent IN %(names)s
+            ORDER BY parent, idx
+        """, {"names": tuple(names)}, as_dict=True)
+        items = {}
+        for r in rows:
+            items.setdefault(r.parent, []).append(r.item_name or "")
+        for name, lst in items.items():
+            text = ", ".join(lst[:2])
+            if len(lst) > 2:
+                text += f" (+{len(lst) - 2})"
+            result[(vt, name)] = text
+
+    names = by_type.get("Payment Entry")
+    if names:
+        for r in frappe.get_all("Payment Entry", filters={"name": ["in", list(names)]}, fields=["name", "mode_of_payment"]):
+            result[("Payment Entry", r.name)] = r.mode_of_payment or ""
+
+    names = by_type.get("Journal Entry")
+    if names:
+        for r in frappe.get_all("Journal Entry", filters={"name": ["in", list(names)]}, fields=["name", "user_remark"]):
+            result[("Journal Entry", r.name)] = r.user_remark or ""
+
+    return result
 
 
 def get_label(voucher_type):
@@ -197,16 +251,23 @@ def fmt(val):
 
 def get_report_summary(summary):
     """Pastdagi summary kartalar."""
+    opening = summary.get("opening_balance", 0)
     return [
         {
+            "value": opening,
+            "label": _("Boshlang'ich qoldiq"),
+            "datatype": "Currency",
+            "indicator": "red" if opening < 0 else "blue"
+        },
+        {
             "value": summary.get("total_debit", 0),
-            "label": _("Jami Debet"),
+            "label": _("Davr debeti"),
             "datatype": "Currency",
             "indicator": "blue"
         },
         {
             "value": summary.get("total_credit", 0),
-            "label": _("Jami Kredit"),
+            "label": _("Davr krediti"),
             "datatype": "Currency",
             "indicator": "orange"
         },
@@ -221,9 +282,9 @@ def get_report_summary(summary):
 
 def get_summary_table(summary, filters):
     """1-Jadval - Voucher Type bo'yicha."""
-    party = filters.get("party", "")
-    from_date = filters.get("from_date", "")
-    to_date = filters.get("to_date", "")
+    party = escape_html(filters.get("party") or "")
+    from_date = escape_html(str(filters.get("from_date") or ""))
+    to_date = escape_html(str(filters.get("to_date") or ""))
     
     opening_debit = summary.get("opening_debit", 0)
     opening_credit = summary.get("opening_credit", 0)
@@ -271,7 +332,7 @@ def get_summary_table(summary, filters):
                 </tr>
                 {rows}
                 <tr class="akt-hl" style="background:#d4edda;font-weight:bold;">
-                    <td>JAMI</td>
+                    <td>JAMI aylanma (davr)</td>
                     <td style="text-align:right;">{fmt(summary.get("total_debit", 0))}</td>
                     <td style="text-align:right;">{fmt(summary.get("total_credit", 0))}</td>
                 </tr>

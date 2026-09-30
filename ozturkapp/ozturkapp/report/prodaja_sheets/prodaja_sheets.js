@@ -32,6 +32,12 @@ frappe.query_reports["Prodaja Sheets"] = {
             "label": __("Тип"),
             "fieldtype": "Link",
             "options": "Item Group"
+        },
+        {
+            "fieldname": "branch",
+            "label": __("Филиал"),
+            "fieldtype": "Link",
+            "options": "Branch"
         }
     ],
 

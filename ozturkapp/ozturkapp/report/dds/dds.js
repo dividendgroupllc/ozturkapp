@@ -21,8 +21,12 @@ frappe.query_reports["DDS"] = {
             "options": "Company",
             "default": frappe.defaults.get_user_default("Company"),
             "on_change": function() {
-                frappe.query_report.set_filter_value('mode_of_payment', '');
-                frappe.query_report.refresh();
+                if (frappe.query_report.get_filter_value('mode_of_payment')) {
+                    // mode_of_payment o'zgarishi refresh ni o'zi chaqiradi
+                    frappe.query_report.set_filter_value('mode_of_payment', '');
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {
@@ -46,7 +50,12 @@ frappe.query_reports["DDS"] = {
             "fieldtype": "Select",
             "options": "\nCustomer\nSupplier\nEmployee\nShareholder",
             "on_change": function() {
-                frappe.query_report.set_filter_value('party', '');
+                // on_change avtomatik refresh ni almashtiradi — shuning uchun qo'lda chaqiramiz
+                if (frappe.query_report.get_filter_value('party')) {
+                    frappe.query_report.set_filter_value('party', '');
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {

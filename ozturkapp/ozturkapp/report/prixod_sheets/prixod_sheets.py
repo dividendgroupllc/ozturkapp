@@ -27,10 +27,13 @@ def get_columns():
         {"fieldname": "supplier", "label": _("Етказиб берувчи"), "fieldtype": "Data", "width": 180},
         {"fieldname": "item_name", "label": _("Товар номи"), "fieldtype": "Data", "width": 240},
         {"fieldname": "qty", "label": _("Дона"), "fieldtype": "Float", "width": 100, "precision": 3},
-        {"fieldname": "rate", "label": _("Нархи"), "fieldtype": "Currency", "width": 120},
-        {"fieldname": "amount", "label": _("Суммаси"), "fieldtype": "Currency", "width": 140},
+        {"fieldname": "stock_uom", "label": _("Ўлчов"), "fieldtype": "Data", "width": 70},
+        {"fieldname": "rate", "label": _("Нархи"), "fieldtype": "Currency", "options": "currency", "width": 120},
+        {"fieldname": "amount", "label": _("Суммаси"), "fieldtype": "Currency", "options": "currency", "width": 140},
+        {"fieldname": "is_return", "label": _("Қайтариш"), "fieldtype": "Check", "width": 80},
         {"fieldname": "company", "label": _("Компания"), "fieldtype": "Link", "options": "Company", "width": 150},
         {"fieldname": "purchase_invoice", "label": _("Ҳужжат"), "fieldtype": "Link", "options": "Purchase Invoice", "width": 170},
+        {"fieldname": "currency", "label": _("Валюта"), "fieldtype": "Link", "options": "Currency", "hidden": 1},
     ]
 
 
@@ -44,9 +47,21 @@ def get_data(filters):
     if filters.get("supplier"):
         conditions.append("pi.supplier = %(supplier)s")
         params["supplier"] = filters["supplier"]
+    if filters.get("item_code"):
+        conditions.append("pii.item_code = %(item_code)s")
+        params["item_code"] = filters["item_code"]
+    if filters.get("item_group"):
+        ig = frappe.db.get_value("Item Group", filters["item_group"], ["lft", "rgt"], as_dict=True)
+        if not ig:
+            frappe.throw(_("Товар гуруҳи топилмади: {0}").format(filters["item_group"]))
+        conditions.append(
+            "pii.item_group IN (SELECT name FROM `tabItem Group` WHERE lft >= %(ig_lft)s AND rgt <= %(ig_rgt)s)"
+        )
+        params.update({"ig_lft": ig.lft, "ig_rgt": ig.rgt})
 
     where = " AND ".join(conditions)
 
+    # Miqdor - ombor o'lchov birligida (stock_qty), summa - kompaniya valyutasida (base_*)
     rows = frappe.db.sql(f"""
         SELECT
             pi.name AS purchase_invoice,
@@ -54,11 +69,15 @@ def get_data(filters):
             pi.company,
             IFNULL(pi.supplier_name, pi.supplier) AS supplier,
             pii.item_name,
-            pii.qty,
-            pii.rate,
-            pii.amount
+            pii.stock_qty AS qty,
+            pii.stock_uom,
+            pii.base_amount / NULLIF(pii.stock_qty, 0) AS rate,
+            pii.base_amount AS amount,
+            pi.is_return,
+            comp.default_currency AS currency
         FROM `tabPurchase Invoice Item` pii
         INNER JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent
+        INNER JOIN `tabCompany` comp ON comp.name = pi.company
         WHERE {where}
         ORDER BY pi.posting_date, pi.name, pii.idx
     """, params, as_dict=True)
@@ -66,6 +85,7 @@ def get_data(filters):
     if rows:
         total_qty = sum(flt(r.qty) for r in rows)
         total_amount = sum(flt(r.amount) for r in rows)
+        currencies = {r.currency for r in rows}
         rows.append({
             "purchase_invoice": None,
             "posting_date": None,
@@ -75,6 +95,8 @@ def get_data(filters):
             "qty": total_qty,
             "rate": None,
             "amount": total_amount,
+            "currency": currencies.pop() if len(currencies) == 1 else None,
+            "is_total": 1,
         })
 
     return rows

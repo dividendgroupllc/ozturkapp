@@ -12,8 +12,12 @@ frappe.query_reports["Employee Period Hours"] = {
             // Faqat to'liq HR huquqiga ega foydalanuvchilar uchun ko'rinadi
             hidden: !(frappe.user.has_role("System Manager") || frappe.user.has_role("HR Manager")),
             on_change: function() {
-                frappe.query_report.set_filter_value("employee", "");
-                frappe.query_report.refresh();
+                // Xodim tanlangan bo'lsa - tozalash o'zi refresh qiladi
+                if (frappe.query_report.get_filter_value("employee")) {
+                    frappe.query_report.set_filter_value("employee", "");
+                } else {
+                    frappe.query_report.refresh();
+                }
             }
         },
         {
@@ -57,20 +61,35 @@ frappe.query_reports["Employee Period Hours"] = {
             return `<strong style="font-size: 13px;">${value}</strong>`;
         }
         
-        // Dam olish kuni (Shanba/Yakshanba)
-        if (data.is_weekend && column.fieldname === "day_name") {
+        // Barcha xodimlar jadvali - kun katakchalari
+        if (column.fieldname.startsWith("d_") && value) {
+            const v = String(value);
+            if (v.includes("?")) {
+                return `<span style="color: #dc3545; font-family: monospace;">${v}</span>`;
+            }
+            if (v === "Dam") {
+                return `<span style="color: #6c757d;">${v}</span>`;
+            }
+            if (v !== "—") {
+                return `<span style="font-family: monospace;">${v}</span>`;
+            }
+        }
+
+        // Dam olish kuni (Holiday List bo'yicha)
+        if (data.is_holiday && column.fieldname === "day_name") {
             return `<span style="color: #6c757d;">${value}</span>`;
         }
         
         // Holat ranglari
         if (column.fieldname === "status") {
+            value = String(value || "");
             if (value.includes("Normada")) {
                 return `<span style="color: #28a745;">${value}</span>`;
             }
             if (value.includes("Chiqmagan") || value.includes("Kelmagan")) {
                 return `<span style="color: #dc3545;">${value}</span>`;
             }
-            if (value.includes("Dam olish")) {
+            if (value.includes("Dam olish") || value.includes("Ishda")) {
                 return `<span style="color: #6c757d;">${value}</span>`;
             }
             if (value.includes("Log yo'q")) {
@@ -105,41 +124,41 @@ frappe.query_reports["Employee Period Hours"] = {
     },
 
     onload: function(report) {
-        // Bir marta refresh (faqat birinchi yuklashda)
-        if (!report._initial_loaded) {
-            report._initial_loaded = true;
-            setTimeout(function() {
+        // Sanalarni o'rnatish: qiymat o'zgarsa filtr o'zi refresh qiladi
+        const set_range = function(from_date, to_date) {
+            // Faqat o'zgargan filtrlar o'rnatiladi - oxirgisi bitta refresh qiladi
+            const changed = {};
+            if (frappe.query_report.get_filter_value("from_date") !== from_date) {
+                changed.from_date = from_date;
+            }
+            if (frappe.query_report.get_filter_value("to_date") !== to_date) {
+                changed.to_date = to_date;
+            }
+            if (Object.keys(changed).length) {
+                frappe.query_report.set_filter_value(changed);
+            } else {
                 frappe.query_report.refresh();
-            }, 300);
-        }
-        
+            }
+        };
+
         // Tez filtrlar
         report.page.add_inner_button(__("Bu oy"), function() {
-            frappe.query_report.set_filter_value("from_date", frappe.datetime.month_start());
-            frappe.query_report.set_filter_value("to_date", frappe.datetime.get_today());
-            frappe.query_report.refresh();
+            set_range(frappe.datetime.month_start(), frappe.datetime.get_today());
         });
-        
+
         report.page.add_inner_button(__("O'tgan oy"), function() {
-            const today = frappe.datetime.get_today();
             const firstDayThisMonth = frappe.datetime.month_start();
             const lastDayPrevMonth = frappe.datetime.add_days(firstDayThisMonth, -1);
             const firstDayPrevMonth = frappe.datetime.add_months(firstDayThisMonth, -1);
-            
-            frappe.query_report.set_filter_value("from_date", firstDayPrevMonth);
-            frappe.query_report.set_filter_value("to_date", lastDayPrevMonth);
-            frappe.query_report.refresh();
+            set_range(firstDayPrevMonth, lastDayPrevMonth);
         });
-        
+
         report.page.add_inner_button(__("Bu hafta"), function() {
             const today = frappe.datetime.get_today();
-            const dayOfWeek = new Date(today).getDay();
+            // str_to_obj - mahalliy vaqt (new Date("YYYY-MM-DD") UTC deb o'qiydi)
+            const dayOfWeek = frappe.datetime.str_to_obj(today).getDay();
             const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-            const monday = frappe.datetime.add_days(today, -diff);
-            
-            frappe.query_report.set_filter_value("from_date", monday);
-            frappe.query_report.set_filter_value("to_date", today);
-            frappe.query_report.refresh();
+            set_range(frappe.datetime.add_days(today, -diff), today);
         });
     }
 };
