@@ -40,6 +40,7 @@ def get_columns():
     return [
         {"label": _("Kontragent turi"), "fieldname": "party_type", "fieldtype": "Data", "width": 110},
         {"label": _("Kontragent"), "fieldname": "party", "fieldtype": "Dynamic Link", "options": "party_type", "width": 180},
+        {"label": _("Nomi"), "fieldname": "party_name", "fieldtype": "Data", "width": 180},
         {"label": _("Kompaniya"), "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 150},
         {"label": _("Akt Sverka"), "fieldname": "akt_sverka", "fieldtype": "HTML", "width": 100},
         {"label": _("Debet (dan oldin)"), "fieldname": "opening_debit", "fieldtype": "Currency", "width": 140},
@@ -59,6 +60,7 @@ def get_data(filters):
     company = filters.get("company")
 
     results = _query_party_based(party_type, party, company, from_date, to_date)
+    party_names = get_party_names(party_type, [r.entity for r in results])
 
     data = []
     totals = {"opening_credit": 0, "opening_debit": 0, "period_credit": 0, "period_debit": 0, "closing_credit": 0, "closing_debit": 0}
@@ -87,6 +89,7 @@ def get_data(filters):
         data.append({
             "party_type": party_type,
             "party": r.entity,
+            "party_name": party_names.get(r.entity) or r.entity,
             "company": r.company,
             "akt_sverka": akt_link,
             "opening_credit": opening_credit,
@@ -121,6 +124,20 @@ def get_data(filters):
         })
     
     return data
+
+
+def get_party_names(party_type, parties):
+    """{party: nomi} — ID o'rniga odam o'qiydigan nom (aksioner uchun `title`)."""
+    field = {
+        "Customer": "customer_name",
+        "Supplier": "supplier_name",
+        "Employee": "employee_name",
+        "Shareholder": "title",
+    }.get(party_type)
+    if not field or not parties:
+        return {}
+    rows = frappe.get_all(party_type, filters={"name": ["in", parties]}, fields=["name", field])
+    return {r.name: r.get(field) for r in rows}
 
 
 def _agg_columns():

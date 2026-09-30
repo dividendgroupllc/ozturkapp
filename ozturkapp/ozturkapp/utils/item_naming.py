@@ -85,6 +85,25 @@ def assign_item_code(doc, method=None):
     doc.item_code = next_item_code()
 
 
+def sync_description(doc, method=None):
+    """Nom o'zgarganda eski nomdan iborat tavsifni yangi nomga almashtiradi.
+
+    Tavsif item tanlash ro'yxatida nom ostida ko'rinadi. ERPNext uni faqat
+    yaratishda nomdan to'ldiradi — keyin nom o'zgarsa ("140 gr" -> "110 gr")
+    ro'yxatda eski gramm chiqib qolardi. Qo'lda yozilgan boshqa tavsifga
+    (masalan ichimlik tarkibi) tegilmaydi.
+    """
+    if doc.is_new():
+        return
+    old_name = (frappe.db.get_value("Item", doc.name, "item_name") or "").strip()
+    new_name = (doc.item_name or "").strip()
+    if not new_name or old_name == new_name:
+        return
+    description = frappe.utils.strip_html(doc.description or "").strip()
+    if not description or description == old_name:
+        doc.description = new_name
+
+
 def existing_numbers() -> list:
     """Mavjud `ITEM-####` kodlarning raqamlari."""
     names = frappe.get_all("Item", filters={"name": ["like", f"{PREFIX}%"]}, pluck="name")

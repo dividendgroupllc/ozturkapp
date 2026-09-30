@@ -452,7 +452,12 @@ def get_category_from_party_type(party_type):
 
 
 def get_party_name(party_type, party, ctx=None):
-    field = {"Customer": "customer_name", "Supplier": "supplier_name", "Employee": "employee_name"}.get(party_type)
+    field = {
+        "Customer": "customer_name",
+        "Supplier": "supplier_name",
+        "Employee": "employee_name",
+        "Shareholder": "title",
+    }.get(party_type)
     if not field:
         return party
     cache = ctx.party_name_cache if ctx is not None else {}

@@ -27,7 +27,7 @@ frappe.query_reports["Kontragent Otchet"] = {
             fieldname: "party_type",
             label: __("Kontragent turi"),
             fieldtype: "Select",
-            options: "Customer\nSupplier\nEmployee",
+            options: "Customer\nSupplier\nEmployee\nShareholder",
             default: "Customer",
             reqd: 1,
             on_change: function() {

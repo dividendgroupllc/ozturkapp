@@ -88,6 +88,9 @@ doc_events = {
 	# olmaydi. Batafsil: utils/item_naming.py
 	"Item": {
 		"before_naming": "ozturkapp.ozturkapp.utils.item_naming.assign_item_code",
+		# Nom o'zgarsa, eski nomdan iborat tavsif ham yangilanadi (tavsif
+		# item tanlash ro'yxatida nom ostida ko'rinadi).
+		"validate": "ozturkapp.ozturkapp.utils.item_naming.sync_description",
 	},
 	"Stock Settings": {
 		# ERPNext uni saqlaganda `item_code` ni majburiy qilib qo'yadi —
