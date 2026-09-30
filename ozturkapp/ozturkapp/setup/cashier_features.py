@@ -148,18 +148,6 @@ FEATURES = {
 
 #: Raqamli/matnli sozlamalar — faqat tegishli funksiya yoqilganda ko'rinadi.
 SETTINGS = {
-    "max_cashier_discount_percent": {
-        "fieldname": "custom_max_cashier_discount_percent",
-        "label": "Kassir chegirmasi chegarasi (%)",
-        "fieldtype": "Percent",
-        "default": "10",
-        "depends_on": "custom_enable_cashier_discount",
-        "description": (
-            "Kassir menejer tasdig'isiz qo'ya oladigan eng katta chegirma. "
-            "Undan oshsa menejer PIN-kodi kerak. 0 — har qanday chegirma "
-            "menejer tasdig'ini talab qiladi."
-        ),
-    },
     "cash_payout_approval_limit": {
         "fieldname": "custom_cash_payout_approval_limit",
         "label": "Kassadan chiqarish — tasdiq chegarasi",
@@ -167,8 +155,8 @@ SETTINGS = {
         "default": "0",
         "depends_on": "custom_enable_cash_movements",
         "description": (
-            "Shu summadan oshgan chiqim menejer PIN-kodini talab qiladi. "
-            "0 — har bir chiqim tasdiqlanadi."
+            "Shu summadan oshgan chiqimni faqat menejer bajaradi. "
+            "0 — har bir chiqim menejer tomonidan."
         ),
     },
     "tip_percent_options": {
@@ -235,7 +223,9 @@ def setup():
 #: ular Custom Field bo'lib qolib ketmasin: `create_fields()` ularni o'chiradi.
 #: `custom_enable_kiosk_mode` — to'liq ekran (kiosk) rejimi: foydalanuvchi talabi bilan
 #: butunlay olib tashlandi, sahifa doim oddiy Desk sarlavhasi bilan ochiladi.
-OBSOLETE_FIELDS = ("custom_enable_kiosk_mode",)
+#: `custom_max_cashier_discount_percent` — kassir chegirmasi chegarasi: chegirma
+#: endi menejer PIN-kodisiz qo'yiladi, chegara kerak emas.
+OBSOLETE_FIELDS = ("custom_enable_kiosk_mode", "custom_max_cashier_discount_percent")
 
 
 def _remove_obsolete_fields():
@@ -337,16 +327,7 @@ def get_settings(pos_profile: str) -> dict:
         if part.strip() and flt(part) > 0
     ]
 
-    max_discount = row.get("custom_max_cashier_discount_percent")
-
     return {
-        # `None` (maydon yo'q) va `0` (ataylab nol) farqlanadi: birinchisida
-        # standart 10%, ikkinchisida har qanday chegirma tasdiq talab qiladi.
-        "max_cashier_discount_percent": flt(
-            SETTINGS["max_cashier_discount_percent"]["default"]
-            if max_discount is None
-            else max_discount
-        ),
         "cash_payout_approval_limit": flt(row.get("custom_cash_payout_approval_limit")),
         "tip_percent_options": tips,
     }

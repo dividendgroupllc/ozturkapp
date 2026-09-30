@@ -4,9 +4,8 @@
  *
  * SIYOSAT SERVERDA
  * ================
- * Chegirma summasini ERPNext hisoblaydi (`utils/discounts.py`), kassir
- * chegarasidan oshganini server aniqlaydi va menejer PIN-kodini so'raydi
- * (`ApprovalRequired`). Bu yerda faqat kiritishni yig'amiz: foiz YOKI summa
+ * Chegirma summasini ERPNext hisoblaydi (`utils/discounts.py`); menejer
+ * tasdig'i kerak emas. Bu yerda faqat kiritishni yig'amiz: foiz YOKI summa
  * (ikkalasi birga emas), sabab (majburiy) — va serverning javobini ko'rsatamiz.
  */
 
@@ -37,14 +36,6 @@ function isDiscountable(screen, detail) {
 		!bill.is_return &&
 		cint(bill.item_count) > 0
 	);
-}
-
-/** Kassir chegarasi haqida ko'rsatma matni (`max_cashier_discount_percent`). */
-function limitHint(screen) {
-	const limit = flt((screen.ctx.feature_settings || {}).max_cashier_discount_percent);
-	return limit > 0
-		? __("Kassir chegarasi — {0}%. Undan oshsa menejer PIN-kodi so'raladi.", [fmtQty(limit)])
-		: __("Har qanday chegirma uchun menejer PIN-kodi so'raladi.");
 }
 
 function openDiscountDialog(screen, detail) {
@@ -93,7 +84,6 @@ function openDiscountDialog(screen, detail) {
 		<div class="rc-field">
 			<label class="rc-field__label" data-part="amount-label"></label>
 			<div data-part="amount"></div>
-			<p class="rc-field__hint">${esc(limitHint(screen))}</p>
 		</div>
 		<div class="rc-field">
 			<label class="rc-field__label">${esc(
@@ -148,20 +138,11 @@ function openDiscountDialog(screen, detail) {
 
 		d.setBusy(true);
 		try {
-			const result = await ui.withApproval(
-				(approval) =>
-					screen.call(APPLY, {
-						invoice: bill.invoice,
-						reason,
-						...(mode === "percent" ? { percent: value } : { amount: value }),
-						...(approval ? { approval: JSON.stringify(approval) } : {}),
-					}),
-				{
-					action: __("Chegirma {0}", [
-						mode === "percent" ? `${fmtQty(value)}%` : screen.money(value),
-					]),
-				}
-			);
+			const result = await screen.call(APPLY, {
+				invoice: bill.invoice,
+				reason,
+				...(mode === "percent" ? { percent: value } : { amount: value }),
+			});
 
 			d.close(result);
 			ui.toast(
@@ -173,8 +154,8 @@ function openDiscountDialog(screen, detail) {
 			await screen.refresh({ floor: true, orders: true, panel: true });
 			await offerReprint(screen, result);
 		} catch (error) {
-			// Rad etilgan tasdiq — xato emas: oyna ochiq qoladi, kassir qiymatni o'zgartira oladi.
-			if (!error || !error.cancelled) d.setError(screen.errorText(error));
+			// Oyna ochiq qoladi, kassir qiymatni o'zgartira oladi.
+			d.setError(screen.errorText(error));
 		} finally {
 			d.setBusy(false);
 		}

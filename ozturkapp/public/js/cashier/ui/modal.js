@@ -2,7 +2,7 @@
  * Umumiy modal oyna — to'lov, kassa tarixi, hisobni bo'lish va smena yopish
  * shu bitta oynada ochiladi.
  *
- * Kichik shakl/tasdiq oynalari (`ui.form`, `ui.confirm`, PIN) boshqa —
+ * Kichik shakl/tasdiq oynalari (`ui.form`, `ui.confirm`) boshqa —
  * ular shu oyna USTIDA ochiladi va bir-biriga xalaqit bermaydi.
  */
 

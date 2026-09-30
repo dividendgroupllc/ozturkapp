@@ -78,23 +78,9 @@ class MoneyCase(BillingCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._make_user(cls.MANAGER2, ["URY Manager"], pin="1111")
-        cls._make_user(cls.MANAGER3, ["URY Manager"], pin="2222")
+        cls._make_user(cls.MANAGER2, ["URY Manager"])
+        cls._make_user(cls.MANAGER3, ["URY Manager"])
         cls._make_user(cls.OTHER_CASHIER, ["URY Cashier"])
-
-    def setUp(self):
-        super().setUp()
-        for user in (self.MANAGER2, self.MANAGER3):
-            manager_approval.reset_attempts(user)
-        manager_approval.reset_requester(self.CASHIER)
-
-    def tearDown(self):
-        for user in (self.MANAGER, self.MANAGER2, self.MANAGER3, self.OTHER_CASHIER, self.NOBODY,
-                     "Administrator", "Guest"):
-            manager_approval.reset_attempts(user)
-        for user in (self.CASHIER, self.OTHER_CASHIER):
-            manager_approval.reset_requester(user)
-        super().tearDown()
 
     def _associate(self, user):
         """URY o'z metodlarida `getBranch()` uchun foydalanuvchini filialga biriktiradi."""
@@ -204,7 +190,7 @@ class TestDocumentLevelBypass(MoneyCase):
                 )
 
     def test_refund_approval_cannot_be_bypassed_with_a_hand_made_return(self):
-        """`make_sales_return` + `insert` + `submit` — PIN'siz pul qaytarish."""
+        """`make_sales_return` + `insert` + `submit` — menejersiz pul qaytarish."""
         self._feature(refunds=True)
         paid, _result = self._paid()
         self._as_cashier()
@@ -304,10 +290,12 @@ class TestDocumentLevelBypass(MoneyCase):
         billing.remove_discount(doc.name)
         self._pay(doc.name)
 
-        result = billing.refund_invoice(
-            doc.name, json.dumps([{"name": doc.items[0].name, "qty": 1}]), "shikoyat",
-            approval={"user": self.MANAGER, "pin": self.PIN},
-        )
+        items = json.dumps([{"name": doc.items[0].name, "qty": 1}])
+        with self.assertRaises(ApprovalRequired):                  # qaytarish — faqat menejer
+            billing.refund_invoice(doc.name, items, "shikoyat")
+        frappe.set_user(self.MANAGER)
+        self._flush_caches()
+        result = billing.refund_invoice(doc.name, items, "shikoyat")
         self.assertEqual(result["docstatus"], 1)
         self.assertEqual(frappe.db.get_value("POS Invoice", result["invoice"], "is_return"), 1)
         self.assertFalse(frappe.flags.get(cashier_billing.TRUSTED_FLAG))
@@ -560,7 +548,6 @@ class TestDiscountInputs(MoneyCase):
     def setUp(self):
         super().setUp()
         self._feature(discount=True)
-        self._max_discount(100)          # chegara tasdiqsiz o'tsin — kirish tekshiruvi sinaladi
 
     def test_non_finite_values_are_rejected_cleanly(self):
         doc = self._invoice()
@@ -639,117 +626,67 @@ class TestDiscountInputs(MoneyCase):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Menejer tasdig'i
+#  Menejer amallari (PIN yo'q — faqat rol)
 # ═══════════════════════════════════════════════════════════════════
 
-class TestApprovalHardening(MoneyCase):
-    def setUp(self):
-        super().setUp()
-        self._feature(discount=True)
-        self._max_discount(0)
-        self.doc = self._invoice()
-        self._as_cashier()
+class TestManagerOnlyActions(MoneyCase):
+    """PIN olib tashlangan: menejer amalini boshqa odam nomidan tasdiqlab bo'lmaydi,
+    faqat joriy foydalanuvchining roli hal qiladi."""
 
-    def _try(self, approval):
-        return billing.apply_discount(self.doc.name, percent=20, reason="sabab", approval=approval)
+    ACTION = "Sinov amali"
 
-    def test_malformed_approval_values_ask_for_approval_instead_of_crashing(self):
-        for approval in (
-            "not json", "[]", "5", 5, [], [1, 2], {},
-            {"user": 5, "pin": 1234}, {"user": ["a"], "pin": {"x": 1}}, {"user": None, "pin": None},
-            json.dumps({"user": self.MANAGER}), json.dumps({"pin": self.PIN}),
-        ):
-            with self.subTest(approval=approval):
-                with self.assertRaises(ApprovalRequired):
-                    self._try(approval)
+    def _require(self, user, **kwargs):
+        frappe.set_user(user)
+        self._flush_caches()
+        return manager_approval.require(self.ACTION, **kwargs)
 
-    def test_pin_must_match_exactly(self):
-        for pin in (self.PIN + " x", " ", "٤٣٢١", "4321.0", "04321", "4321\u0000"):
-            with self.subTest(pin=pin):
-                with self.assertRaises(ApprovalRequired):
-                    self._try({"user": self.MANAGER, "pin": pin})
-        manager_approval.reset_attempts(self.MANAGER)
-        manager_approval.reset_requester(self.CASHIER)
-        self.assertEqual(self._try({"user": self.MANAGER, "pin": f"  {self.PIN}  "})["discount_approved_by"], self.MANAGER)
-
-    def test_cashier_cannot_approve_with_own_or_a_cashiers_pin(self):
-        frappe.set_user("Administrator")
-        frappe.db.set_value("User", self.OTHER_CASHIER, "custom_pos_pin", None)
-        from frappe.utils.password import set_encrypted_password
-        set_encrypted_password("User", self.OTHER_CASHIER, "5555", manager_approval.PIN_FIELD)
-        self._as_cashier()
-
-        for user in (self.CASHIER, self.OTHER_CASHIER, self.NOBODY, "Administrator", "Guest"):
+    def test_only_supervisors_pass(self):
+        for user in (self.CASHIER, self.OTHER_CASHIER, self.NOBODY, "Guest"):
             with self.subTest(user=user):
-                with self.assertRaises(ApprovalRequired):
-                    self._try({"user": user, "pin": "5555"})
+                with self.assertRaises(ApprovalRequired) as ctx:
+                    self._require(user)
+                self.assertIn(self.ACTION, str(ctx.exception))
+        for user in (self.MANAGER, self.MANAGER2, "Administrator"):
+            with self.subTest(user=user):
+                self.assertEqual(self._require(user), user)
 
-    def test_a_disabled_or_demoted_manager_can_no_longer_approve(self):
+    def test_a_demoted_manager_can_no_longer_act(self):
         frappe.set_user("Administrator")
-        frappe.db.set_value("User", self.MANAGER2, "enabled", 0)
-        frappe.db.set_value("User", self.MANAGER3, "custom_pos_pin", "2222")
         frappe.db.sql("delete from `tabHas Role` where parent=%s", self.MANAGER3)
         frappe.clear_cache(user=self.MANAGER3)
-        frappe.clear_cache(user=self.MANAGER2)
-        self._as_cashier()
 
         with self.assertRaises(ApprovalRequired):
-            self._try({"user": self.MANAGER2, "pin": "1111"})
-        with self.assertRaises(ApprovalRequired):
-            self._try({"user": self.MANAGER3, "pin": "2222"})
+            self._require(self.MANAGER3)
 
-    def test_guessing_across_managers_is_capped_per_requester(self):
-        """Har menejerga 5 urinishdan 3 menejer = 15 taxmin bo'lmaydi: kassirga umumiy chegara."""
-        managers = (self.MANAGER, self.MANAGER2, self.MANAGER3)
-        attempts = 0
-        for _ in range(manager_approval.MAX_ATTEMPTS):
-            for manager in managers:
-                attempts += 1
-                with self.assertRaises(ApprovalRequired):
-                    self._try({"user": manager, "pin": "0000"})
+    def test_require_takes_no_approval_argument(self):
+        """Eski `{"user", "pin"}` chaqiruvi jimgina "tasdiq" bo'lib o'tib ketmasin."""
+        frappe.set_user(self.CASHIER)
+        with self.assertRaises(TypeError):
+            manager_approval.require(self.ACTION, approval={"user": self.MANAGER, "pin": "4321"})
+        with self.assertRaises(TypeError):                        # eski pozitsion tartib
+            manager_approval.require(self.ACTION, {"user": self.MANAGER, "pin": "4321"},
+                                     "POS Invoice", "X", "sabab")
 
-        self.assertEqual(attempts, 15)
-        total = sum(manager_approval.failed_attempts(m) for m in managers)
-        self.assertLessEqual(total, manager_approval.REQUESTER_MAX_ATTEMPTS)
+    def test_manager_action_is_audited_and_escaped(self):
+        doc = self._invoice()
+        self._require(self.MANAGER, reference_doctype="POS Invoice", reference_name=doc.name,
+                      details="<b>sabab</b>")
 
-        # Endi TO'G'RI PIN ham o'tmaydi: kassir bloklangan.
-        with self.assertRaises(ApprovalRequired) as ctx:
-            self._try({"user": self.MANAGER3, "pin": "2222"})
-        self.assertIn("daqiqa", str(ctx.exception))
-        self.assertTrue(self._stays_unapproved())
-
-    def test_requester_lock_does_not_touch_other_cashiers(self):
-        for _ in range(manager_approval.REQUESTER_MAX_ATTEMPTS + 1):
-            with self.assertRaises(ApprovalRequired):
-                self._try({"user": self.MANAGER, "pin": "0000"})
-        manager_approval.reset_attempts(self.MANAGER)          # menejerning o'z hisobchisi alohida
-
-        frappe.set_user(self.OTHER_CASHIER)
-        self._flush_caches()
-        bill = billing.apply_discount(
-            self.doc.name, percent=20, reason="sabab", approval={"user": self.MANAGER, "pin": self.PIN}
+        content = frappe.db.get_value(
+            "Comment", {"reference_doctype": "POS Invoice", "reference_name": doc.name,
+                        "content": ["like", "%Menejer amali%"]}, "content",
         )
+        self.assertIn(self.ACTION, content)
+        self.assertNotIn("<b>", content)
 
-        self.assertEqual(bill["discount_approved_by"], self.MANAGER)
-
-    def test_unknown_approver_names_leave_no_counter_behind(self):
-        """Cheksiz turli nom bilan kesh kalitlari to'ldirilmasin."""
-        for name in ("no-such-user-1", "no-such-user-2", "x" * 200):
-            with self.assertRaises(ApprovalRequired):
-                self._try({"user": name, "pin": "1234"})
-            self.assertEqual(manager_approval.failed_attempts(name), 0)
-
-    def test_pin_format_accepts_only_ascii_digits(self):
-        frappe.set_user("Administrator")
-        for value in ("١٢٣٤", "12٣٤", "12 34", "123", "123456789", "abcd"):
-            with self.subTest(value=value):
-                doc = frappe._dict({manager_approval.PIN_FIELD: value})
-                with self.assertRaises(frappe.ValidationError):
-                    manager_approval.validate_pin_format(doc)
-        manager_approval.validate_pin_format(frappe._dict({manager_approval.PIN_FIELD: "12345678"}))
-
-    def _stays_unapproved(self) -> bool:
-        return not frappe.db.get_value("POS Invoice", self.doc.name, "custom_discount_approved_by")
+    def test_rejected_request_leaves_no_audit(self):
+        doc = self._invoice()
+        with self.assertRaises(ApprovalRequired):
+            self._require(self.CASHIER, reference_doctype="POS Invoice", reference_name=doc.name)
+        self.assertFalse(frappe.db.exists(
+            "Comment", {"reference_doctype": "POS Invoice", "reference_name": doc.name,
+                        "content": ["like", "%Menejer amali%"]},
+        ))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1182,12 +1119,17 @@ class TestCashMovementEdges(MoneyCase):
         self.assertEqual(accounts[movement.cash_account][1], flt(movement.amount))     # chiqim: kassa kredit
         self.assertEqual(accounts[movement.counter_account][0], flt(movement.amount))
 
-    def test_cash_in_always_needs_approval_and_out_only_above_the_limit(self):
+    def test_cash_in_is_always_manager_only_and_out_only_above_the_limit(self):
         with self.assertRaises(ApprovalRequired):
             self._create(kind="In", amount=1, category="Kassaga qo'shish")
-        self._create(kind="Out", amount=50000)                        # limitning o'zi — tasdiqsiz
+        self._create(kind="Out", amount=50000)                        # limitning o'zi — kassir ham
         with self.assertRaises(ApprovalRequired):
             self._create(kind="Out", amount=50000.01, reason="limitdan yuqori")
+
+        frappe.set_user(self.MANAGER)
+        self._flush_caches()
+        result = cash_movements.create_cash_movement("Out", 50000.01, "Xarajat", "limitdan yuqori")
+        self.assertEqual(result["approved_by"], self.MANAGER)
 
     def test_kind_spelling_is_normalised_but_categories_stay_strict(self):
         self._create(kind="out", amount=1000)
@@ -1222,7 +1164,7 @@ class TestCashMovementEdges(MoneyCase):
         self.assertEqual(pos_closing.get_cash_movements(shift), [])
         self.assertEqual(frappe.db.get_value("Journal Entry", result["journal_entry"], "docstatus"), 2)
 
-    def test_zero_limit_means_every_payout_needs_approval(self):
+    def test_zero_limit_means_every_payout_is_manager_only(self):
         frappe.db.set_value("POS Profile", self.profile,
                             cashier_features.SETTINGS["cash_payout_approval_limit"]["fieldname"], 0)
         with self.assertRaises(ApprovalRequired):
@@ -1267,7 +1209,7 @@ FEATURE_GATES = {
 }
 
 #: Kassa yozuvi o'zgartiradigan endpointlar: HTTP POST'gina.
-GUARDED_MODULES = ("billing", "cashier", "cash_movements", "approval", "printing")
+GUARDED_MODULES = ("billing", "cashier", "cash_movements", "printing")
 
 
 def _whitelisted_functions(module: str) -> dict:
@@ -1327,7 +1269,7 @@ class TestEndpointHygiene(unittest.TestCase):
         base = os.path.join(os.path.dirname(__file__), "..")
         commits, bypasses = [], []
         files = [
-            "api/billing.py", "api/cashier.py", "api/cash_movements.py", "api/printing.py", "api/approval.py",
+            "api/billing.py", "api/cashier.py", "api/cash_movements.py", "api/printing.py",
             "utils/discounts.py", "utils/refunds.py", "utils/cashier_billing.py", "utils/pos_closing.py",
             "utils/shift_report.py", "utils/manager_approval.py", "utils/print_queue.py",
             "doctype/ozturk_cash_movement/ozturk_cash_movement.py",
@@ -1351,13 +1293,15 @@ class TestEndpointHygiene(unittest.TestCase):
             sorted(set(commits)),
             ["utils/manager_approval.py:setup", "utils/print_queue.py:recover_stale"],
         )
-        # Har biri sabablangan: audit izi, tasdiq izi, navbat topshirig'i, kassa harakati, ERPNext ichki yozuvi.
+        # Har biri sabablangan: audit izi, menejer amali izi, eski PIN maydonini o'chirish,
+        # navbat topshirig'i, kassa harakati, ERPNext ichki yozuvi.
         self.assertLessEqual(
             sorted(set(bypasses)),
             sorted([
                 "api/billing.py:_ensure_service_charge",
                 "api/cash_movements.py:create_cash_movement",
                 "utils/manager_approval.py:_audit",
+                "utils/manager_approval.py:remove_pin_field",
                 "utils/print_queue.py:enqueue",
                 "utils/print_queue.py:requeue",
             ]),
@@ -1436,9 +1380,9 @@ class TestClosingArithmetic(MoneyCase):
 
         self._as_cashier()
         cash_movements.create_cash_movement("Out", 3000, "Xarajat", "muz olindi")
-        cash_movements.create_cash_movement(
-            "In", 7000, "Kassaga qo'shish", "mayda pul", approval={"user": self.MANAGER, "pin": self.PIN}
-        )
+        frappe.set_user(self.MANAGER)                                 # kirim — faqat menejer
+        self._flush_caches()
+        cash_movements.create_cash_movement("In", 7000, "Kassaga qo'shish", "mayda pul")
         frappe.set_user("Administrator")
         self._flush_caches()
         result = billing.refund_invoice(

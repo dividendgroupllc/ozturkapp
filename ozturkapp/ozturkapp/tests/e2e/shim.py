@@ -185,7 +185,6 @@ class Shim:
             args = {k: str(v)[:80] for k, v in (frappe.local.form_dict or {}).items() if k != "cmd"}
         except Exception:  # noqa: BLE001
             pass
-        args.pop("approval", None)  # PIN jurnalga tushmasin
 
         self.log.append(
             {

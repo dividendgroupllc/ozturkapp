@@ -124,8 +124,6 @@ def _call_sites(source):
             literal = _balanced(rest, 0, "{", "}")
             for item in _split_top_level(literal[1:-1]):
                 if item.startswith("..."):
-                    if "approvalArgs(" in item:
-                        keys.add("approval")
                     keys.update(re.findall(r"(\w+)\s*:", item))
                 else:
                     keys.add(re.match(r"(\w+)", item).group(1))
@@ -308,6 +306,15 @@ class TestBackendReferences(FrappeTestCase):
         self.assertIn("item.approved_by_name || item.approved_by", code)
         # Foydalanuvchi identifikatori tooltip'da qoladi.
         self.assertIn('title="${esc(item.approved_by || "")}"', code)
+
+    def test_movements_are_recorded_without_a_pin_dialog(self):
+        """Menejer PIN-kodi yo'q: kassir limitdan ortiq yozsa server o'zi rad etadi."""
+        code = _code(_read(os.path.join(_shift_dir(), "movements.js")))
+        self.assertNotIn("withApproval", code)
+        self.assertNotIn("approvalArgs", code)
+        self.assertNotIn("approval:", code)
+        self.assertNotIn("approvalArgs", _read(os.path.join(_shift_dir(), "shared.js")))
+        self.assertIn("faqat menejer", code)
 
     def test_movement_categories_fall_back_to_the_doctype_options(self):
         """Server `categories` bermasa ishlatiladigan zaxira ro'yxat DocType bilan bir xil."""

@@ -17,18 +17,17 @@ import frappe
 from frappe.utils import flt
 
 from ozturkapp.ozturkapp.setup import cashier_features
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, manager_approval
+from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
 
 CASHIER = "e2e-cashier@example.com"
 MANAGER = "e2e-manager@example.com"
 WAITER = "e2e-waiter@example.com"
-PIN = "4321"
 CARD = "Test Karta"
 CASH2 = "Test Naqd 2"
 PRICED_ITEMS = 200
 
 
-def _user(email, roles, pin=None):
+def _user(email, roles):
     doc = frappe.get_doc(
         {
             "doctype": "User",
@@ -39,8 +38,6 @@ def _user(email, roles, pin=None):
             "roles": [{"role": role} for role in roles],
         }
     )
-    if pin:
-        doc.custom_pos_pin = pin
     doc.flags.no_welcome_mail = True
     doc.insert(ignore_permissions=True)
 
@@ -76,7 +73,7 @@ def setup_base():
     )
 
     _user(CASHIER, ["URY Cashier"])
-    _user(MANAGER, ["URY Manager", "URY Cashier"], pin=PIN)
+    _user(MANAGER, ["URY Manager", "URY Cashier"])
     _user(WAITER, ["URY Captain"])
 
     branch_doc = frappe.get_doc("Branch", branch)
@@ -119,11 +116,8 @@ def setup_base():
     for key in cashier_features.FEATURES:
         _set_flag(profile.name, cashier_features.FEATURES[key]["fieldname"], 1)
     frappe.db.set_value("POS Profile", profile.name, "remove_items", 1, update_modified=False)
-    _set_setting(profile.name, "max_cashier_discount_percent", 10)
     _set_setting(profile.name, "cash_payout_approval_limit", 100000)
 
-    manager_approval.reset_attempts(MANAGER)
-    manager_approval.reset_requester(CASHIER)
     frappe.local._ozturk_scope_cache = {}
     return {"branch": branch, "profile": profile.name, "cash_mode": cash_mode.mode_of_payment}
 

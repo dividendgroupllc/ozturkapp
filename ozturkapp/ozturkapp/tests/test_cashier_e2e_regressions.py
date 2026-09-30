@@ -111,7 +111,7 @@ class TestTaxLabel(FrappeTestCase):
 
 
 class TestMoneyFormatInMessages(FrappeTestCase):
-    """E2E `i`: PIN oynasi «Kassadan chiqarish лв 150,000.00» ko'rsatdi.
+    """E2E `i`: menejer xabari «Kassadan chiqarish лв 150,000.00» ko'rsatdi.
 
     `utils/money.py` aynan shu formatni («лв», vergul, `.00`) taqiqlaydi: ekranning o'zi
     «150 000» deb yozadi. Kassir foydalanadigan server xabarlari ham shu qoidaga amal qiladi.
@@ -150,7 +150,7 @@ class TestMoneyFormatInMessages(FrappeTestCase):
             return_value={"cash_payout_approval_limit": 100000},
         ):
             with self.assertRaises(manager_approval.ApprovalRequired):
-                cash_movements._approve(movement, scope, "SHIFT", None)
+                cash_movements._approve(movement, scope, "SHIFT")
 
         text = " ".join(str(entry.get("message")) for entry in frappe.local.message_log)
         self.assertIn("1 250 000", text)

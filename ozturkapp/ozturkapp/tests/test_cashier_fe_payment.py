@@ -9,7 +9,7 @@ Modul: `public/js/cashier/features/payment/` — choychaqa, chegirma va qaytaris
 slot/funksiya nomlari to'qnashmaydimi, JS chaqiradigan serverdagi funksiyalar
 mavjud va `@frappe.whitelist()` bilanmi (parametr nomlari imzoga mos), JS
 o'qiydigan kalitlar serverning `build_bill()` / `get_refundable()` javobida
-bormi. Ko'rinish (1366x768 va 1024x768 ga sig'ish) va oqimlar (PIN, xato
+bormi. Ko'rinish (1366x768 va 1024x768 ga sig'ish) va oqimlar (xato
 matni) haqiqiy Chrome'da sinalgan — bu testlar ularning REGRESSIYASINI ushlaydi.
 """
 
@@ -273,24 +273,26 @@ class TestPaymentSourceRules(FrappeTestCase):
         self.assertIn("bill.tip", tips)
         self.assertIn("tip_percent_options", tips)
 
-    def test_discount_sends_percent_or_amount_never_both_and_asks_approval(self):
+    def test_discount_sends_percent_or_amount_never_both_without_approval(self):
         discount = _code(self.js["discount.js"])
         self.assertIsNotNone(
             re.search(r'\.\.\.\(mode === "percent" \? \{ percent: value \} : \{ amount: value \}\)', discount)
         )
-        self.assertIsNotNone(
-            re.search(r"ui\.withApproval\(\s*\(approval\)\s*=>\s*screen\.call\(APPLY", discount),
-            "chegirma menejer tasdig'i oqimi (`ui.withApproval`) ichida yuborilishi kerak",
-        )
-        self.assertIn("max_cashier_discount_percent", discount)
+        # Chegirma menejer tasdig'isiz: to'g'ridan-to'g'ri `screen.call`, chegara ko'rsatmasi yo'q.
+        self.assertRegex(discount, r"await screen\.call\(APPLY, \{")
+        self.assertNotIn("withApproval", discount)
+        self.assertNotIn("approval", discount)
+        self.assertNotIn("max_cashier_discount_percent", discount)
+        self.assertNotIn("PIN", discount)
         self.assertIn("offerReprint(", discount)
 
-    def test_refund_always_goes_through_manager_approval(self):
+    def test_refund_is_sent_directly_and_the_server_decides(self):
         refunds_js = _code(self.js["refunds.js"])
-        self.assertIsNotNone(
-            re.search(r"ui\.withApproval\(\s*\(approval\)\s*=>\s*screen\.call\(REFUND", refunds_js),
-            "qaytarish HAR DOIM `ui.withApproval` ichida yuborilishi kerak",
-        )
+        # PIN oynasi yo'q: qaytarishni faqat menejer bajaradi, kassirga server rad javobini beradi.
+        self.assertRegex(refunds_js, r"await screen\.call\(REFUND, \{")
+        self.assertNotIn("withApproval", refunds_js)
+        self.assertNotIn("approval", refunds_js)
+        self.assertIn("d.setError(screen.errorText(error))", refunds_js)
         # Qaytariladigan summa oldindan JS'da hisoblanmaydi: faqat serverning javobi ko'rsatiladi.
         self.assertIn("result.refunded", refunds_js)
         self.assertNotIn("rate *", refunds_js)
@@ -344,11 +346,11 @@ class TestPaymentBackendReferences(FrappeTestCase):
         keys = _object_keys(
             _balanced(
                 'x({ invoice: a, reason, ...(m ? { percent: v } : { amount: v }), '
-                '...(ap ? { approval: JSON.stringify(ap) } : {}) })',
+                '...(md ? { mode_of_payment: md } : {}) })',
                 2,
             )
         )
-        self.assertEqual(keys, {"invoice", "reason", "percent", "amount", "approval"})
+        self.assertEqual(keys, {"invoice", "reason", "percent", "amount", "mode_of_payment"})
 
 
 class TestPaymentServerShapes(FrappeTestCase):
@@ -390,7 +392,10 @@ class TestPaymentServerShapes(FrappeTestCase):
 
     def test_settings_the_frontend_reads_are_provided(self):
         settings = cashier_features.get_settings(self.doc.pos_profile)
-        for key in ("tip_percent_options", "max_cashier_discount_percent"):
+        for key in ("tip_percent_options",):
             self.assertIn(key, settings)
             self.assertTrue(any(key in text for text in self.sources.values()), f"{key} JS'da o'qilmaydi")
+        # Kassir chegirmasi chegarasi olib tashlangan: server bermaydi, JS o'qimaydi.
+        self.assertNotIn("max_cashier_discount_percent", settings)
+        self.assertFalse(any("max_cashier_discount_percent" in text for text in self.sources.values()))
         self.assertIsInstance(settings["tip_percent_options"], list)

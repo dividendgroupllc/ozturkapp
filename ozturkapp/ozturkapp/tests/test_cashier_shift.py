@@ -37,7 +37,6 @@ from ozturkapp.ozturkapp.utils import (
     cashier_billing,
     cashier_permissions,
     escpos,
-    manager_approval,
     pos_closing,
     print_queue,
     shift_report,
@@ -47,7 +46,6 @@ from ozturkapp.ozturkapp.utils.manager_approval import ApprovalRequired
 CASHIER = "shift-cashier@example.com"
 OTHER_CASHIER = "shift-cashier2@example.com"
 MANAGER = "shift-manager@example.com"
-PIN = "4321"
 
 SAVEPOINT = "shift_test"
 
@@ -87,7 +85,7 @@ class ShiftTestCase(FrappeTestCase):
         )
         cls._make_user(CASHIER, ["URY Cashier"])
         cls._make_user(OTHER_CASHIER, ["URY Cashier"])
-        cls._make_user(MANAGER, ["URY Manager"], pin=PIN)
+        cls._make_user(MANAGER, ["URY Manager"])
 
         # Qarshi hisob sozlanmagan bo'lsa (setup ishlamagan) shu tranzaksiya ichida qo'yamiz.
         if not frappe.db.get_value("Company", cls.company, "custom_cash_movement_account"):
@@ -95,7 +93,7 @@ class ShiftTestCase(FrappeTestCase):
             frappe.db.set_value("Company", cls.company, "custom_cash_movement_account", account)
 
     @staticmethod
-    def _make_user(email, roles, pin=None):
+    def _make_user(email, roles):
         if frappe.db.exists("User", email):
             frappe.delete_doc("User", email, force=True, ignore_permissions=True)
         doc = frappe.get_doc(
@@ -108,8 +106,6 @@ class ShiftTestCase(FrappeTestCase):
                 "roles": [{"role": role} for role in roles],
             }
         )
-        if pin:
-            doc.custom_pos_pin = pin
         doc.insert(ignore_permissions=True)
 
     def setUp(self):
@@ -117,9 +113,6 @@ class ShiftTestCase(FrappeTestCase):
         frappe.db.savepoint(SAVEPOINT)
         frappe.local._ozturk_scope_cache = {}
         frappe.local._ozturk_payment_methods = {}
-        manager_approval.reset_attempts(MANAGER)
-        for user in (CASHIER, OTHER_CASHIER):
-            manager_approval.reset_requester(user)
 
         self._isolate_payment_methods()
         self.scope = cashier_permissions.resolve_scope("Administrator")
@@ -144,9 +137,6 @@ class ShiftTestCase(FrappeTestCase):
         frappe.set_user("Administrator")
         frappe.db.rollback(save_point=SAVEPOINT)
         frappe.local._ozturk_scope_cache = {}
-        manager_approval.reset_attempts(MANAGER)
-        for user in (CASHIER, OTHER_CASHIER):
-            manager_approval.reset_requester(user)
 
     # ── Sozlamalar ───────────────────────────────────────────────
 
@@ -284,13 +274,11 @@ class ShiftTestCase(FrappeTestCase):
         ).insert(ignore_permissions=True).name
 
     def add_known_movements(self):
-        """Chiqim 30 000 (limitdan past — tasdiqsiz) va kirim 7 000 (menejer tasdig'i bilan)."""
+        """Chiqim 30 000 (limitdan past — kassir) va kirim 7 000 (faqat menejer)."""
         with self.as_user(CASHIER):
             cash_api.create_cash_movement("Out", 30000, "Xarajat", "Muz sotib olindi")
-            cash_api.create_cash_movement(
-                "In", 7000, "Kassaga qo'shish", "Mayda pul keltirildi",
-                approval={"user": MANAGER, "pin": PIN},
-            )
+        with self.as_user(MANAGER):
+            cash_api.create_cash_movement("In", 7000, "Kassaga qo'shish", "Mayda pul keltirildi")
 
     # Ma'lum fikstura bo'yicha kutilgan raqamlar.
     EXPECTED_CASH = 100000 + 88000 + 7000 - 30000   # ochilish + sotuv + kirim - chiqim
@@ -1104,9 +1092,6 @@ class TestCashMovements(ShiftTestCase):
     def count(self):
         return frappe.db.count("Ozturk Cash Movement", {"pos_opening_entry": self.shift})
 
-    def approval(self, pin=PIN):
-        return {"user": MANAGER, "pin": pin}
-
     # ── Yoqish/o'chirish va ruxsat ───────────────────────────────
 
     def test_endpoints_are_gated_by_the_feature(self):
@@ -1175,7 +1160,7 @@ class TestCashMovements(ShiftTestCase):
         self.assertEqual(len(gl), 2)
 
     def test_in_movement_reverses_the_entry(self):
-        result = self.create("In", 7000, "Kassaga qo'shish", "Mayda pul", approval=self.approval())
+        result = self.create("In", 7000, "Kassaga qo'shish", "Mayda pul", user=MANAGER)
 
         journal, rows = self.journal(result["name"])
         counter = frappe.db.get_value("Company", self.company, "custom_cash_movement_account")
@@ -1205,47 +1190,48 @@ class TestCashMovements(ShiftTestCase):
 
     # ── Tasdiq chegarasi ─────────────────────────────────────────
 
-    def test_out_up_to_the_limit_needs_no_approval(self):
+    def test_out_up_to_the_limit_is_allowed_for_a_cashier(self):
         self.set_payout_limit(100000)
         result = self.create("Out", 100000)                          # aynan chegarada
         self.assertFalse(result["approved_by"])
 
-    def test_out_above_the_limit_requires_approval(self):
+    def test_out_above_the_limit_is_manager_only(self):
         self.set_payout_limit(100000)
         with self.assertRaises(ApprovalRequired):
             self.create("Out", 100001)
         self.assertEqual(self.count(), 0)                            # hech narsa yozilmadi
 
-    def test_zero_limit_means_every_payout_needs_approval(self):
+    def test_zero_limit_means_every_payout_is_manager_only(self):
         self.set_payout_limit(0)
         with self.assertRaises(ApprovalRequired):
             self.create("Out", 1)
-        result = self.create("Out", 1, approval=self.approval())
+        result = self.create("Out", 1, user=MANAGER)
         self.assertEqual(result["approved_by"], MANAGER)
 
-    def test_wrong_pin_is_rejected(self):
-        self.set_payout_limit(0)
-        with self.assertRaises(ApprovalRequired):
-            self.create("Out", 500, approval=self.approval(pin="0000"))
-        self.assertEqual(self.count(), 0)
-
-    def test_valid_approval_is_recorded(self):
-        result = self.create("Out", 250000, approval=self.approval())
+    def test_manager_payout_is_recorded(self):
+        result = self.create("Out", 250000, user=MANAGER)
         self.assertEqual(result["approved_by"], MANAGER)
         self.assertEqual(frappe.db.get_value("Ozturk Cash Movement", result["name"], "approved_by"), MANAGER)
         self.assertTrue(frappe.db.exists("Comment", {
             "reference_doctype": "POS Opening Entry", "reference_name": self.shift,
-            "content": ["like", "%Kassadan chiqarish%"],
+            "content": ["like", "%Menejer amali%Kassadan chiqarish%"],
         }))
 
-    def test_cash_in_always_needs_approval_from_a_cashier(self):
-        """Sohta kirim kamomadni yopa olmasin — kirim har doim tasdiqlanadi."""
+    def test_cash_in_is_manager_only(self):
+        """Sohta kirim kamomadni yopa olmasin — kassir kirim yoza olmaydi."""
         self.set_payout_limit(10 ** 9)
         with self.assertRaises(ApprovalRequired):
             self.create("In", 1000, "Kassaga qo'shish", "Mayda pul")
         self.assertEqual(self.count(), 0)
+        result = self.create("In", 1000, "Kassaga qo'shish", "Mayda pul", user=MANAGER)
+        self.assertEqual(result["approved_by"], MANAGER)
 
-    def test_manager_at_the_till_needs_no_pin(self):
+    def test_movement_no_longer_accepts_an_approval_argument(self):
+        with self.assertRaises(TypeError):
+            self.create("Out", 250000, approval={"user": MANAGER, "pin": "4321"})
+        self.assertEqual(self.count(), 0)
+
+    def test_manager_at_the_till_is_not_limited(self):
         self.set_payout_limit(0)
         result = self.create("Out", 500000, user=MANAGER)
         self.assertEqual(result["approved_by"], MANAGER)
@@ -1258,8 +1244,8 @@ class TestCashMovements(ShiftTestCase):
 
     # ── Tekshiruvlar ─────────────────────────────────────────────
 
-    def test_invalid_input_is_rejected_before_asking_for_a_pin(self):
-        self.set_payout_limit(0)                                    # tasdiq har doim kerak bo'lardi
+    def test_invalid_input_is_rejected_before_the_manager_check(self):
+        self.set_payout_limit(0)                                    # har biri menejerga qolardi
         bad = [
             ("Out", 0, "Xarajat", "sabab"),
             ("Out", -5, "Xarajat", "sabab"),

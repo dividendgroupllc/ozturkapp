@@ -5,15 +5,6 @@
  * shulardan foydalanadi.
  */
 
-/** Menejer tasdig'i so'rovi foydalanuvchi tomonidan rad etilganda. */
-export class ApprovalCancelled extends Error {
-	constructor() {
-		super("ApprovalCancelled");
-		this.name = "ApprovalCancelled";
-		this.cancelled = true;
-	}
-}
-
 export function call(method, args) {
 	// `silent: true` — ERPNext'ning O'Z msgprint oynasi CHIQMAYDI
 	// (`frappe/public/js/frappe/request.js:459`). Xatoni sahifaning
@@ -21,48 +12,6 @@ export function call(method, args) {
 	return frappe
 		.call({ method, args: args || {}, freeze: false, silent: true })
 		.then((r) => r.message);
-}
-
-/**
- * Menejer PIN'i Frappe xato hisobotiga tushmasin.
- *
- * Server 500 bersa Frappe «Server Error» oynasini ochadi: «Copy error to clipboard»
- * (yoki sozlangan bo'lsa e-pochta hisoboti) so'rov argumentlarini MATNGA yozadi, PIN
- * ham shunda — menejerning paroli yordam so'ralganda chatga tushib ketardi.
- * `cleanup_request_opts` faqat `password`/`passphrase` kalitlarini yashiradi; PIN esa
- * `approval` kaliti ichida (JSON), shuning uchun o'sha funksiya kengaytiriladi.
- * Faqat hisobot uchun ishlatiladigan nusxaga tegadi — so'rovning o'ziga emas.
- */
-export function maskApprovalInErrorReports() {
-	const request = frappe.request;
-	if (!request || request.ozturkMasksApproval || typeof request.cleanup_request_opts !== "function") {
-		return;
-	}
-
-	const original = request.cleanup_request_opts;
-	request.cleanup_request_opts = function (opts) {
-		const cleaned = original.call(this, opts);
-		if (cleaned && cleaned.args && cleaned.args.approval) cleaned.args.approval = "*****";
-		return cleaned;
-	};
-	request.ozturkMasksApproval = true;
-}
-
-/** Server tashlagan xato turi (`exc_type`), masalan `ApprovalRequired`. */
-function exceptionType(error) {
-	const body = error && (error.responseJSON || error);
-	return (body && body.exc_type) || "";
-}
-
-/**
- * Server menejer tasdig'ini so'radimi?
- *
- * Frappe xatoni JSON'da `exc_type` bilan qaytaradi (`utils/response.py:
- * report_error`), `frappe.call` esa uni **jqXHR** bilan rad etadi — shuning
- * uchun `error.responseJSON.exc_type` o'qiladi.
- */
-export function isApprovalRequired(error) {
-	return exceptionType(error) === "ApprovalRequired";
 }
 
 /**
@@ -121,7 +70,6 @@ function transportText(status) {
 export function errorText(error) {
 	if (!error) return __("Noma'lum xato");
 	if (typeof error === "string") return error;
-	if (error.cancelled) return "";
 
 	const body = error.responseJSON || error;
 

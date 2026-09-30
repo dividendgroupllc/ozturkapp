@@ -377,8 +377,6 @@ export class PaymentMethods {
 				// ko'rinmay qolardi, kassir esa oynani qayta ochib ikkinchi marta
 				// to'lashi mumkin edi.
 				this.setModalLocked(true);
-				// To'lov menejer tasdig'ini HECH QACHON talab qilmaydi (`submit_payment`
-				// `approval` qabul qilmaydi): chegirma/qaytarish o'z oqimida so'raydi.
 				const result = await this.call("ozturkapp.ozturkapp.api.billing.submit_payment", {
 					invoice: bill.invoice,
 					payments: JSON.stringify(session.payments()),

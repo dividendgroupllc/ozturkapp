@@ -264,7 +264,6 @@ class TestPageAssets(FrappeTestCase):
             ("js", "cashier", "core", "layout.js"),
             ("js", "cashier", "kit", "dialog.js"),
             ("js", "cashier", "kit", "keyboard.js"),
-            ("js", "cashier", "kit", "approval.js"),
             ("js", "cashier", "kit", "controls.js"),
         ):
             path = frappe.get_app_path("ozturkapp", "public", *parts)
@@ -455,16 +454,18 @@ class TestCashierFrontendContract(FrappeTestCase):
         # Klaviatura faqat POS Profile bayrog'i yoqilganda.
         self.assertIn("if (kit.virtualKeyboard) this.bindKeyboard()", self._js("kit", "dialog.js"))
 
-    def test_approval_flow_follows_the_server_contract(self):
-        approval = self._js("kit", "approval.js")
-        self.assertIn("ozturkapp.ozturkapp.api.approval.get_approvers", approval)
-        self.assertIn("self_approves", approval)
-        self.assertIn("isApprovalRequired(error)", approval)
-        self.assertIn("ApprovalCancelled", approval)
-        # PIN hech qayerga yozilmaydi.
-        for storage in ("localStorage", "sessionStorage", "console.log"):
-            self.assertNotIn(storage, approval)
-        self.assertIn('exc_type', self._js("core", "api.js"))
+    def test_manager_pin_flow_is_removed(self):
+        """Menejer PIN-kodi olib tashlangan: tasdiq oynasi, uning API'si va uslubi qolmagan."""
+        self.assertFalse(
+            os.path.exists(frappe.get_app_path("ozturkapp", "public", "js", "cashier", "kit", "approval.js"))
+        )
+        source = cashier_page().all_script
+        for token in ("withApproval", "requestApproval", "ApprovalCancelled", "isApprovalRequired",
+                      "maskApprovalInErrorReports", "api.approval.get_approvers", "approvalArgs"):
+            self.assertNotIn(token, source, token)
+        for token in (".rc-pin", ".rc-approver"):
+            self.assertNotIn(token, self.page.style, token)
+        self.assertNotIn("max_cashier_discount_percent", self._js("features", "payment", "discount.js"))
 
     def test_registry_rejects_typos_and_duplicates(self):
         slots = self._js("core", "slots.js")
@@ -719,9 +720,8 @@ class TestCashierFrontendContract(FrappeTestCase):
         self.assertRegex(payment, r'rc-pay__foot">\s*<div class="rc-pay__error"')
 
     def test_payment_confirm_needs_no_manager_approval(self):
-        """`submit_payment` tasdiq qabul qilmaydi — bo'sh `withApproval` o'ramasi yo'q."""
+        """`submit_payment` menejer tasdig'ini qabul qilmaydi — `approval` argumenti yo'q."""
         payment = self._js("ui", "payment.js")
-        self.assertNotIn("withApproval", payment)
         call = re.search(r'this\.call\("ozturkapp\.ozturkapp\.api\.billing\.submit_payment", \{(.*?)\}\);', payment, re.S)
         self.assertIsNotNone(call, "submit_payment chaqiruvi topilmadi")
         self.assertNotIn("approval", call.group(1))

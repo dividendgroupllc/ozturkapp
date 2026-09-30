@@ -73,7 +73,7 @@ def run():
 		# bayroqlari (chegirma, aralash to'lov, stol ko'chirish, ...).
 		# `setup_virtual_keyboard` dan KEYIN: maydonlar shundan keyin joylashadi.
 		setup_cashier_features,
-		# Menejer PIN maydoni (`User.custom_pos_pin`).
+		# Eski menejer PIN maydonini (`User.custom_pos_pin`) o'chiradi.
 		setup_manager_approval,
 		# Item kodi avtomatik (ITEM-####) — `item_code` faqat o'qiladi.
 		# `ury` ning Item sozlamalari (`item_code.reqd=1`) migrate paytida

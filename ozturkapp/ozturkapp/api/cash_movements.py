@@ -10,16 +10,15 @@
 Qoidalar `Ozturk Cash Movement` hujjatida (`doctype/ozturk_cash_movement`);
 bu yerda faqat kim, qachon va qanday tasdiq bilan yoza olishi.
 
-MENEJER TASDIG'I
-================
+FAQAT MENEJER
+=============
     Chiqim (Out)  — summa `cash_payout_approval_limit` dan KATTA bo'lsa
-                    (limit 0 — har bir chiqim tasdiqlanadi);
+                    (limit 0 — har bir chiqim);
     Kirim  (In)   — DOIM (limit yo'q).
 
+Bunday harakatni faqat menejerning o'zi yozadi (`manager_approval.require`).
 Nega kirim ham? Kirim kutilgan summani OSHIRADI. Kassir pul yetmayotganini
-bilsa, sohta «kassaga qo'shish» yozib kamomadni yopa oladi. Amalda kassaga
-mayda pulni baribir menejer olib keladi, shuning uchun uning PIN-kodi
-tabiiy tasdiq. Menejer o'zi kassada ishlasa PIN so'ralmaydi.
+bilsa, sohta «kassaga qo'shish» yozib kamomadni yopa oladi.
 
 BALANS TEKSHIRUVI YO'Q (ataylab)
 ================================
@@ -79,7 +78,7 @@ def get_cash_movements():
 
 
 @frappe.whitelist(methods=["POST"])
-def create_cash_movement(kind, amount, category, reason, approval=None, mode_of_payment=None):
+def create_cash_movement(kind, amount, category, reason, mode_of_payment=None):
     """Kassaga pul kiritish yoki undan chiqarish (Journal Entry bilan).
 
     Args:
@@ -88,8 +87,6 @@ def create_cash_movement(kind, amount, category, reason, approval=None, mode_of_
         category: kirim — «Kassaga qo'shish» | «Boshqa»; chiqim — «Xarajat» |
             «Inkassatsiya» | «Boshqa».
         reason: sabab (kamida 3 belgi) — hisobotga va Journal Entry izohiga tushadi.
-        approval: `{"user", "pin"}` (dict yoki JSON) — menejer tasdig'i
-            (yuqoridagi qoidaga qarang). Kerak bo'lsa `ApprovalRequired`.
         mode_of_payment: naqd usul. Berilmasa profildagi birinchi naqd usul.
 
     Returns:
@@ -118,13 +115,13 @@ def create_cash_movement(kind, amount, category, reason, approval=None, mode_of_
             "posting_datetime": now_datetime(),
         }
     )
-    # Qoidalar buzilgan bo'lsa PIN so'ramaymiz — kassir avval tuzatsin.
+    # Qoidalar buzilgan bo'lsa avval shu xato ko'rinsin.
     doc.validate()
 
     _lock_open_shift(shift)
     _assert_not_duplicate(doc, shift)
 
-    approver = _approve(doc, scope, shift, approval)
+    approver = _approve(doc, scope, shift)
     if approver:
         doc.approved_by = approver
 
@@ -156,8 +153,8 @@ def _lock_open_shift(shift: str):
         frappe.throw(_("Kassa smenasi yopilgan"), title=_("Smena yopiq"))
 
 
-def _approve(doc, scope, shift: str, approval):
-    """Kerak bo'lsa menejer tasdig'ini oladi; tasdiqlagan foydalanuvchini qaytaradi."""
+def _approve(doc, scope, shift: str):
+    """Kerak bo'lsa faqat menejerga ruxsat beradi; menejerni qaytaradi."""
     limit = flt(cashier_features.get_settings(scope.pos_profile)["cash_payout_approval_limit"])
     if doc.kind == KIND_OUT and flt(doc.amount) <= limit:
         return None
@@ -165,7 +162,6 @@ def _approve(doc, scope, shift: str, approval):
     label = _("Kassadan chiqarish") if doc.kind == KIND_OUT else _("Kassaga kiritish")
     return manager_approval.require(
         f"{label} {money.format_amount(doc.amount)}",
-        approval,
         reference_doctype="POS Opening Entry",
         reference_name=shift,
         details=f"{doc.category}: {doc.reason}",

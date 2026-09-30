@@ -205,8 +205,7 @@ def submit_payment(invoice, payments, tip=0):
         payments: `[{"mode_of_payment": "<usul>", "amount": 112000}, ...]`
         tip: choychaqa summasi (faqat `tips` yoqilgan bo'lsa; 0 — choychaqasiz).
 
-    To'lovning o'zi menejer tasdig'ini talab QILMAYDI (chegirma va qaytarish
-    talab qiladi), shuning uchun `approval` parametri yo'q.
+    To'lovning o'zi menejer tasdig'ini talab QILMAYDI.
 
     Muvaffaqiyatli bo'lsa — chek submit bo'ladi, GL yozuvlari yaratiladi va
     stol biznes qoidalariga ko'ra bo'shatiladi. Xato bo'lsa — tranzaksiya
@@ -303,12 +302,11 @@ def submit_payment(invoice, payments, tip=0):
 
 
 @frappe.whitelist()
-def apply_discount(invoice, percent=None, amount=None, reason=None, approval=None):
+def apply_discount(invoice, percent=None, amount=None, reason=None):
     """Chekka chegirma qo'yish (foiz YOKI summa, sabab majburiy).
 
-    Kassir chegarasidan oshsa `ApprovalRequired` — frontend PIN oynasini
-    ochib, shu so'rovni `approval` bilan qayta yuboradi. Qoralama chek
-    bo'lishi shart; `build_bill()` natijasini qaytaradi.
+    Menejer tasdig'i kerak emas. Qoralama chek bo'lishi shart;
+    `build_bill()` natijasini qaytaradi.
     """
     cashier_permissions.require_cashier()
     scope = cashier_permissions.resolve_scope()
@@ -316,7 +314,7 @@ def apply_discount(invoice, percent=None, amount=None, reason=None, approval=Non
     cashier_permissions.assert_shift_open(scope)
     cashier_features.assert_enabled(scope.pos_profile, "discount")
 
-    bill = discounts.apply_discount(invoice, scope, percent, amount, reason, approval)
+    bill = discounts.apply_discount(invoice, scope, percent, amount, reason)
 
     emit_order_change(scope.branch, invoice, "DISCOUNT_APPLIED", bill.get("table"))
     return bill
@@ -365,15 +363,14 @@ def get_refundable(invoice):
 
 
 @frappe.whitelist()
-def refund_invoice(invoice, items, reason, approval=None):
-    """To'langan chekni to'liq yoki qisman qaytarish — HAR DOIM menejer tasdig'i bilan.
+def refund_invoice(invoice, items, reason):
+    """To'langan chekni to'liq yoki qisman qaytarish — faqat menejer.
 
     Args:
         invoice: asl (submit qilingan, qaytarish bo'lmagan) `POS Invoice`.
         items: `[{"name": <asl mahsulot qatori>, "qty": <son>}, ...]`
             (qatorlar `get_refundable()` dan).
         reason: sabab (majburiy).
-        approval: `{"user", "pin"}` — menejerning o'zi kassada bo'lsa shart emas.
 
     Qaytarish cheki JORIY OCHIQ SMENAga tushadi (smena hisobotida manfiy
     sotuv bo'lib ko'rinadi). Mahsulot omborga QAYTMAYDI (`utils/refunds.py`).
@@ -403,7 +400,7 @@ def refund_invoice(invoice, items, reason, approval=None):
             title=_("Qaytarish mumkin emas"),
         )
 
-    return refunds.refund(doc, scope, items, reason, approval)
+    return refunds.refund(doc, scope, items, reason)
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -36,7 +36,6 @@ from ozturkapp.ozturkapp.setup import cashier_features
 from ozturkapp.ozturkapp.utils import (
     cashier_billing,
     cashier_permissions,
-    manager_approval,
     print_queue,
     refunds,
 )
@@ -54,18 +53,17 @@ class BillingCase(FrappeTestCase):
     MANAGER = "bill-manager@example.com"
     CASHIER = "bill-cashier@example.com"
     NOBODY = "bill-nobody@example.com"
-    PIN = "4321"
     CARD = "Test Karta"
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._make_user(cls.MANAGER, ["URY Manager", "URY Cashier"], pin=cls.PIN)
+        cls._make_user(cls.MANAGER, ["URY Manager", "URY Cashier"])
         cls._make_user(cls.CASHIER, ["URY Cashier"])
         cls._make_user(cls.NOBODY, [])
 
     @staticmethod
-    def _make_user(email, roles, pin=None):
+    def _make_user(email, roles):
         if frappe.db.exists("User", email):
             frappe.delete_doc("User", email, force=True, ignore_permissions=True)
         doc = frappe.get_doc(
@@ -78,8 +76,6 @@ class BillingCase(FrappeTestCase):
                 "roles": [{"role": role} for role in roles],
             }
         )
-        if pin:
-            doc.custom_pos_pin = pin
         doc.insert(ignore_permissions=True)
 
     def setUp(self):
@@ -110,8 +106,6 @@ class BillingCase(FrappeTestCase):
         for key in MONEY_FEATURES:
             self._feature(**{key: False})
         self._add_card_mode()
-        manager_approval.reset_attempts(self.MANAGER)
-        manager_approval.reset_requester(self.CASHIER)
 
     def tearDown(self):
         frappe.set_user("Administrator")
@@ -134,15 +128,6 @@ class BillingCase(FrappeTestCase):
                 1 if enabled else 0,
                 update_modified=False,
             )
-
-    def _max_discount(self, percent):
-        frappe.db.set_value(
-            "POS Profile",
-            self.profile,
-            cashier_features.SETTINGS["max_cashier_discount_percent"]["fieldname"],
-            percent,
-            update_modified=False,
-        )
 
     def _add_card_mode(self):
         """Naqd bo'lmagan usul: aralash to'lov va ortiqcha to'lov qoidalari uchun."""
@@ -251,9 +236,6 @@ class BillingCase(FrappeTestCase):
         doc = self._invoice(**invoice_kwargs)
         result = self._pay(doc.name)
         return frappe.get_doc("POS Invoice", doc.name), result
-
-    def _approval(self, pin=None):
-        return {"user": self.MANAGER, "pin": pin or self.PIN}
 
     def _as_cashier(self):
         frappe.set_user(self.CASHIER)
@@ -650,7 +632,6 @@ class TestDiscount(BillingCase):
     def setUp(self):
         super().setUp()
         self._feature(discount=True)
-        self._max_discount(10)
 
     def test_feature_off_is_rejected(self):
         self._feature(discount=False)
@@ -682,7 +663,6 @@ class TestDiscount(BillingCase):
 
     def test_amount_discount_is_exact_and_stored_as_percent(self):
         doc = self._invoice(lines=((3, 11111), (3, 11111)))
-        self._max_discount(50)
 
         billing.apply_discount(doc.name, amount=7777, reason="Kechikish uchun")
 
@@ -713,68 +693,42 @@ class TestDiscount(BillingCase):
                 billing.apply_discount(doc.name, reason="x", **kwargs)
         self.assertEqual(flt(frappe.get_doc("POS Invoice", doc.name).discount_amount), 0)
 
-    def test_limit_itself_needs_no_approval_but_above_it_does(self):
+    def test_cashier_applies_any_discount_without_approval(self):
+        """Kassir chegarasi yo'q: 100% dan kichik har qanday chegirma tasdiqsiz."""
         doc = self._invoice()
         self._as_cashier()
 
-        billing.apply_discount(doc.name, percent=10, reason="Chegara")  # aynan chegara
-        with self.assertRaises(ApprovalRequired):
-            billing.apply_discount(doc.name, percent=10.5, reason="Chegaradan oshdi")
-        self.assertEqual(flt(frappe.get_doc("POS Invoice", doc.name).additional_discount_percentage), 10)
+        for percent in (1, 10.5, 30, 99):
+            with self.subTest(percent=percent):
+                bill = billing.apply_discount(doc.name, percent=percent, reason="Kassir")
+                self.assertEqual(bill["discount_percent"], percent)
+                self.assertEqual(bill["discount_approved_by"], "")
+        fresh = frappe.get_doc("POS Invoice", doc.name)
+        self.assertEqual(flt(fresh.additional_discount_percentage), 99)
+        self.assertFalse(fresh.custom_discount_approved_by)
 
-    def test_amount_is_judged_by_its_effective_percent(self):
+    def test_cashier_amount_discount_needs_no_approval(self):
         doc = self._invoice()
         self._as_cashier()
 
-        billing.apply_discount(doc.name, amount=6000, reason="10% ga teng")
-        with self.assertRaises(ApprovalRequired):
-            billing.apply_discount(doc.name, amount=6100, reason="10% dan oshadi")
+        bill = billing.apply_discount(doc.name, amount=30000, reason="Yarim narx")
 
-    def test_zero_limit_means_every_discount_needs_approval(self):
-        self._max_discount(0)
+        self.assertEqual(bill["discount"], 30000)
+        self.assertEqual(bill["discount_approved_by"], "")
+
+    def test_discount_no_longer_accepts_an_approval_argument(self):
         doc = self._invoice()
-        self._as_cashier()
-        with self.assertRaises(ApprovalRequired):
-            billing.apply_discount(doc.name, percent=1, reason="x")
+        with self.assertRaises(TypeError):
+            billing.apply_discount(doc.name, percent=5, reason="x", approval={"user": self.MANAGER})
 
-        billing.apply_discount(doc.name, percent=1, reason="x", approval=self._approval())
-        self.assertEqual(frappe.db.get_value("POS Invoice", doc.name, "custom_discount_approved_by"), self.MANAGER)
-
-    def test_missing_wrong_and_correct_pin(self):
-        doc = self._invoice()
-        self._as_cashier()
-
-        with self.assertRaises(ApprovalRequired):
-            billing.apply_discount(doc.name, percent=30, reason="x")
-        with self.assertRaises(ApprovalRequired):
-            billing.apply_discount(doc.name, percent=30, reason="x", approval=self._approval("0000"))
-        self.assertEqual(flt(frappe.get_doc("POS Invoice", doc.name).discount_amount), 0)
-
-        bill = billing.apply_discount(
-            doc.name, percent=30, reason="Menejer ruxsati", approval=json.dumps(self._approval())
-        )
-
-        self.assertEqual(bill["discount_percent"], 30)
-        self.assertEqual(bill["discount_approved_by"], self.MANAGER)
-        self.assertTrue(
-            frappe.db.exists(
-                "Comment",
-                {
-                    "reference_doctype": "POS Invoice",
-                    "reference_name": doc.name,
-                    "content": ["like", "%Chegirma 30%"],
-                },
-            )
-        )
-
-    def test_manager_at_the_till_needs_no_pin(self):
+    def test_manager_discount_is_not_marked_as_approved(self):
         doc = self._invoice()
         frappe.set_user(self.MANAGER)
         self._flush_caches()
 
         bill = billing.apply_discount(doc.name, percent=40, reason="Menejer")
 
-        self.assertEqual(bill["discount_approved_by"], self.MANAGER)
+        self.assertEqual(bill["discount_approved_by"], "")
 
     def test_new_discount_replaces_the_old_one(self):
         doc = self._invoice()
@@ -785,14 +739,6 @@ class TestDiscount(BillingCase):
         self.assertEqual(flt(fresh.additional_discount_percentage), 8)
         self.assertEqual(flt(fresh.discount_amount), 4800)
         self.assertEqual(fresh.custom_discount_reason, "b")
-
-    def test_within_limit_discount_clears_a_previous_approver(self):
-        doc = self._invoice()
-        self._as_cashier()
-        billing.apply_discount(doc.name, percent=30, reason="a", approval=self._approval())
-        billing.apply_discount(doc.name, percent=5, reason="b")
-
-        self.assertFalse(frappe.db.get_value("POS Invoice", doc.name, "custom_discount_approved_by"))
 
     def test_remove_discount_restores_the_totals_and_is_idempotent(self):
         doc = self._invoice()
@@ -1088,23 +1034,29 @@ class TestRefunds(BillingCase):
             with self.assertRaises(frappe.ValidationError):
                 self._refund(doc, {self.items[0]: 1}, reason=reason)
 
-    def test_manager_approval_is_always_required_for_a_cashier(self):
+    def test_cashier_is_rejected_and_manager_succeeds(self):
         doc, _result = self._paid()
         self._as_cashier()
 
         with self.assertRaises(ApprovalRequired):
             self._refund(doc, {self.items[0]: 1})
-        with self.assertRaises(ApprovalRequired):
-            self._refund(doc, {self.items[0]: 1}, approval=self._approval("0000"))
         self.assertFalse(frappe.db.exists("POS Invoice", {"return_against": doc.name}))
 
-        result = self._refund(doc, {self.items[0]: 1}, approval=self._approval())
+        frappe.set_user(self.MANAGER)
+        self._flush_caches()
+        result = self._refund(doc, {self.items[0]: 1})
         self.assertEqual(result["approved_by"], self.MANAGER)
 
-    def test_approval_is_audited_on_the_original_invoice(self):
+    def test_refund_no_longer_accepts_an_approval_argument(self):
         doc, _result = self._paid()
-        self._as_cashier()
-        self._refund(doc, {self.items[0]: 1}, reason="Sifatsiz", approval=self._approval())
+        with self.assertRaises(TypeError):
+            self._refund(doc, {self.items[0]: 1}, approval={"user": self.MANAGER, "pin": "4321"})
+
+    def test_manager_refund_is_audited_on_the_original_invoice(self):
+        doc, _result = self._paid()
+        frappe.set_user(self.MANAGER)
+        self._flush_caches()
+        self._refund(doc, {self.items[0]: 1}, reason="Sifatsiz")
 
         self.assertTrue(
             frappe.db.exists(
@@ -1112,7 +1064,7 @@ class TestRefunds(BillingCase):
                 {
                     "reference_doctype": "POS Invoice",
                     "reference_name": doc.name,
-                    "content": ["like", "%Chekni qaytarish%"],
+                    "content": ["like", "%Menejer amali%Chekni qaytarish%Sifatsiz%"],
                 },
             )
         )

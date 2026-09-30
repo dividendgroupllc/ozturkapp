@@ -128,28 +128,3 @@
 .rc-toast--orange { border-left-color: var(--rc-reserved); }
 .rc-toast--blue   { border-left-color: var(--rc-accent); }
 
-/* ═══ Menejer tasdig'i ═════════════════════════════════════════ */
-
-.rc-approvers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.rc-approver {
-	display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 12px;
-	border: 2px solid var(--rc-line); border-radius: var(--rc-radius);
-	background: var(--rc-surface); color: var(--rc-text);
-	font-size: 16px; font-weight: 700; text-align: left; cursor: pointer;
-}
-.rc-approver:hover { border-color: var(--rc-accent); }
-.rc-approver__avatar {
-	flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%;
-	display: inline-flex; align-items: center; justify-content: center;
-	background: var(--rc-accent-soft); color: var(--rc-accent-ink); font-size: 18px; font-weight: 800;
-}
-.rc-approver__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-
-.rc-pin { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.rc-pin__who { font-size: 16px; font-weight: 700; }
-.rc-pin__dots { display: flex; gap: 12px; min-height: 22px; }
-.rc-pin__dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--rc-muted); }
-.rc-pin__dot--on { background: var(--rc-text); border-color: var(--rc-text); }
-.rc-pin__hint { min-height: 20px; font-size: 14px; font-weight: 600; color: var(--rc-occupied-ink); }
-.rc-numpad--pin { width: min(320px, 100%); }
-.rc-numpad--pin .rc-numpad__key { min-height: 66px; }

@@ -37,7 +37,7 @@ public/js/cashier/
                              va `ozturk.cashier` nomlar fazosini e'lon qiladi
   core/   screen · realtime · helpers · api · prefs · build · mixin
           slots · features · shortcuts · layout
-  kit/    dialog · controls · keyboard · approval · context · index   (UI to'plami)
+  kit/    dialog · controls · keyboard · context · index   (UI to'plami)
   ui/     topbar · menu · floor · panel · orders · actions · split · modal
           payment · history · shift · shortcuts                       (ekranlar)
   util/   format.js          esc, money, groupAmount, parseAmount, elapsed*, ...
@@ -100,7 +100,7 @@ kelmasligi va reestrlar bo'linib ketmasligi uchun).
 | `ozturk.cashier.features` | funksiya reestri (§5) |
 | `ozturk.cashier.slots` | kengaytma nuqtalari (§6) |
 | `ozturk.cashier.ui` | UI to'plami (§7) |
-| `ozturk.cashier.api` | `call(method, args)`, `errorText(error)`, `isApprovalRequired(error)`, `ApprovalCancelled` |
+| `ozturk.cashier.api` | `call(method, args)`, `errorText(error)` |
 | `ozturk.cashier.util` | `esc`, `money`, `num`, `fmtQty`, `groupAmount`, `parseAmount`, `bindAmountInput`, `hhmm`, `elapsedHtml`, `elapsedLevel`, `formatElapsed` |
 | `ozturk.cashier.BUILD` | yig'ma hash'i (`«⋯»` menyusi tagida ko'rinadi) |
 
@@ -135,7 +135,7 @@ screen.call(method, args) -> Promise<message>      (silent: xato ekranda o'zi ch
                                                     xato jqXHR bilan rad etiladi — `errorText(e)`)
 screen.money(v)           "1 080 800"
 screen.errorText(e)       o'qiladigan xato matni
-screen.alertError(e)      xatoni toast qiladi (rad etilgan tasdiq — xato emas)
+screen.alertError(e)      xatoni toast qiladi
 screen.busy(button, bool) tugmani band qiladi. `data-locked="1"` tugma `busy(false)` dan keyin ham
                           o'chiq qoladi (`PaymentSession.setConfirmEnabled` shunga tayanadi)
 screen.readPreference(k) / writePreference(k, v)   qurilma sozlamasi (localStorage)
@@ -321,7 +321,7 @@ raqam paneli va pastki qator (xato, `payment.footer`, «To'lovni tasdiqlash») j
 ## 7. UI to'plami — `ozturk.cashier.ui`
 
 Hammasi sensorli (48px+ nishonlar), ekran klaviaturasiga tayyor, `.rc-root` ichida
-chiziladi (Desk uslubi tushmaydi). Kichik oynalar STEK: to'lov oynasi ustida PIN
+chiziladi (Desk uslubi tushmaydi). Kichik oynalar STEK: to'lov oynasi ustida boshqa
 oynasi ochilishi mumkin; `Esc` eng ustkisini yopadi.
 
 ```js
@@ -354,10 +354,6 @@ ui.chips({ options, value?, multiple?, columns?, onChange?, other?: { label, pla
 ui.amountInput({ value?, onChange?(number), label? }) -> { el, value(), set(n), focus() }
     // "1 080 800" guruhlanadi, kursor joyida qoladi (to'lov/sanoq maydonlari bilan bir xil mantiq)
 
-ui.requestApproval(actionLabel, { error? }) -> Promise<{ user, pin } | null>
-ui.withApproval(fn, { action? })            -> Promise<natija>     // fn: async (approval|null) => natija
-ui.ApprovalCancelled                          // withApproval foydalanuvchi bekor qilganda tashlaydi
-
 ui.keyboard.numpad({ inputs? }) -> HTMLElement      // oyna ichiga qo'yiladigan raqam paneli; `el.bind(input)` keyin maydon ulaydi
 ui.keyboard.TextKeyboard(host, { onEnter })        // matn klaviaturasi (o'zbek lotin / kirill / belgi / raqam)
 ui.keyboard.insertText(input, text) / backspace(input)
@@ -386,29 +382,12 @@ maydonlarida — katta raqam paneli. Tugmalar fokusni olmaydi. O'chiq bo'lsa —
 faqat brauzerning o'z klaviaturasi. Maydonlar `data-vk="text|numeric|tel"` bilan
 belgilanadi (`ui.form` o'zi qo'yadi); o'z maydoningizga shu atributni bering.
 
-### Menejer tasdig'i
+### Menejer amallari
 
-```js
-try {
-	await ui.withApproval(
-		(approval) => screen.call("ozturkapp.ozturkapp.api.billing.apply_discount", {
-			invoice, percent, reason, ...(approval ? { approval: JSON.stringify(approval) } : {}),
-		}),
-		{ action: __("Chegirma {0}%", [percent]) }
-	);
-} catch (error) { screen.alertError(error); }   // ApprovalCancelled xato sifatida ko'rinmaydi
-```
-
-* `fn(null)` avval tasdiqsiz chaqiriladi. Server `exc_type == "ApprovalRequired"`
-  (`error.responseJSON.exc_type`) qaytarsa — menejer ismi tanlanadi, PIN kiritiladi
-  va `fn({user, pin})` qayta chaqiriladi; PIN noto'g'ri bo'lsa server yana
-  `ApprovalRequired` beradi — oyna xato matni bilan qayta ochiladi.
-* Menejerlar ro'yxati (`approval.get_approvers`) 1 daqiqa keshlanadi. Foydalanuvchining
-  o'zi menejer (`self_approves`) bo'lsa HECH NARSA so'ralmaydi.
-* **Server talabi:** `ApprovalRequired` `frappe.throw(msg, exc=ApprovalRequired)`
-  bilan tashlanishi kerak. Oddiy `raise ApprovalRequired(msg)` da xabar JSON'ga
-  tushmaydi va Frappe 403 da o'zining «Not permitted» oynasini (`silent` bo'lsa
-  ham) ochib yuboradi.
+Chegirma tasdiq talab qilmaydi. Qaytarish va limitdan katta kassa harakatini
+faqat menejer (URY Manager / System Manager) bajaradi — kassirga server
+`ApprovalRequired` («faqat menejer bajara oladi») bilan rad javobini beradi.
+Menejer PIN-kodi yo'q.
 
 ## 8. Ko'rinish: CSS o'zgaruvchilari va DOM kelishuvlari
 

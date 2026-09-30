@@ -29,7 +29,7 @@ class Harness {
 		this.shared = {};
 	}
 
-	/** Shu qadamda KUTILGAN non-2xx javob (masalan PIN so'ralganda 403 ApprovalRequired). */
+	/** Shu qadamda KUTILGAN non-2xx javob (masalan kassir qaytarish qilganda 403 ApprovalRequired). */
 	expect(method, status, excType = "") {
 		this.expected.push({ scenario: this.scenario, step: this.stepName, method, status, excType });
 	}

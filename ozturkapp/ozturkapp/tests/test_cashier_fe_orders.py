@@ -290,11 +290,11 @@ class TestBackendReference(FrappeTestCase):
         )
 
     def test_remove_item_has_no_approval_flow(self):
-        """`remove_item` menejer PIN-i so'ramaydi (`ApprovalRequired` tashlamaydi).
+        """`remove_item` menejer tasdig'ini so'ramaydi (`ApprovalRequired` tashlamaydi).
 
         Oshxona boshlagan taomni faqat menejer roli sabab bilan olib tashlaydi, oddiy
-        kassirga esa xabar ko'rsatiladi. Server PIN oqimini qo'shsa, bu test JS ham
-        `ui.withApproval` ga o'tishi kerakligini eslatadi.
+        kassirga esa xabar ko'rsatiladi. Menejer PIN-kodi (va `ui.withApproval`)
+        butunlay olib tashlangan — qaytib kelmasin.
         """
         self.assertNotIn("approval", inspect.signature(cashier_orders.remove_item).parameters)
         self.assertNotIn("manager_approval", inspect.getsource(cashier_orders.remove_item))

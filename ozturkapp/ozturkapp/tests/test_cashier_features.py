@@ -2,7 +2,7 @@
 # Copyright (c) 2026, Ozturkapp
 # License: MIT
 
-"""Kassa funksiyalari reestri va menejer PIN-tasdig'i testlari.
+"""Kassa funksiyalari reestri va menejer amallari (faqat rol, PIN yo'q) testlari.
 
 Ishga tushirish::
 
@@ -15,7 +15,6 @@ import json
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from ozturkapp.ozturkapp.api import approval as approval_api
 from ozturkapp.ozturkapp.api import cashier as cashier_api
 from ozturkapp.ozturkapp.setup import cashier_features
 from ozturkapp.ozturkapp.utils import cashier_permissions, manager_approval
@@ -85,21 +84,15 @@ class TestFeatureRegistry(FrappeTestCase):
         with self.assertRaises(KeyError):
             cashier_features.is_enabled(self.profile, "does_not_exist")
 
-    def test_explicit_zero_discount_limit_is_not_replaced_by_default(self):
-        """`0` — ataylab nol (hamma chegirma tasdiq talab qiladi), standart 10 emas."""
-        field = cashier_features.SETTINGS["max_cashier_discount_percent"]["fieldname"]
-        original = frappe.db.get_value("POS Profile", self.profile, field)
-        try:
-            frappe.db.set_value("POS Profile", self.profile, field, 0)
-            self.assertEqual(
-                cashier_features.get_settings(self.profile)["max_cashier_discount_percent"], 0
-            )
-            frappe.db.set_value("POS Profile", self.profile, field, 7.5)
-            self.assertEqual(
-                cashier_features.get_settings(self.profile)["max_cashier_discount_percent"], 7.5
-            )
-        finally:
-            frappe.db.set_value("POS Profile", self.profile, field, original or 0)
+    def test_cashier_discount_limit_setting_is_gone(self):
+        """Chegirma menejer tasdig'isiz — kassir chegarasi sozlamasi olib tashlangan."""
+        self.assertNotIn("max_cashier_discount_percent", cashier_features.SETTINGS)
+        self.assertNotIn("max_cashier_discount_percent", cashier_features.get_settings(self.profile))
+        self.assertIn("custom_max_cashier_discount_percent", cashier_features.OBSOLETE_FIELDS)
+        self.assertFalse(
+            frappe.db.exists("Custom Field", "POS Profile-custom_max_cashier_discount_percent"),
+            "Eskirgan Custom Field o'chirilishi kerak (bench execute ...cashier_features.setup)",
+        )
 
     def test_tip_options_are_parsed_and_junk_is_dropped(self):
         field = cashier_features.SETTINGS["tip_percent_options"]["fieldname"]
@@ -144,7 +137,7 @@ class TestNoCollisionWithOtherApps(FrappeTestCase):
         foreign = self._foreign_fields()
         ours = [f["fieldname"] for f in cashier_features.FEATURES.values()]
         ours += [s["fieldname"] for s in cashier_features.SETTINGS.values()]
-        ours += [cashier_features.SECTION_FIELD, manager_approval.PIN_FIELD]
+        ours += [cashier_features.SECTION_FIELD]
         self.assertEqual([name for name in ours if name in foreign], [])
 
     def test_ury_discount_field_keeps_its_own_definition(self):
@@ -219,7 +212,10 @@ class TestKioskModeIsGone(FrappeTestCase):
             cashier_features._remove_obsolete_fields()
         delete.assert_not_called()
 
-        with mock.patch.object(frappe.db, "get_value", return_value=ours), mock.patch.object(
+        # Ro'yxatda bir nechta eskirgan maydon bor — bu yerda bittasi bilan sinaymiz.
+        with mock.patch.object(
+            cashier_features, "OBSOLETE_FIELDS", ("custom_enable_kiosk_mode",)
+        ), mock.patch.object(frappe.db, "get_value", return_value=ours), mock.patch.object(
             frappe, "delete_doc"
         ) as delete:
             cashier_features._remove_obsolete_fields()
@@ -227,21 +223,20 @@ class TestKioskModeIsGone(FrappeTestCase):
         self.assertEqual(delete.call_args.args[:2], ("Custom Field", ours.name))
 
 
-class TestManagerApproval(FrappeTestCase):
+class TestManagerOnly(FrappeTestCase):
+    """Menejer amali: PIN yo'q — joriy foydalanuvchi menejer bo'lsagina o'tadi."""
+
     MANAGER = "pin-manager@example.com"
     CASHIER = "pin-cashier@example.com"
-    OTHER_CASHIER = "pin-cashier2@example.com"
-    PIN = "4321"
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.manager = cls._make_user(cls.MANAGER, ["URY Manager"], pin=cls.PIN)
+        cls.manager = cls._make_user(cls.MANAGER, ["URY Manager"])
         cls.cashier = cls._make_user(cls.CASHIER, ["URY Cashier"])
-        cls.other_cashier = cls._make_user(cls.OTHER_CASHIER, ["URY Cashier"])
 
     @staticmethod
-    def _make_user(email, roles, pin=None):
+    def _make_user(email, roles):
         if frappe.db.exists("User", email):
             frappe.delete_doc("User", email, force=True, ignore_permissions=True)
         doc = frappe.get_doc(
@@ -254,145 +249,87 @@ class TestManagerApproval(FrappeTestCase):
                 "roles": [{"role": role} for role in roles],
             }
         )
-        if pin:
-            doc.custom_pos_pin = pin
         doc.insert(ignore_permissions=True)
         return doc
 
     def setUp(self):
-        self._reset_counters()
         frappe.set_user(self.CASHIER)
-
-    def _reset_counters(self):
-        """Menejer hisobchisi VA so'rovchi (kassir) hisobchisi — ikkalasi ham kesh'da saqlanadi."""
-        manager_approval.reset_attempts(self.MANAGER)
-        for user in (self.CASHIER, self.OTHER_CASHIER):
-            manager_approval.reset_requester(user)
 
     def tearDown(self):
         frappe.set_user("Administrator")
-        self._reset_counters()
 
-    def _require(self, pin=None, user=None, **kwargs):
-        approval = {"user": user or self.MANAGER, "pin": pin} if pin is not None else None
-        return manager_approval.require("Sinov amali", approval, **kwargs)
-
-    def test_missing_approval_raises_approval_required(self):
-        with self.assertRaises(ApprovalRequired):
-            self._require()
-
-    def test_correct_pin_returns_the_manager(self):
-        self.assertEqual(self._require(pin=self.PIN), self.MANAGER)
-
-    def test_wrong_pin_is_rejected(self):
-        with self.assertRaises(ApprovalRequired):
-            self._require(pin="0000")
-
-    def test_pin_is_accepted_as_json_string(self):
-        approval = json.dumps({"user": self.MANAGER, "pin": self.PIN})
-        self.assertEqual(manager_approval.require("Sinov", approval), self.MANAGER)
-
-    def test_lockout_after_too_many_failures_even_with_correct_pin(self):
-        for _ in range(manager_approval.MAX_ATTEMPTS):
-            with self.assertRaises(ApprovalRequired):
-                self._require(pin="0000")
-        with self.assertRaises(ApprovalRequired) as ctx:
-            self._require(pin=self.PIN)  # to'g'ri PIN ham o'tmaydi — bloklangan
-        self.assertIn("daqiqa", str(ctx.exception))
-
-    def test_success_resets_failure_counter(self):
-        for _ in range(manager_approval.MAX_ATTEMPTS - 1):
-            with self.assertRaises(ApprovalRequired):
-                self._require(pin="0000")
-        self.assertEqual(self._require(pin=self.PIN), self.MANAGER)
-        with self.assertRaises(ApprovalRequired):
-            self._require(pin="0000")  # hisob qaytadan boshlangan — bloklanmagan
-        self.assertEqual(self._require(pin=self.PIN), self.MANAGER)
-
-    def test_requester_cap_spans_all_managers(self):
-        """Har menejerga alohida 5 urinish emas: kassirga jami `REQUESTER_MAX_ATTEMPTS` ta."""
-        second = "pin-manager2@example.com"
-        self._make_user(second, ["URY Manager"], pin="7777")
-        for index in range(manager_approval.REQUESTER_MAX_ATTEMPTS):
-            with self.assertRaises(ApprovalRequired):
-                self._require(pin="0000", user=self.MANAGER if index % 2 else second)
-        with self.assertRaises(ApprovalRequired) as ctx:
-            self._require(pin="7777", user=second)          # to'g'ri PIN ham o'tmaydi
-        self.assertIn("daqiqa", str(ctx.exception))
-        manager_approval.reset_attempts(second)
-
-    def test_non_manager_cannot_approve_even_with_a_pin(self):
-        cashier_pin = "5555"
-        frappe.db.set_value("User", self.CASHIER, "custom_pos_pin", None)
-        from frappe.utils.password import set_encrypted_password
-
-        set_encrypted_password("User", self.CASHIER, cashier_pin, manager_approval.PIN_FIELD)
-        frappe.set_user(self.OTHER_CASHIER)  # boshqa KASSIR so'rayapti (menejer emas)
-        with self.assertRaises(ApprovalRequired):
-            manager_approval.require("Sinov", {"user": self.CASHIER, "pin": cashier_pin})
-
-    def test_unknown_user_looks_the_same_as_wrong_pin(self):
-        with self.assertRaises(ApprovalRequired) as ctx:
-            self._require(pin="1234", user="nobody@example.com")
-        self.assertIn("noto'g'ri", str(ctx.exception))
-
-    def test_cashier_cannot_approve_own_action(self):
-        with self.assertRaises(ApprovalRequired):
-            manager_approval.require("Sinov", {"user": self.CASHIER, "pin": "1234"})
-
-    def test_manager_at_the_till_needs_no_pin(self):
-        frappe.set_user(self.MANAGER)
-        self.assertEqual(manager_approval.require("Sinov", None), self.MANAGER)
-
-    def test_disabled_manager_cannot_approve(self):
-        frappe.db.set_value("User", self.MANAGER, "enabled", 0)
-        try:
-            with self.assertRaises(ApprovalRequired):
-                self._require(pin=self.PIN)
-        finally:
-            frappe.db.set_value("User", self.MANAGER, "enabled", 1)
-
-    def test_pin_format_is_validated_on_save(self):
-        doc = frappe.get_doc("User", self.MANAGER)
-        for bad in ("12", "abcd", "123456789", "12 34"):
-            doc.custom_pos_pin = bad
-            with self.assertRaises(frappe.ValidationError):
-                manager_approval.validate_pin_format(doc)
-        doc.custom_pos_pin = "987654"
-        manager_approval.validate_pin_format(doc)  # xato bermaydi
-
-    def test_masked_pin_is_not_revalidated(self):
-        doc = frappe.get_doc("User", self.MANAGER)
-        doc.custom_pos_pin = "*****"
-        manager_approval.validate_pin_format(doc)  # o'zgarmagan parol — xato emas
-
-    def test_approver_list_never_contains_the_pin(self):
-        result = manager_approval.list_approvers()
-        users = {row["user"] for row in result}
-        self.assertIn(self.MANAGER, users)
-        self.assertNotIn(self.CASHIER, users)
-        for row in result:
-            self.assertEqual(set(row), {"user", "full_name"})
-
-    def test_audit_comment_is_written_on_success(self):
+    def _invoice(self):
         invoice = frappe.db.get_value("POS Invoice", {}, "name")
         if not invoice:
             self.skipTest("POS Invoice yo'q")
-        self._require(pin=self.PIN, reference_doctype="POS Invoice", reference_name=invoice)
-        self.assertTrue(
-            frappe.db.exists(
-                "Comment",
-                {
-                    "reference_doctype": "POS Invoice",
-                    "reference_name": invoice,
-                    "content": ["like", "%Sinov amali%"],
-                },
-            )
+        return invoice
+
+    def _comment_exists(self, invoice, text="%Sinov amali%"):
+        return frappe.db.exists(
+            "Comment",
+            {"reference_doctype": "POS Invoice", "reference_name": invoice, "content": ["like", text]},
         )
 
-    def test_api_lists_approvers_for_a_cashier(self):
+    def test_cashier_is_rejected(self):
+        with self.assertRaises(ApprovalRequired) as ctx:
+            manager_approval.require("Sinov amali")
+        self.assertIn("faqat menejer", str(ctx.exception))
+        self.assertIn("Sinov amali", str(ctx.exception))
+
+    def test_approval_required_is_a_403_validation_error(self):
+        self.assertTrue(issubclass(ApprovalRequired, frappe.ValidationError))
+        self.assertEqual(ApprovalRequired.http_status_code, 403)
+
+    def test_manager_at_the_till_passes(self):
+        frappe.set_user(self.MANAGER)
+        self.assertTrue(cashier_permissions.has_supervisor_role())
+        self.assertEqual(manager_approval.require("Sinov"), self.MANAGER)
+
+    def test_system_manager_passes(self):
         frappe.set_user("Administrator")
-        result = approval_api.get_approvers()
-        self.assertIn("approvers", result)
-        self.assertIn("self_approves", result)
-        self.assertNotIn("pin", json.dumps(result).lower())
+        self.assertEqual(manager_approval.require("Sinov"), "Administrator")
+
+    def test_someone_elses_pin_cannot_be_passed_any_more(self):
+        """Eski `approval={"user", "pin"}` parametri yo'q — kassir menejer nomidan o'ta olmaydi."""
+        with self.assertRaises(TypeError):
+            manager_approval.require("Sinov", approval={"user": self.MANAGER, "pin": "4321"})
+
+    def test_audit_comment_is_written_on_success(self):
+        invoice = self._invoice()
+        frappe.set_user(self.MANAGER)
+        manager_approval.require(
+            "Sinov amali", reference_doctype="POS Invoice", reference_name=invoice, details="sabab"
+        )
+        self.assertTrue(self._comment_exists(invoice, "%Menejer amali%Sinov amali%sabab%"))
+
+    def test_no_audit_comment_when_rejected(self):
+        invoice = self._invoice()
+        with self.assertRaises(ApprovalRequired):
+            manager_approval.require(
+                "Sinov amali (rad)", reference_doctype="POS Invoice", reference_name=invoice
+            )
+        self.assertFalse(self._comment_exists(invoice, "%Sinov amali (rad)%"))
+
+
+class TestPinIsGone(FrappeTestCase):
+    """Menejer PIN-kodi foydalanuvchi talabi bilan butunlay olib tashlangan."""
+
+    def test_user_has_no_pin_field(self):
+        self.assertEqual(manager_approval.OBSOLETE_PIN_FIELD, "custom_pos_pin")
+        self.assertFalse(frappe.get_meta("User").has_field("custom_pos_pin"))
+        self.assertFalse(
+            frappe.db.exists("Custom Field", {"dt": "User", "fieldname": "custom_pos_pin"}),
+            "Eskirgan maydon o'chirilishi kerak (bench execute ...manager_approval.setup)",
+        )
+
+    def test_user_validate_hook_is_removed(self):
+        hooks = frappe.get_hooks("doc_events").get("User", {})
+        self.assertNotIn("validate_pin_format", json.dumps(hooks))
+
+    def test_approver_api_is_removed(self):
+        import importlib.util
+
+        self.assertIsNone(importlib.util.find_spec("ozturkapp.ozturkapp.api.approval"))
+        for name in ("list_approvers", "validate_pin_format", "reset_attempts", "reset_requester",
+                     "failed_attempts", "PIN_FIELD", "MAX_ATTEMPTS", "REQUESTER_MAX_ATTEMPTS"):
+            self.assertFalse(hasattr(manager_approval, name), name)

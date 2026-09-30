@@ -381,7 +381,7 @@ export class PanelMethods {
 	 * `panel.more` amallarini katta qatorli varaqda ko'rsatadi.
 	 *
 	 * Qator bosilganda varaq YOPILADI va amal shundan keyin ishga tushadi —
-	 * amal o'z oynasini (forma, PIN) ochsa, u varaq ustiga emas, o'zi turadi.
+	 * amal o'z oynasini (forma) ochsa, u varaq ustiga emas, o'zi turadi.
 	 * `button` sifatida panel tagidagi «Yana ⋯» tugmasi uzatiladi: u varaqdan
 	 * tashqarida turadi, shuning uchun `screen.busy(button, true)` ko'rinib turadi.
 	 */

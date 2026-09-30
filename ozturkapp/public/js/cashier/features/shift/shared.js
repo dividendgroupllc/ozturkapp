@@ -29,8 +29,3 @@ export function noOverlay(screen) {
 export function isHidden(value) {
 	return value === null || value === undefined;
 }
-
-/** `withApproval` bergan tasdiqni serverga uzatiladigan ko'rinishga aylantiradi. */
-export function approvalArgs(approval) {
-	return approval ? { approval: JSON.stringify(approval) } : {};
-}

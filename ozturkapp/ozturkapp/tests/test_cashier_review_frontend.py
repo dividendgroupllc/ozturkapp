@@ -8,7 +8,7 @@ Har test SHARHDA TASDIQLANGAN nuqsonni qulflaydi. Ikki qatlam:
 
 1. HAQIQIY BRAUZERDA (headless Chrome, `file://` sahifa, esbuild yig'ma) — xulq:
    `errorText` XSS, `parseAmount`/`money` saytning raqam formatidan mustaqilligi,
-   `withApproval` tsikli, oyna fokusi, eskirgan javob himoyasi, qayta yangilash
+   menejer rad javobi matni, oyna fokusi, eskirgan javob himoyasi, qayta yangilash
    kechikishi. Chrome yoki esbuild yo'q bo'lsa bu testlar o'tkazib yuboriladi.
 2. MANBA MATNI bo'yicha — brauzersiz tekshirib bo'lmaydigan yoki yopishqoq qoidalar
    (CSS zaxiralari, README, taqiqlangan API ro'yxati).
@@ -76,9 +76,8 @@ def _js_sources():
 # global'lari: `__`, `cint`, `flt` (`#.###,##` formatini TAQLID qiladi — Frappe'ning haqiqiy
 # `flt("1234.5")` i shunda 12345 beradi), `frappe.call`.
 ENTRY = r"""
-import { errorText, maskApprovalInErrorReports } from "__ROOT__/core/api.js";
+import { errorText } from "__ROOT__/core/api.js";
 import { money, num, fmtQty, groupAmount, parseAmount, bindAmountInput } from "__ROOT__/util/format.js";
-import { withApproval } from "__ROOT__/kit/approval.js";
 import { ui } from "__ROOT__/kit/index.js";
 import { closeTop, trapTab } from "__ROOT__/kit/dialog.js";
 import { CashierScreen } from "__ROOT__/core/screen.js";
@@ -111,12 +110,8 @@ async function main() {
 	out.errJs = errorText(new Error("Izoh juda uzun"));
 	out.errObject = errorText({ foo: 1 });
 
-	// ── Menejer PIN'i Frappe xato hisobotiga tushmasin ─────────
-	window.frappe.request = { cleanup_request_opts(opts) { opts.args.password = "*****"; return opts; } };
-	maskApprovalInErrorReports();
-	maskApprovalInErrorReports();
-	const cleaned = window.frappe.request.cleanup_request_opts({ args: { approval: JSON.stringify({ user: "m", pin: "482913" }), invoice: "X", password: "p" } });
-	out.pinReport = { approval: cleaned.args.approval, invoice: cleaned.args.invoice, password: cleaned.args.password };
+	// ── Menejer amali: server 403 + `ApprovalRequired` — «Sessiya tugagan» emas, o'z xabari ──
+	out.errManagerOnly = errorText({ status: 403, responseJSON: { exc_type: "ApprovalRequired", _server_messages: JSON.stringify([JSON.stringify({ message: "«Chekni qaytarish» ni faqat menejer bajara oladi." })]) } });
 
 	// ── summa: saytning raqam formati (#.###,##) ga bog'liq emas ──
 	out.parse = ["1234,5", "1 234,5", "1234.5", "1 080 800", "-5", "abc", "", "0005", "1,5,5"].map(parseAmount);
@@ -135,18 +130,6 @@ async function main() {
 	out.typedMinus = type("-5x0y0");
 	out.typedHuge = type("123456789012345678901");
 	out.typedComma = type("1234,567");
-
-	// ── withApproval: menejer o'zi tasdiqlagan, server baribir so'raydi ──
-	let calls = 0;
-	window.frappe.call = () => Promise.resolve({ message: { self_approves: true, approvers: [] } });
-	const required = () => { const e = new Error("ApprovalRequired"); e.responseJSON = { exc_type: "ApprovalRequired", _server_messages: JSON.stringify([JSON.stringify({ message: "Tasdiq kerak" })]) }; return e; };
-	try {
-		await withApproval(async () => { calls += 1; if (calls > 50) throw new Error("LOOP"); throw required(); });
-		out.approval = "resolved";
-	} catch (error) {
-		out.approval = error.message;
-	}
-	out.approvalCalls = calls;
 
 	// ── Dialog: Tab oyna ichida aylanadi, fokus qaytadi, band oyna Esc bilan yopilmaydi ──
 	const opener = document.createElement("button");
@@ -338,13 +321,10 @@ class TestBrowserBehaviour(FrappeTestCase):
         self.assertEqual(r["errJs"], "Izoh juda uzun")
         self.assertNotIn("[object Object]", r["errObject"])
 
-    def test_manager_pin_never_reaches_the_frappe_error_report(self):
-        """500 da Frappe «Copy error to clipboard» so'rov argumentlarini matnga yozadi:
-        `approval` ichidagi PIN yashirilishi kerak (Frappe faqat `password` kalitini yashiradi)."""
-        report = self.result["pinReport"]
-        self.assertEqual(report["approval"], "*****")
-        self.assertEqual(report["invoice"], "X")
-        self.assertEqual(report["password"], "*****")  # Frappe'ning o'z niqobi buzilmagan
+    def test_manager_only_rejection_shows_the_server_message(self):
+        """Kassir qaytarish/katta chiqim qilsa server 403 `ApprovalRequired` beradi: kassir
+        «Sessiya tugagan» emas, «faqat menejer bajara oladi» matnini ko'rishi kerak."""
+        self.assertEqual(self.result["errManagerOnly"], "«Chekni qaytarish» ni faqat menejer bajara oladi.")
 
     # ── summa ────────────────────────────────────────────────────
 
@@ -374,14 +354,6 @@ class TestBrowserBehaviour(FrappeTestCase):
         self.assertEqual(self.result["typedMinus"], "500")
         self.assertEqual(self.result["typedHuge"], "123 456 789 012")
         self.assertEqual(self.result["typedComma"], "1 234,56")
-
-    # ── withApproval ─────────────────────────────────────────────
-
-    def test_with_approval_does_not_hammer_the_server(self):
-        """Menejer o'zi tasdiqlagan (`self_approves`), server baribir so'rasa — cheksiz
-        qayta yuborish soniyasiga yuzlab so'rov bo'lardi."""
-        self.assertEqual(self.result["approvalCalls"], 2)
-        self.assertEqual(self.result["approval"], "ApprovalRequired")
 
     # ── oyna ─────────────────────────────────────────────────────
 
@@ -500,8 +472,12 @@ class TestSourceRules(FrappeTestCase):
         body = menu[menu.index("openMenu()") : menu.index("closeMenu()")]
         self.assertNotIn("setTimeout", body)
 
-    def test_bundle_installs_the_pin_mask_at_load(self):
-        self.assertIn("maskApprovalInErrorReports();", _read("cashier.bundle.js"))
+    def test_bundle_has_no_manager_pin_flow(self):
+        """Menejer PIN-kodi olib tashlangan: tasdiq oynasi ham, xato hisobotidagi niqob ham yo'q."""
+        bundle = _read("cashier.bundle.js")
+        for token in ("maskApprovalInErrorReports", "isApprovalRequired", "ApprovalCancelled"):
+            self.assertNotIn(token, bundle)
+        self.assertFalse(os.path.exists(os.path.join(JS_ROOT, "kit", "approval.js")))
 
     def test_floor_is_not_redrawn_in_the_middle_of_a_table_drag(self):
         """Sudrash paytida realtime yangilash stolni DOM'dan olib tashlasa `pointerup` unga
@@ -534,9 +510,6 @@ class TestSourceRules(FrappeTestCase):
         for path in (("ui", "menu.js"), ("ui", "topbar.js")):
             self.assertRegex(_code(*path), r"refreshAll\(\)\.catch\(")
         self.assertRegex(_code("ui", "panel.js"), r"screen\.refreshAll\(\)\.catch\(")
-
-    def test_with_approval_stops_after_a_self_approval_is_refused(self):
-        self.assertIn('approval.pin === ""', _read("kit", "approval.js"))
 
     def test_modal_has_a_real_label_and_traps_tab(self):
         self.assertIn('.attr("aria-label", title)', _read("ui", "modal.js"))

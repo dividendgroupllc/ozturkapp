@@ -5,17 +5,16 @@
  * SIYOSAT SERVERDA
  * ================
  * Qaytariladigan summani, usullar bo'yicha taqsimotni va choychaqa qoidasini
- * `utils/refunds.py` hisoblaydi. Qaytarish HAR DOIM menejer PIN-kodini talab
- * qiladi (`ui.withApproval`) va sabab majburiy. Bu yerda faqat tanlangan
- * qatorlar va sabab yig'iladi; qaytariladigan summa TASDIQLASHDAN KEYIN serverdan
+ * `utils/refunds.py` hisoblaydi. Qaytarishni faqat menejer bajaradi (kassirga
+ * server rad javobini beradi) va sabab majburiy. Bu yerda faqat tanlangan
+ * qatorlar va sabab yig'iladi; qaytariladigan summa QAYTARILGANDAN KEYIN serverdan
  * ko'rsatiladi — oldindan qo'lda hisoblanmaydi.
  *
  * QAYTARISH USULI
  * ===============
  * Pul asl to'lov usullariga qaytadi. Usulda `allow_in_returns` o'chiq bo'lsa
- * server qaytarishni rad etadi — lekin faqat PIN kiritilgandan KEYIN. Bunday
- * usul aniq bo'lsa (`get_refundable().paid`) kassirga oldindan aytiladi va
- * tugma yoqilmaydi: menejer bekorga PIN kiritmasin.
+ * server qaytarishni rad etadi. Bunday usul aniq bo'lsa (`get_refundable().paid`)
+ * oldindan aytiladi va tugma yoqilmaydi.
  */
 
 const { slots, ui, util } = ozturk.cashier;
@@ -214,16 +213,11 @@ function refundDialog(screen, info) {
 		const payload = picked().map(([name, qty]) => ({ name, qty }));
 		d.setBusy(true);
 		try {
-			const result = await ui.withApproval(
-				(approval) =>
-					screen.call(REFUND, {
-						invoice: info.invoice,
-						items: JSON.stringify(payload),
-						reason,
-						...(approval ? { approval: JSON.stringify(approval) } : {}),
-					}),
-				{ action: __("Chekni qaytarish · {0}", [info.invoice]) }
-			);
+			const result = await screen.call(REFUND, {
+				invoice: info.invoice,
+				items: JSON.stringify(payload),
+				reason,
+			});
 
 			d.close(result);
 			const by = (result.payments || []).map((row) => row.mode_of_payment).join(", ");
@@ -235,8 +229,7 @@ function refundDialog(screen, info) {
 			// Ro'yxat qayta yuklanadi: qaytarish cheki (manfiy summa) unda paydo bo'ladi.
 			await screen.openHistoryModal();
 		} catch (error) {
-			// Rad etilgan tasdiq — xato emas: oyna ochiq qoladi.
-			if (!error || !error.cancelled) d.setError(screen.errorText(error));
+			d.setError(screen.errorText(error));
 		} finally {
 			d.setBusy(false);
 			paint();

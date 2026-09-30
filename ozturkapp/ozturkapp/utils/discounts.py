@@ -28,10 +28,8 @@ summaga aniq teng chiqadi (testda tekshirilgan).
 
 SIYOSAT
 =======
-Kassir chegarasi — `POS Profile.custom_max_cashier_discount_percent`.
-Undan oshsa menejer PIN-kodi kerak (`manager_approval.require`). Chegara 0
-bo'lsa har qanday chegirma tasdiq talab qiladi. Chegaraning o'zi (teng
-foiz) tasdiqsiz o'tadi.
+Kassir istalgan chegirmani (100% dan kichik) menejer tasdig'isiz qo'yadi —
+sabab majburiy va chek tarixida qoladi.
 
 100% VA UNDAN KATTA CHEGIRMA QABUL QILINMAYDI
 =============================================
@@ -54,8 +52,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from ozturkapp.ozturkapp.setup import cashier_features
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, manager_approval
+from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
 
 AUDIT_COLUMNS = ("custom_discount_reason", "custom_discount_approved_by", "custom_reprint_needed")
 
@@ -134,7 +131,7 @@ def effective_percent(doc, percent=None, amount=None) -> float:
     return value
 
 
-def apply_discount(invoice, scope, percent=None, amount=None, reason=None, approval=None):
+def apply_discount(invoice, scope, percent=None, amount=None, reason=None):
     """Chekka chegirma qo'yadi (yoki almashtiradi). `build_bill()` natijasini qaytaradi."""
     _assert_fields_ready()
 
@@ -145,13 +142,6 @@ def apply_discount(invoice, scope, percent=None, amount=None, reason=None, appro
     doc = _load_draft(invoice, scope)
     value = effective_percent(doc, percent, amount)
 
-    limit = cashier_features.get_settings(scope.pos_profile)["max_cashier_discount_percent"]
-    approver = None
-    if flt(value, 6) > flt(limit, 6):
-        approver = manager_approval.require(
-            _("Chegirma {0}%").format(f"{flt(value, 2):g}"), approval, "POS Invoice", doc.name, reason
-        )
-
     # Choychaqa to'lov paytida qo'yiladi va mutlaq summa — chegirma o'zgarsa
     # eskirgan choychaqa qolib ketmasligi uchun olib tashlanadi.
     cashier_billing.set_tip(doc, 0)
@@ -160,7 +150,7 @@ def apply_discount(invoice, scope, percent=None, amount=None, reason=None, appro
     doc.discount_amount = 0
     doc.additional_discount_percentage = value
     doc.custom_discount_reason = reason
-    doc.custom_discount_approved_by = approver
+    doc.custom_discount_approved_by = None
     _mark_stale_bill(doc)
     with cashier_billing.trusted_billing():
         doc.save()

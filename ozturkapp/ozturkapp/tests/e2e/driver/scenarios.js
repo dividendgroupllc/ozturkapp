@@ -1,7 +1,6 @@
 // E2E senariylari (haqiqiy interfeys + haqiqiy backend, shim tranzaksiyasi ichida).
 const CASHIER = "e2e-cashier@example.com";
 const MANAGER = "e2e-manager@example.com";
-const PIN = "4321";
 const WAITER = "e2e-waiter@example.com";
 
 
@@ -51,12 +50,11 @@ async function openOrdersList(h) {
 
 const printJobs = (h, type) => h.sql("select name, job_type, status, printer, ref_name, reason from `tabOzturk Print Job` where job_type = %s order by creation", [type]);
 
-/** Menejer PIN oynasi: raqamlar bosiladi va «✓». */
-async function enterPin(h, pin, { submit = true } = {}) {
-	await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 8000, "PIN oynasi");
-	for (const digit of pin) await h.click(".rc-numpad__key", digit, { scope: ".rc-dialog", last: true, exact: true, settle: 60 });
-	if (submit) await h.click(".rc-numpad__key", "✓", { scope: ".rc-dialog", last: true, exact: true });
-}
+/** Menejer PIN oynasi olib tashlangan — sahifada hech qayerda bo'lmasligi kerak. */
+const noPinDialog = async (h) => !(await h.eval(`!!document.querySelector(".rc-pin, .rc-approver")`));
+
+/** Eng ustki oynadagi xato matni (`d.setError`). */
+const dialogError = (h) => h.eval(`(() => { const d = [...document.querySelectorAll(".rc-dialog")].pop(); const e = d && d.querySelector(".rc-dialog__error"); return e ? e.innerText.trim() : ""; })()`);
 
 /** «Yana ⋯» varag'idan amal tanlaydi. */
 async function moreAction(h, label) {
@@ -346,7 +344,7 @@ scenarios.c = {
 
 
 scenarios.d = {
-	title: "Chegirma: chegaradan oshsa -> ApprovalRequired -> PIN (noto'g'ri, keyin to'g'ri) -> qayta hisob, chop etish belgisi",
+	title: "Chegirma: kassir istalgan chegirmani (100% dan kichik) PIN'siz qo'yadi -> qayta hisob, chop etish belgisi",
 	async run(h) {
 		let invoice;
 		await h.step("buyurtma + hisob berilgan", async () => {
@@ -354,9 +352,10 @@ scenarios.d = {
 			await selectTable(h, "E2E-T2");
 			await giveBill(h);
 		});
-		await h.step("chegara ichidagi 10% — PIN so'ralmaydi", async () => {
+		await h.step("10% — tasdiqsiz qo'yiladi", async () => {
 			await moreAction(h, "Chegirma");
 			await h.waitDialog("Chegirma turi");
+			h.check("chegirma oynasida kassir chegarasi / PIN haqida ko'rsatma yo'q", !/PIN|Kassir chegarasi/.test(await h.dialogText()), (await h.dialogText()).slice(0, 300));
 			await h.click(".rc-chip-opt", "10%", { scope: ".rc-dialog", last: true });
 			await h.click(".rc-chip-opt", "Aksiya", { scope: ".rc-dialog", last: true });
 			await h.clickDialog('[data-action="apply"]');
@@ -374,25 +373,14 @@ scenarios.d = {
 			h.check("panel serverdagi payable (151 200) ni ko'rsatadi", panel.includes("151200"), panel.slice(0, 300));
 			h.check("«Chek o'zgardi» eslatmasi ko'rinadi", (await h.text(".rc-panel")).includes("Chek o'zgardi"));
 		});
-		await h.step("15% — chegaradan oshdi -> PIN oynasi, noto'g'ri PIN", async () => {
-			h.expect("billing.apply_discount", 403, "ApprovalRequired");
+		await h.step("15% — PIN oynasi yo'q, chegirma darhol qo'yiladi va qayta hisoblanadi", async () => {
 			await moreAction(h, "Chegirmani o'zgartirish");
 			await h.waitDialog("Chegirma turi");
 			await h.click(".rc-chip-opt", "15%", { scope: ".rc-dialog", last: true });
 			await h.click(".rc-chip-opt", "Aksiya", { scope: ".rc-dialog", last: true });
 			await h.clickDialog('[data-action="apply"]');
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi ochildi");
-			h.check("PIN oynasi menejer nomini ko'rsatadi", (await h.dialogText()).includes("e2e-manager"));
-			h.expect("billing.apply_discount", 403, "ApprovalRequired");
-			await enterPin(h, "1111");
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin__hint") && document.querySelector(".rc-dialog .rc-pin__hint").innerText.toLowerCase().includes("noto'g'ri")`, 10000, "noto'g'ri PIN xabari");
-			const inv = await h.op("invoice", { name: invoice });
-			h.near(inv.discount_percent, 10, "noto'g'ri PIN: chegirma o'zgarmagan (10%)");
-		});
-		await h.step("to'g'ri PIN — chegirma qo'yiladi, qayta hisoblanadi", async () => {
-			await enterPin(h, "4321");
-			await h.waitFor(`!document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi yopildi");
 			await h.waitFor(`document.querySelector(".rc-dialog") && document.querySelector(".rc-dialog").innerText.toLowerCase().includes("chek o'zgardi")`, 10000, "qayta chop etish taklifi");
+			h.check("PIN oynasi ochilmadi", await noPinDialog(h));
 			await h.clickDialog('[data-action="no"]', "Keyinroq");
 			await h.waitNoDialog();
 			const inv = await h.op("invoice", { name: invoice });
@@ -402,9 +390,7 @@ scenarios.d = {
 			h.near(service.amount, 15300, "xizmat haqi = 12% * 127 500");
 			h.near(inv.grand_total, 142800, "grand_total = 127 500 + 15 300");
 			const meta = await h.one("select custom_discount_reason r, custom_discount_approved_by a from `tabPOS Invoice` where name = %s", [invoice]);
-			h.check("chegirma sababi va tasdiqlagan menejer chekka yozilgan", meta.r === "Aksiya" && meta.a === MANAGER, JSON.stringify(meta));
-			const comment = await h.one("select count(*) c from `tabComment` where reference_doctype = 'POS Invoice' and reference_name = %s and content like %s", [invoice, "%Chegirma%"]);
-			h.check("tasdiq izi hujjat tarixiga (Comment) yozilgan", Number(comment.c) >= 1, JSON.stringify(comment));
+			h.check("chegirma sababi chekka yozilgan, tasdiqlagan menejer yo'q", meta.r === "Aksiya" && !meta.a, JSON.stringify(meta));
 			const panel = (await h.text(".rc-panel")).replace(/\s/g, "");
 			h.check("panel yangi payable (142 800) ni ko'rsatadi", panel.includes("142800"));
 		});
@@ -417,12 +403,11 @@ scenarios.d = {
 			const jobs = await printJobs(h, "Bill");
 			h.check("ikkinchi Bill topshirig'i navbatda", jobs.filter((j) => j.ref_name === invoice).length === 2, JSON.stringify(jobs));
 		});
-		await h.step("chegirma chegarasi: API chegara qiymatlari", async () => {
-			const r10 = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent: 10, reason: "Aksiya" });
-			h.eq(r10.status, 200, "10% (aynan chegara) — PIN'siz o'tadi");
-			h.expect("billing.apply_discount", 403, "ApprovalRequired");
-			const r11 = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent: 10.01, reason: "Aksiya" });
-			h.eq([r11.status, r11.excType], [403, "ApprovalRequired"], "10.01% — PIN so'raydi");
+		await h.step("chegirma: API chegara qiymatlari (kassir chegarasi yo'q)", async () => {
+			for (const percent of [10, 10.01, 30, 99]) {
+				const r = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent, reason: "Aksiya" });
+				h.eq([r.status, r.message && r.message.discount_approved_by], [200, ""], `${percent}% — kassir PIN'siz qo'yadi`);
+			}
 			h.expect("billing.apply_discount", 417, "ValidationError");
 			const r0 = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent: 0, reason: "Aksiya" });
 			h.eq(r0.status, 417, "0% rad etiladi");
@@ -432,9 +417,6 @@ scenarios.d = {
 			h.expect("billing.apply_discount", 417, "ValidationError");
 			const rNoReason = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent: 5 });
 			h.eq(rNoReason.status, 417, "sababsiz chegirma rad etiladi");
-			h.expect("billing.apply_discount", 403, "ApprovalRequired");
-			const rBadPin = await h.apiAs(CASHIER, "billing.apply_discount", { invoice, percent: 30, reason: "Aksiya", approval: { user: MANAGER, pin: "0000" } });
-			h.eq([rBadPin.status, rBadPin.excType], [403, "ApprovalRequired"], "noto'g'ri PIN 403");
 			const rCash = await h.apiAs(CASHIER, "billing.remove_discount", { invoice });
 			h.eq(rCash.status, 200, "chegirma olib tashlash");
 		});
@@ -443,7 +425,7 @@ scenarios.d = {
 
 
 scenarios.e = {
-	title: "Qaytarish (tarixdan): allow_in_returns ogohlantirishi, menejer PIN, qisman va qolgan qismi",
+	title: "Qaytarish (tarixdan): allow_in_returns ogohlantirishi, kassir rad etiladi, menejer qisman va qolgan qismini qaytaradi",
 	async run(h) {
 		let invoice;
 		await h.step("to'langan chek tayyorlanadi (API) va tarix ochiladi", async () => {
@@ -461,55 +443,74 @@ scenarios.e = {
 			h.check("«Allow In Returns» ogohlantirishi ko'rinadi", /Allow In Returns/i.test(await h.dialogText()), (await h.dialogText()).slice(0, 300));
 			await h.click(".rc-payment-refund__row [data-dir='1']", null, { scope: ".rc-dialog", last: true });
 			h.eq(await h.eval(`[...document.querySelectorAll('.rc-dialog [data-action="refund"]')].pop().disabled`), true, "«Qaytarish» tugmasi o'chiq (usul ruxsat etilmagan)");
-			// Server ham (menejer PIN bilan) rad etadi
+			// Server ham (menejer uchun ham) rad etadi
 			const info = await h.apiAs(CASHIER, "billing.get_refundable", { invoice }, { http: "GET" });
 			const row = info.message.items[0];
 			h.expect("billing.refund_invoice", 417, "ValidationError");
-			const r = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice, items: [{ name: row.name, qty: 1 }], reason: "Mijoz e'tirozi", approval: { user: MANAGER, pin: PIN } });
+			const r = await h.apiAs(MANAGER, "billing.refund_invoice", { invoice, items: [{ name: row.name, qty: 1 }], reason: "Mijoz e'tirozi" });
 			h.check("server allow_in_returns=0 bo'lsa aniq xato beradi", r.status === 417 && /Allow In Returns|Qaytarishda ruxsat|ruxsat/i.test(JSON.stringify(r.data)), `${r.status} ${JSON.stringify(r.data).slice(0, 300)}`);
 			await h.clickDialog('[data-action="cancel"]');
 			await h.waitNoDialog();
 		});
-		await h.step("usul ruxsat etiladi -> qisman qaytarish (1 dona) menejer PIN bilan", async () => {
+		await h.step("usul ruxsat etiladi -> kassir qaytara olmaydi (faqat menejer), oyna ochiq qoladi", async () => {
 			await h.op("allow_in_returns", { mode: CASH, allowed: 1 });
 			await h.click('.rc-history__detail [data-history-action="payment-refund"]');
 			await h.waitDialog("Chekni qaytarish");
 			h.check("ogohlantirish endi yo'q", !/Allow In Returns/i.test(await h.dialogText()));
 			await h.click(".rc-payment-refund__row[data-name] [data-dir='1']", null, { scope: ".rc-dialog", last: true });
-			h.expect("billing.refund_invoice", 403, "ApprovalRequired");
 			await h.click(".rc-chip-opt", "Mijoz e'tirozi", { scope: ".rc-dialog", last: true });
-			await h.clickDialog('[data-action="refund"]');
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi");
-			await enterPin(h, "4321");
-			await h.waitFor(`document.querySelector(".rc-history__row .rc-return-badge")`, 12000, "tarixda qaytarish cheki paydo bo'ldi");
-			const returns = await h.sql("select name, grand_total, rounded_total, is_return, return_against, docstatus from `tabPOS Invoice` where return_against = %s", [invoice]);
-			h.eq(returns.length, 1, "1 ta qaytarish cheki");
-			h.check("qaytarish cheki submit qilingan, manfiy summali", returns[0].docstatus === 1 && Number(returns[0].grand_total) < 0, JSON.stringify(returns));
-			const items = await h.sql("select item_code, qty from `tabPOS Invoice Item` where parent = %s", [returns[0].name]);
-			h.eq(items.map((i) => `${i.item_code}:${Number(i.qty)}`), ["AFGAN BREAD:-1"], "qaytarilgan qator (1 dona)");
-			const posPays = await h.sql("select mode_of_payment, amount from `tabSales Invoice Payment` where parent = %s", [returns[0].name]);
-			h.check("qaytarish cheki to'lov qatori Нахт, manfiy (pul naqd qaytadi)", posPays.length === 1 && posPays[0].mode_of_payment === CASH && Number(posPays[0].amount) < 0, JSON.stringify(posPays));
-			h.near(Number(returns[0].grand_total), -67200, "qaytarilgan summa = -(60 000 + 12%)");
-			const audit = await h.one("select count(*) c from `tabComment` where reference_doctype = 'POS Invoice' and reference_name = %s and content like %s", [invoice, "%Qaytarish%"]);
-			h.check("tasdiq izi asl chek tarixida", Number(audit.c) >= 1, JSON.stringify(audit));
-		});
-		await h.step("qolgan qismini qaytarish (Hammasini tanlash)", async () => {
-			await historyDetail(h, invoice);
-			await h.click('.rc-history__detail [data-history-action="payment-refund"]');
-			await h.waitDialog("Chekni qaytarish");
-			await h.click('.rc-dialog [data-part="all"]', null, { last: true });
-			await h.click(".rc-chip-opt", "Buyurtma xatosi", { scope: ".rc-dialog", last: true });
 			h.expect("billing.refund_invoice", 403, "ApprovalRequired");
 			await h.clickDialog('[data-action="refund"]');
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi");
-			await enterPin(h, "4321");
-			await h.waitFor(`document.querySelectorAll(".rc-history__row .rc-return-badge").length >= 2`, 12000, "ikkinchi qaytarish cheki");
-			const sum = await h.one("select coalesce(sum(grand_total), 0) t, count(*) c from `tabPOS Invoice` where return_against = %s and docstatus = 1", [invoice]);
-			h.near(Number(sum.t), -168000, "qaytarishlar yig'indisi = -asl chek jami (168 000)");
-			const refundable = await h.apiAs(CASHIER, "billing.get_refundable", { invoice }, { http: "GET" });
-			h.check("qaytariladigan qoldiq yo'q", (refundable.message.items || []).every((i) => Number(i.refundable_qty) === 0), JSON.stringify(refundable.message.items));
-			await h.click('.rc-modal .rc-modal__close');
+			await h.waitFor(`(() => { const d = [...document.querySelectorAll(".rc-dialog")].pop(); const e = d && d.querySelector(".rc-dialog__error"); return e && /faqat menejer/i.test(e.innerText); })()`, 10000, "«faqat menejer» xabari");
+			h.check("xato matni kassirga tushunarli (sessiya haqida emas)", !/Sessiya/i.test(await dialogError(h)), await dialogError(h));
+			h.check("PIN oynasi ochilmadi", await noPinDialog(h));
+			const returns = await h.sql("select name from `tabPOS Invoice` where return_against = %s", [invoice]);
+			h.eq(returns.length, 0, "qaytarish cheki yaratilmadi");
+			await h.clickDialog('[data-action="cancel"]');
+			await h.waitNoDialog();
 		});
+		try {
+			await h.step("menejer: qisman qaytarish (1 dona) — PIN'siz", async () => {
+				await h.op("actor", { user: MANAGER });
+				await h.openCashier();
+				await openHistory(h);
+				await historyDetail(h, invoice);
+				await h.click('.rc-history__detail [data-history-action="payment-refund"]');
+				await h.waitDialog("Chekni qaytarish");
+				await h.click(".rc-payment-refund__row[data-name] [data-dir='1']", null, { scope: ".rc-dialog", last: true });
+				await h.click(".rc-chip-opt", "Mijoz e'tirozi", { scope: ".rc-dialog", last: true });
+				await h.clickDialog('[data-action="refund"]');
+				await h.waitFor(`document.querySelector(".rc-history__row .rc-return-badge")`, 12000, "tarixda qaytarish cheki paydo bo'ldi");
+				h.check("PIN oynasi ochilmadi", await noPinDialog(h));
+				const returns = await h.sql("select name, grand_total, rounded_total, is_return, return_against, docstatus from `tabPOS Invoice` where return_against = %s", [invoice]);
+				h.eq(returns.length, 1, "1 ta qaytarish cheki");
+				h.check("qaytarish cheki submit qilingan, manfiy summali", returns[0].docstatus === 1 && Number(returns[0].grand_total) < 0, JSON.stringify(returns));
+				const items = await h.sql("select item_code, qty from `tabPOS Invoice Item` where parent = %s", [returns[0].name]);
+				h.eq(items.map((i) => `${i.item_code}:${Number(i.qty)}`), ["AFGAN BREAD:-1"], "qaytarilgan qator (1 dona)");
+				const posPays = await h.sql("select mode_of_payment, amount from `tabSales Invoice Payment` where parent = %s", [returns[0].name]);
+				h.check("qaytarish cheki to'lov qatori Нахт, manfiy (pul naqd qaytadi)", posPays.length === 1 && posPays[0].mode_of_payment === CASH && Number(posPays[0].amount) < 0, JSON.stringify(posPays));
+				h.near(Number(returns[0].grand_total), -67200, "qaytarilgan summa = -(60 000 + 12%)");
+				const audit = await h.one("select count(*) c from `tabComment` where reference_doctype = 'POS Invoice' and reference_name = %s and content like %s", [invoice, "%Menejer amali%qaytarish%"]);
+				h.check("menejer amali izi asl chek tarixida", Number(audit.c) >= 1, JSON.stringify(audit));
+			});
+			await h.step("menejer: qolgan qismini qaytarish (Hammasini tanlash)", async () => {
+				await historyDetail(h, invoice);
+				await h.click('.rc-history__detail [data-history-action="payment-refund"]');
+				await h.waitDialog("Chekni qaytarish");
+				await h.click('.rc-dialog [data-part="all"]', null, { last: true });
+				await h.click(".rc-chip-opt", "Buyurtma xatosi", { scope: ".rc-dialog", last: true });
+				await h.clickDialog('[data-action="refund"]');
+				await h.waitFor(`document.querySelectorAll(".rc-history__row .rc-return-badge").length >= 2`, 12000, "ikkinchi qaytarish cheki");
+				const sum = await h.one("select coalesce(sum(grand_total), 0) t, count(*) c from `tabPOS Invoice` where return_against = %s and docstatus = 1", [invoice]);
+				h.near(Number(sum.t), -168000, "qaytarishlar yig'indisi = -asl chek jami (168 000)");
+				const refundable = await h.apiAs(CASHIER, "billing.get_refundable", { invoice }, { http: "GET" });
+				h.check("qaytariladigan qoldiq yo'q", (refundable.message.items || []).every((i) => Number(i.refundable_qty) === 0), JSON.stringify(refundable.message.items));
+				await h.click('.rc-modal .rc-modal__close');
+			});
+		} finally {
+			await h.op("actor", { user: CASHIER });
+			await h.openCashier();
+		}
 	},
 };
 
@@ -788,7 +789,7 @@ scenarios.h = {
 
 
 scenarios.i = {
-	title: "G'aladon + kassa harakati (chiqim/kirim, PIN) + X-hisobot (kassir: ko'r, menejer: to'liq)",
+	title: "G'aladon + kassa harakati (chiqim/kirim, katta summa — faqat menejer) + X-hisobot (kassir: ko'r, menejer: to'liq)",
 	async run(h) {
 		let cashInvoice;
 		await h.step("kassada naqd savdo (API) — hisobot uchun", async () => {
@@ -834,7 +835,7 @@ scenarios.i = {
 			await h.click('[data-e2e-sel="reason"] .rc-chip-opt', null, { scope: ".rc-dialog", last: true, index: 0 });
 			if (mode) await h.click('[data-e2e-sel="mode"] .rc-chip-opt', mode, { scope: ".rc-dialog", last: true });
 		};
-		await h.step("chiqim 50 000 (chegara ichida) — PIN'siz", async () => {
+		await h.step("chiqim 50 000 (chegara ichida) — kassir o'zi yozadi", async () => {
 			await fillMovement("Out", 50000, CASH);
 			await h.clickDialog('[data-action="submit"]', "Chiqimni qayd etish");
 			await h.waitFor(`document.querySelectorAll(".rc-dialog").length === 1 && document.querySelector(".rc-dialog .rc-shift-mv__table")`, 10000, "harakatlar jadvali yangilandi");
@@ -843,31 +844,55 @@ scenarios.i = {
 			h.check("Out 50 000 Нахт, tasdiqsiz", rows[0].kind === "Out" && Number(rows[0].amount) === 50000 && !rows[0].approved_by, JSON.stringify(rows));
 			h.check("jadvalda ko'rinadi", (await h.dialogText()).replace(/\s/g, "").includes("50000"));
 		});
-		await h.step("chiqim 150 000 (chegaradan oshdi) — PIN kerak", async () => {
+		await h.step("chiqim 150 000 (chegaradan oshdi) — kassir rad etiladi (faqat menejer)", async () => {
 			h.expect("cash_movements.create_cash_movement", 403, "ApprovalRequired");
 			await fillMovement("Out", 150000, CASH);
 			await h.clickDialog('[data-action="submit"]', "Chiqimni qayd etish");
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi");
-			await enterPin(h, "4321");
-			await h.waitFor(`!document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi yopildi");
+			await h.waitFor(`(() => { const d = [...document.querySelectorAll(".rc-dialog")].pop(); const e = d && d.querySelector(".rc-dialog__error"); return e && /faqat menejer/i.test(e.innerText); })()`, 10000, "«faqat menejer» xabari");
+			h.check("PIN oynasi ochilmadi", await noPinDialog(h));
+			const rows = await h.sql("select kind, amount from `tabOzturk Cash Movement` order by creation");
+			h.eq(rows.length, 1, "yangi harakat yozilmadi");
+			await h.key("Escape");
 			await h.waitFor(`document.querySelectorAll(".rc-dialog").length === 1`, 10000, "forma yopildi");
-			const rows = await h.sql("select kind, amount, approved_by from `tabOzturk Cash Movement` order by creation");
-			h.eq(rows.length, 2, "2 ta harakat");
-			h.check("150 000 chiqim menejer tasdig'i bilan", Number(rows[1].amount) === 150000 && rows[1].approved_by === MANAGER, JSON.stringify(rows));
 		});
-		await h.step("kirim 30 000 (har doim tasdiq) — ikkinchi naqd usulga", async () => {
+		await h.step("kirim 30 000 — kassir rad etiladi (kirim doim faqat menejer)", async () => {
 			h.expect("cash_movements.create_cash_movement", 403, "ApprovalRequired");
 			await fillMovement("In", 30000, "Test Naqd 2");
 			await h.clickDialog('[data-action="submit"]', "Kirimni qayd etish");
-			await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi");
-			await enterPin(h, "4321");
-			await h.waitFor(`!document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi yopildi");
+			await h.waitFor(`(() => { const d = [...document.querySelectorAll(".rc-dialog")].pop(); const e = d && d.querySelector(".rc-dialog__error"); return e && /faqat menejer/i.test(e.innerText); })()`, 10000, "«faqat menejer» xabari");
+			const rows = await h.sql("select kind from `tabOzturk Cash Movement`");
+			h.eq(rows.length, 1, "kirim yozilmadi");
+			await h.key("Escape");
 			await h.waitFor(`document.querySelectorAll(".rc-dialog").length === 1`, 10000, "forma yopildi");
-			const rows = await h.sql("select kind, amount, approved_by, mode_of_payment from `tabOzturk Cash Movement` order by creation");
-			h.check("30 000 kirim tasdiq bilan, Test Naqd 2", rows.length === 3 && rows[2].kind === "In" && Number(rows[2].amount) === 30000 && rows[2].approved_by === MANAGER && rows[2].mode_of_payment === "Test Naqd 2", JSON.stringify(rows));
 			await h.key("Escape");
 			await h.waitNoDialogAny();
 		});
+		try {
+			await h.step("menejer: chiqim 150 000 va kirim 30 000 (ikkinchi naqd usulga) — PIN'siz", async () => {
+				await h.op("actor", { user: MANAGER });
+				await h.openCashier();
+				await h.click(".rc-menu-btn");
+				await h.click(".rc-menu button, .rc-menu [data-id]", "Kassa harakati");
+				await h.waitDialog("Kassa harakati");
+				await fillMovement("Out", 150000, CASH);
+				await h.clickDialog('[data-action="submit"]', "Chiqimni qayd etish");
+				await h.waitFor(`document.querySelectorAll(".rc-dialog").length === 1`, 10000, "forma yopildi");
+				let rows = await h.sql("select kind, amount, approved_by from `tabOzturk Cash Movement` order by creation");
+				h.eq(rows.length, 2, "2 ta harakat");
+				h.check("150 000 chiqimni menejer yozdi", Number(rows[1].amount) === 150000 && rows[1].approved_by === MANAGER, JSON.stringify(rows));
+				await fillMovement("In", 30000, "Test Naqd 2");
+				await h.clickDialog('[data-action="submit"]', "Kirimni qayd etish");
+				await h.waitFor(`document.querySelectorAll(".rc-dialog").length === 1`, 10000, "forma yopildi");
+				h.check("PIN oynasi ochilmadi", await noPinDialog(h));
+				rows = await h.sql("select kind, amount, approved_by, mode_of_payment from `tabOzturk Cash Movement` order by creation");
+				h.check("30 000 kirimni menejer yozdi, Test Naqd 2", rows.length === 3 && rows[2].kind === "In" && Number(rows[2].amount) === 30000 && rows[2].approved_by === MANAGER && rows[2].mode_of_payment === "Test Naqd 2", JSON.stringify(rows));
+				await h.key("Escape");
+				await h.waitNoDialogAny();
+			});
+		} finally {
+			await h.op("actor", { user: CASHIER });
+			await h.openCashier();
+		}
 		await h.step("X-hisobot kassir sifatida: ko'r sanoq (kutilgan summa yo'q)", async () => {
 			await h.click(".rc-menu-btn");
 			await h.click(".rc-menu button, .rc-menu [data-id]", "X-hisobot");
@@ -1106,7 +1131,7 @@ scenarios.k = {
 			await denied("chegirma", "billing.apply_discount", { invoice, percent: 5, reason: "Aksiya" });
 			await denied("stol ko'chirish", "table.transfer_table", { invoice, to_table: "E2E-T2" });
 			await denied("birlashtirish", "table.merge_tables", { invoice, tables: ["E2E-T2"] });
-			await denied("qaytarish (menejer PIN bilan ham)", "billing.refund_invoice", { invoice: paid, items: [{ name: "x", qty: 1 }], reason: "x", approval: { user: MANAGER, pin: PIN } });
+			await denied("qaytarish", "billing.refund_invoice", { invoice: paid, items: [{ name: "x", qty: 1 }], reason: "x" });
 			await denied("g'aladon", "printing.open_drawer", { reason: "manual" });
 			await denied("kassa harakati", "cash_movements.create_cash_movement", { kind: "Out", amount: 1000, category: "Xarajat", reason: "x" });
 			await denied("X-hisobot", "cashier.get_shift_report", { kind: "X" }, "GET");
@@ -1321,9 +1346,9 @@ scenarios.n = {
 			const info = await h.apiAs(CASHIER, "billing.get_refundable", { invoice: inv }, { http: "GET" });
 			const afgan = info.message.items.find((i) => i.item_code === "AFGAN BREAD");
 			h.expect("billing.refund_invoice", 403, "ApprovalRequired");
-			const noPin = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice: inv, items: [{ name: afgan.name, qty: 1 }], reason: "Mijoz e'tirozi" });
-			h.eq([noPin.status, noPin.excType], [403, "ApprovalRequired"], "PIN'siz qaytarish rad etiladi");
-			const r = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice: inv, items: [{ name: afgan.name, qty: 1 }], reason: "Mijoz e'tirozi", approval: { user: MANAGER, pin: PIN } });
+			const byCashier = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice: inv, items: [{ name: afgan.name, qty: 1 }], reason: "Mijoz e'tirozi" });
+			h.eq([byCashier.status, byCashier.excType], [403, "ApprovalRequired"], "kassir qaytarishi rad etiladi (faqat menejer)");
+			const r = await h.apiAs(MANAGER, "billing.refund_invoice", { invoice: inv, items: [{ name: afgan.name, qty: 1 }], reason: "Mijoz e'tirozi" });
 			h.eq(r.status, 200, "qisman qaytarish");
 			firstReturn = r.message;
 			const ret = await h.op("invoice", { name: firstReturn.invoice });
@@ -1336,7 +1361,7 @@ scenarios.n = {
 			const info = await h.apiAs(CASHIER, "billing.get_refundable", { invoice: inv }, { http: "GET" });
 			h.check("javobda choychaqa ko'rsatilgan", Number(info.message.tip) === 10000, String(info.message.tip));
 			const rest = info.message.items.filter((i) => Number(i.refundable_qty) > 0).map((i) => ({ name: i.name, qty: Number(i.refundable_qty) }));
-			const r = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice: inv, items: rest, reason: "Buyurtma xatosi", approval: { user: MANAGER, pin: PIN } });
+			const r = await h.apiAs(MANAGER, "billing.refund_invoice", { invoice: inv, items: rest, reason: "Buyurtma xatosi" });
 			h.eq(r.status, 200, "qolganini qaytarish");
 			h.eq(r.message.final, true, "final=true");
 			const sum = await h.one("select coalesce(sum(grand_total), 0) t, coalesce(sum(paid_amount), 0) p from `tabPOS Invoice` where return_against = %s and docstatus = 1", [inv]);
@@ -1346,7 +1371,7 @@ scenarios.n = {
 			const again = await h.apiAs(CASHIER, "billing.get_refundable", { invoice: inv }, { http: "GET" });
 			h.check("qaytariladigan qoldiq yo'q", again.message.items.every((i) => Number(i.refundable_qty) === 0) && Number(again.message.refundable || 0) === 0, JSON.stringify(again.message).slice(0, 300));
 			h.expect("billing.refund_invoice", 417, "ValidationError");
-			const dup = await h.apiAs(CASHIER, "billing.refund_invoice", { invoice: inv, items: rest, reason: "takror", approval: { user: MANAGER, pin: PIN } });
+			const dup = await h.apiAs(MANAGER, "billing.refund_invoice", { invoice: inv, items: rest, reason: "takror" });
 			h.check("takroriy qaytarish rad etiladi", dup.status >= 400, `${dup.status}`);
 		});
 	},
@@ -1450,7 +1475,7 @@ scenarios.p = {
 		try {
 			for (const [w, hgt] of [[1024, 768], [1920, 1080]]) {
 				const tag = `${w}x${hgt}`;
-				await h.step(`${tag}: zal, buyurtma oynasi, to'lov (aralash + choychaqa), PIN`, async () => {
+				await h.step(`${tag}: zal, buyurtma oynasi, to'lov (aralash + choychaqa), chegirma`, async () => {
 					await h.setViewport(w, hgt);
 					await h.openCashier();
 					await fitsRoot(`${tag} zal`);
@@ -1478,16 +1503,10 @@ scenarios.p = {
 					await dialogFits(`${tag} to'lov usullari + choychaqa`, { selector: '.rc-modal [data-action="confirm"]' });
 					await h.escapeAll();
 					await h.waitFor(`document.querySelector(".rc-overlay").hidden`, 5000, "to'lov oynasi yopildi");
-					// PIN oynasi
-					h.expect("billing.apply_discount", 403, "ApprovalRequired");
+					// Chegirma oynasi (menejer PIN oynasi endi yo'q)
 					await moreAction(h, "Chegirma");
 					await h.waitDialog("Chegirma turi");
 					await dialogFits(`${tag} chegirma oynasi`, { selector: '.rc-dialog [data-action="apply"]' });
-					await h.click(".rc-chip-opt", "20%", { scope: ".rc-dialog", last: true });
-					await h.click(".rc-chip-opt", "Aksiya", { scope: ".rc-dialog", last: true });
-					await h.clickDialog('[data-action="apply"]');
-					await h.waitFor(`document.querySelector(".rc-dialog .rc-pin")`, 10000, "PIN oynasi");
-					await dialogFits(`${tag} PIN oynasi`, { selector: ".rc-numpad__key", text: "✓", scope: ".rc-dialog" });
 					await h.escapeAll();
 					await h.waitNoDialogAny();
 					await h.op("actor", { user: MANAGER });
@@ -1571,4 +1590,3 @@ module.exports = scenarios;
 module.exports.prepare = prepare;
 module.exports.CASHIER = CASHIER;
 module.exports.MANAGER = MANAGER;
-module.exports.PIN = PIN;

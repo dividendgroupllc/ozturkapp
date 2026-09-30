@@ -12,10 +12,10 @@ kerakli darajada moslaymiz va submit qilamiz; buxgalteriya (kredit-nota)
 smena yopilganda ERPNext konsolidatsiyasi orqali yaratiladi — xuddi oddiy
 cheklardek.
 
-HAR DOIM MENEJER TASDIG'I
-=========================
-Qaytarish pulni kassadan chiqaradi. Tasdiq va sabab MAJBURIY, sozlab
-o'chirib bo'lmaydi. Tasdiq izi ASL chekning tarixiga yoziladi.
+FAQAT MENEJER
+=============
+Qaytarish pulni kassadan chiqaradi. Uni faqat menejer bajaradi, sabab
+MAJBURIY — sozlab o'chirib bo'lmaydi. Amal izi ASL chekning tarixiga yoziladi.
 
 QAYTARISH CHEKI QAYSI SMENAGA TUSHADI
 =====================================
@@ -281,14 +281,14 @@ def allocate_refund(capacity: list, total: float, step: Decimal) -> list:
     return [(mode, flt(Decimal(share) * step)) for mode, share in shares if share > 0]
 
 
-def refund(doc, scope, items, reason, approval=None) -> dict:
+def refund(doc, scope, items, reason) -> dict:
     """Chekni to'liq yoki qisman qaytaradi (chaqiruvchi chekni QULFLAGAN bo'lishi shart)."""
     from erpnext.accounts.doctype.pos_invoice.pos_invoice import make_sales_return
 
     wanted, final = _plan(doc, _parse_items(items))
 
     approver = manager_approval.require(
-        _("Chekni qaytarish"), approval, "POS Invoice", doc.name, reason
+        _("Chekni qaytarish"), "POS Invoice", doc.name, reason
     )
 
     shift = cashier_permissions.open_shift_name(scope)

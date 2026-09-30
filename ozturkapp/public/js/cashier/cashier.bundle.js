@@ -12,13 +12,7 @@
  * olib kelardi va reestrlar bir-biridan ajralib qolardi).
  */
 
-import {
-	ApprovalCancelled,
-	call,
-	errorText,
-	isApprovalRequired,
-	maskApprovalInErrorReports,
-} from "./core/api.js";
+import { call, errorText } from "./core/api.js";
 import { bundleVersion } from "./core/build.js";
 import { features } from "./core/features.js";
 import { CashierScreen } from "./core/screen.js";
@@ -39,7 +33,6 @@ import {
 } from "./util/format.js";
 
 frappe.provide("ozturk.cashier");
-maskApprovalInErrorReports();
 
 Object.assign(ozturk.cashier, {
 	Screen: CashierScreen,
@@ -47,7 +40,7 @@ Object.assign(ozturk.cashier, {
 	features,
 	slots,
 	ui,
-	api: { call, errorText, isApprovalRequired, ApprovalCancelled },
+	api: { call, errorText },
 	util: {
 		esc,
 		money,

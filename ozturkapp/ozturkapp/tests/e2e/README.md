@@ -72,9 +72,9 @@ haqiqiy serverda; shim yuborgan realtime hodisalari brauzerga HAQIQATAN yetib bo
 
 `a` kassa yopiq ekrani / smena ochish · `b` dine-in buyurtma (menyu, izoh, KOT, stol, hisob so'rash qo'ng'irog'i) ·
 `c` hisob berish, aralash to'lov (teng bo'lish, naqd + karta), choychaqa, g'aladon, stol bo'shashi ·
-`d` chegirma, `ApprovalRequired`, PIN (noto'g'ri/to'g'ri), chop etish belgisi · `e` qaytarish (`allow_in_returns`, PIN, qisman/qolgan) ·
+`d` chegirma (kassir chegarasi va PIN yo'q), chop etish belgisi · `e` qaytarish (`allow_in_returns`, kassir `ApprovalRequired` bilan rad etiladi, menejer qisman/qolgan qismini qaytaradi) ·
 `f` ko'chirish/birlashtirish/ajratish (+ birlashgan chekni to'lash) · `g` olib ketish/yetkazish, mijoz yaratish/biriktirish, to'lov ·
-`h` bron va vaqt formati · `i` g'aladon, kassa harakati, X-hisobot (kassir: ko'r, menejer: to'liq) ·
+`h` bron va vaqt formati · `i` g'aladon, kassa harakati (kirim va limitdan katta chiqim — faqat menejer), X-hisobot (kassir: ko'r, menejer: to'liq) ·
 `k` bayroqlar o'chiq: elementlar yo'qoladi, server rad etadi · `l` bekor qilish qoidalari (oshxona holati) ·
 `m` ofitsant API: pul sizib chiqmasligi · `n` qaytarish buxgalteriyasi (choychaqa + chegirma) ·
 `o` yorliqlar (F2/F3/F9/Esc), zal tanlash, Desk paneli ko'rinishi (to'liq ekran yo'q), joylashuvni sudrash · `p` 1024x768 / 1920x1080 sig'ishi (Desk navbari ko'rinib, sahifa aylanmaydi) ·

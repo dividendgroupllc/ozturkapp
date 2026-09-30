@@ -1,13 +1,11 @@
 /**
  * UI to'plami (`ozturk.cashier.ui`) — sensorli oyna, forma, ekran klaviaturasi,
- * menejer tasdig'i, tanlov tugmalari, bildirishnoma.
+ * tanlov tugmalari, bildirishnoma.
  *
  * Kassa ichida `frappe.prompt/confirm/msgprint` o'rniga FAQAT shular
  * ishlatiladi. Imzolar va misollar: `public/js/cashier/README.md`.
  */
 
-import { ApprovalCancelled } from "../core/api.js";
-import { requestApproval, withApproval } from "./approval.js";
 import { amountInput, chips, toast } from "./controls.js";
 import { kit } from "./context.js";
 import { alert, closeTop, confirm, dialog, form, hasDialog } from "./dialog.js";
@@ -26,9 +24,6 @@ export const ui = {
 	toast,
 	chips,
 	amountInput,
-	requestApproval,
-	withApproval,
-	ApprovalCancelled,
 
 	keyboard: { numpad, TextKeyboard, insertText, backspace },
 

@@ -9,10 +9,10 @@
  * taxmin qilishga yordam beradi.
  *
  * Pul va ruxsat mantig'i serverda (`api/cash_movements.py`): kirim DOIM,
- * chiqim limitdan oshsa menejer tasdig'i so'raladi (`ui.withApproval`).
+ * chiqim limitdan oshsa — faqat menejer yoza oladi.
  */
 
-import { approvalArgs, esc, features, hhmm, shiftIsOpen, slots, ui } from "./shared.js";
+import { esc, features, hhmm, shiftIsOpen, slots, ui } from "./shared.js";
 
 /**
  * Yo'nalish -> tur. Server `categories` ni beradi; bo'lmasa (eski javob)
@@ -92,38 +92,33 @@ function listHtml(screen, data) {
 //  Yangi harakat
 // ═══════════════════════════════════════════════════════════════
 
-/** Tasdiq oynasi va toast uchun: «Kassadan chiqarish 50 000». */
+/** Toast uchun: «Kassadan chiqarish 50 000». */
 function actionLabel(screen, kind, amount) {
 	return `${kind === "In" ? __("Kassaga kiritish") : __("Kassadan chiqarish")} ${screen.money(
 		amount
 	)}`;
 }
 
-/** Serverga yozadi; kerak bo'lsa menejer tasdig'ini so'raydi. */
+/** Serverga yozadi. */
 function record(screen, args) {
-	return ui.withApproval(
-		(approval) =>
-			screen.call("ozturkapp.ozturkapp.api.cash_movements.create_cash_movement", {
-				kind: args.kind,
-				amount: args.amount,
-				category: args.category,
-				reason: args.reason,
-				...(args.mode ? { mode_of_payment: args.mode } : {}),
-				...approvalArgs(approval),
-			}),
-		{ action: actionLabel(screen, args.kind, args.amount) }
-	);
+	return screen.call("ozturkapp.ozturkapp.api.cash_movements.create_cash_movement", {
+		kind: args.kind,
+		amount: args.amount,
+		category: args.category,
+		reason: args.reason,
+		...(args.mode ? { mode_of_payment: args.mode } : {}),
+	});
 }
 
-/** Tasdiq haqidagi eslatma — faqat ma'lumot: qaror serverda. */
+/** Kim yoza olishi haqidagi eslatma — faqat ma'lumot: qaror serverda. */
 function approvalNote(screen, kind) {
-	if (kind === "In") return __("Kassaga kirim menejer tasdig'i bilan qayd etiladi.");
+	if (kind === "In") return __("Kassaga kirimni faqat menejer qayd etadi.");
 
 	const limit = (screen.ctx.feature_settings || {}).cash_payout_approval_limit;
 	if (typeof limit !== "number") return "";
 	return limit > 0
-		? __("{0} dan katta chiqim menejer tasdig'i bilan qayd etiladi.", [screen.money(limit)])
-		: __("Har bir chiqim menejer tasdig'i bilan qayd etiladi.");
+		? __("{0} dan katta chiqimni faqat menejer qayd etadi.", [screen.money(limit)])
+		: __("Chiqimni faqat menejer qayd etadi.");
 }
 
 /**
@@ -190,7 +185,7 @@ async function askMovement(screen, kind, data, reload) {
 			} catch (error) {
 				// Javob yo'qolgan bo'lsa harakat yozilgan bo'lishi mumkin («takror» xatosi):
 				// ro'yxatni yangilab qo'yamiz, shunda kassir uni ko'radi.
-				if (!error || !error.cancelled) reload();
+				reload();
 				throw error;
 			}
 		},

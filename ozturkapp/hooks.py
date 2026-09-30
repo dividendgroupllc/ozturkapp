@@ -45,10 +45,6 @@ doc_events = {
 		"before_update_after_submit": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_audit",
 		"before_cancel": "ozturkapp.ozturkapp.utils.cashier_billing.guard_invoice_cancel",
 	},
-	"User": {
-		# Menejer PIN-kodi (`custom_pos_pin`) faqat 4–8 raqam bo'lsin.
-		"validate": "ozturkapp.ozturkapp.utils.manager_approval.validate_pin_format",
-	},
 	"URY Table": {
 		# Desk orqali qo'lda tahrirlash (layout, o'rindiqlar soni, ...).
 		"on_update": "ozturkapp.ozturkapp.utils.cashier_realtime.on_table_change",
