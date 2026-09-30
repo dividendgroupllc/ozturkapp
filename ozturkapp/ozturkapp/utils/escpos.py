@@ -536,7 +536,7 @@ def build_kot(kot: dict, printer) -> bytes:
     r.text(sep, align=align)
     for item in kot.get("items") or []:
         qty = fmt_qty(item.get("qty"))
-        r.text(f"{qty} x {item.get('item_name') or ''}", align=align, bold=True, size="tall")
+        r.text(f"{qty} x {item.get('item_name') or ''}", align=align, bold=True)
         if item.get("comment"):
             r.text(f"* {item['comment']}", align=align)
     r.text(sep, align=align)
