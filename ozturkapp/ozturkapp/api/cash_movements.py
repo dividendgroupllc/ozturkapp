@@ -35,6 +35,7 @@ from frappe.utils import add_to_date, flt, now_datetime
 
 from ozturkapp.ozturkapp.doctype.ozturk_cash_movement.ozturk_cash_movement import (
     CATEGORIES,
+    cashier_categories,
     KIND_OUT,
 )
 from ozturkapp.ozturkapp.setup import cashier_features
@@ -72,7 +73,8 @@ def get_cash_movements():
     return {
         "pos_opening_entry": shift or None,
         **summary,
-        "categories": {kind: list(names) for kind, names in CATEGORIES.items()},
+        # «Xarajat»ni kassir kiritmaydi — operator «Kassa» orqali (CASHIER_HIDDEN).
+        "categories": cashier_categories(),
         "cash_modes": cashier_billing.cash_modes(scope.pos_profile),
     }
 

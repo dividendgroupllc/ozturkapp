@@ -26,7 +26,7 @@ import re
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from ozturkapp.ozturkapp.doctype.ozturk_cash_movement.ozturk_cash_movement import CATEGORIES
+from ozturkapp.ozturkapp.doctype.ozturk_cash_movement.ozturk_cash_movement import CATEGORIES, cashier_categories
 from ozturkapp.ozturkapp.setup import cashier_features
 from ozturkapp.ozturkapp.utils import shift_report
 
@@ -324,7 +324,8 @@ class TestBackendReferences(FrappeTestCase):
             kind: re.findall(r'"([^"]+)"', values)
             for kind, values in re.findall(r"(\w+):\s*\[(.*?)\]", block)
         }
-        self.assertEqual(fallback, {kind: list(names) for kind, names in CATEGORIES.items()})
+        # Kassir ekrani: «Xarajat» yo'q — uni operator Kassa orqali kiritadi.
+        self.assertEqual(fallback, cashier_categories())
 
         doctype = frappe.get_meta("Ozturk Cash Movement").get_field("category").options.split("\n")
         self.assertEqual(sorted(set(doctype)), sorted({name for names in CATEGORIES.values() for name in names}))

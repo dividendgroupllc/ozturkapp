@@ -20,7 +20,7 @@ import { esc, features, hhmm, modeLabel, shiftIsOpen, slots, ui } from "./shared
  */
 const FALLBACK_CATEGORIES = {
 	In: ["Kassaga qo'shish", "Boshqa"],
-	Out: ["Xarajat", "Inkassatsiya", "Boshqa"],
+	Out: ["Inkassatsiya", "Boshqa"],
 };
 
 /** Sabab tugmalari — yozishdan tezroq; «Boshqa…» erkin matn (ekran klaviaturasi). */

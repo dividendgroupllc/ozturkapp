@@ -57,6 +57,15 @@ CATEGORIES = {
     KIND_OUT: ("Xarajat", "Inkassatsiya", "Boshqa"),
 }
 
+#: Kassir ekranida taklif QILINMAYDIGAN turlar: xarajatni operator «Kassa» (Расход)
+#: orqali yozadi va u smenaga o'zi bog'lanadi (utils/kassa_shift.py).
+CASHIER_HIDDEN = {"Xarajat"}
+
+
+def cashier_categories() -> dict:
+    """Kassa ekranidagi turlar: `CATEGORIES` dan `CASHIER_HIDDEN` siz."""
+    return {kind: [n for n in names if n not in CASHIER_HIDDEN] for kind, names in CATEGORIES.items()}
+
 #: Sabab shundan qisqa bo'lsa qabul qilinmaydi (`utils/order_cancel.py` bilan bir xil).
 MIN_REASON_LENGTH = 3
 

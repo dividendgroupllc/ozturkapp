@@ -157,6 +157,10 @@ def make_closing_entry_from_opening(opening_entry):
                 )
 
     apply_cash_movements(payments, opening_entry.name)
+    # Operator Kassa harakatlari (g'aladon naqdi) — kassirning kamomadi bo'lib qolmasin.
+    from ozturkapp.ozturkapp.utils import kassa_shift
+
+    kassa_shift.apply_to_expected(payments, opening_entry.name)
 
     closing_entry.set("pos_transactions", pos_transactions)
     closing_entry.set("payment_reconciliation", payments)
