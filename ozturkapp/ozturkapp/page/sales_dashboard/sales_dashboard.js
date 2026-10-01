@@ -301,6 +301,8 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 	}
 
 	// Gorizontal ulush chiziqlari: [{label, value, hint}] — eng kattasi 100%.
+	// `r.color` berilsa chiziq o'sha rangda, fon esa uning och tusida — summasi
+	// 0 bo'lgan qatorda ham rang ko'rinadi.
 	bar_list(rows, { tone = "primary", money = true } = {}) {
 		if (!rows.length) return `<div class="sd-hint">${__("Ma'lumot yo'q")}</div>`;
 		const max = Math.max(...rows.map((r) => Math.abs(flt(r.value)))) || 1;
@@ -312,7 +314,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<span class="sd-bar-value">${money ? this.money(r.value) : this.num(r.value)}
 						<span class="text-muted">· ${this.pct((flt(r.value) / total) * 100)}</span></span>
 				</div>
-				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-${tone}" style="width:${(Math.abs(flt(r.value)) / max) * 100}%${r.color ? `;background:${r.color}` : ""}"></div></div>
+				<div class="sd-bar-track"${r.color ? ` style="background:${r.color}33"` : ""}><div class="sd-bar-fill sd-fill-${tone}" style="width:${(Math.abs(flt(r.value)) / max) * 100}%${r.color ? `;background:${r.color}` : ""}"></div></div>
 				${r.hint ? `<div class="sd-bar-hint">${r.hint}</div>` : ""}
 			</div>`).join("")}</div>`;
 	}
@@ -474,18 +476,31 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			return;
 		}
 
-		// Chegirma turlari (sabab) — har biri alohida qator va o'z rangida;
-		// qatorda kim bergani va nechta chek ekani ham ko'rinadi.
+		// Chegirma turlari (sabab) — har biri alohida qator va o'z rangida.
+		// Kassadagi tayyor turlar (features/payment/discount.js REASONS) davrda
+		// chegirma bo'lmasa ham 0 bilan ko'rinadi; ranglari o'zgarmas.
+		const STANDARD = [
+			[__("Aksiya"), "#e24c4c"],
+			[__("Xodim"), "#eab308"],
+			[__("Shikoyat"), "#2490ef"],
+			[__("Doimiy mijoz"), "#10b981"],
+		];
+		const extra_colors = ["#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#64748b"];
 		const types = {};
+		STANDARD.forEach(([reason, color], order) => {
+			types[reason] = { reason, color, order, discount: 0, count: 0, by: {} };
+		});
 		for (const r of d.rows) {
-			const t = (types[r.reason] ||= { reason: r.reason, discount: 0, count: 0, by: {} });
+			const t = (types[r.reason] ||= {
+				reason: r.reason, color: null, order: STANDARD.length, discount: 0, count: 0, by: {},
+			});
 			t.discount += flt(r.discount);
 			t.count += 1;
 			t.by[r.user_name] = (t.by[r.user_name] || 0) + flt(r.discount);
 		}
-		const palette = ["#e24c4c", "#f59e0b", "#2490ef", "#10b981", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
 		const discount_types = Object.values(types)
-			.sort((a, b) => b.discount - a.discount)
+			// Avval summasi bor turlar (kattadan), keyin bo'shlari — tayyor tartibda.
+			.sort((a, b) => b.discount - a.discount || a.order - b.order)
 			.map((t, i) => {
 				const by = Object.entries(t.by).sort((a, b) => b[1] - a[1]);
 				const who = by.length === 1
@@ -494,8 +509,10 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 				return {
 					label: t.reason,
 					value: t.discount,
-					color: palette[i % palette.length],
-					hint: `${__("{0} ta chek", [t.count])} · ${this.esc(who)}`,
+					color: t.color || extra_colors[i % extra_colors.length],
+					hint: t.count
+						? `${__("{0} ta chek", [t.count])} · ${this.esc(who)}`
+						: __("Bu davrda berilmagan"),
 				};
 			});
 
