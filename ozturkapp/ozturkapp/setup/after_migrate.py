@@ -40,6 +40,7 @@ def run():
 	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
 	from ozturkapp.ozturkapp.setup.kot_failsafe_setup import setup as setup_kot_failsafe
 	from ozturkapp.ozturkapp.setup.currency_setup import setup as setup_currency
+	from ozturkapp.ozturkapp.setup.finance_workspace_setup import setup as setup_finance_workspace
 
 	tasks = [
 		create_fields,
@@ -95,6 +96,8 @@ def run():
 		setup_kot_failsafe,
 		# Kompaniya bitta valyutada — "лв" (UZS belgisi) hech qayerda chiqmaydi.
 		setup_currency,
+		# «Finance Manager» workspace'idagi «Kassa qoldiqlari» HTML bloki.
+		setup_finance_workspace,
 	]
 	for fn in tasks:
 		try:
