@@ -4,12 +4,23 @@
 
 """
 Kontragent Otchet - Barcha kontragentlar bo'yicha sverka
+
+Ichki kontragentlar (sklad/filial kompaniyalarini ifodalovchi Customer /
+Supplier — is_internal_customer / is_internal_supplier) "Toifa" ustunida
+"Ichki: <kompaniya>" bilan belgilanadi va "Ichki" filtri bilan ajratib ko'rish mumkin.
+Bu qarz tashqi mijoz/ta'minotchi bilan emas, guruh ichidagi (Branch Stock
+Transfer) hisob-kitob. JAMI qatori — filtrdan o'tgan barcha qatorlar yig'indisi.
 """
 
 import frappe
 from frappe import _
 from frappe.utils import flt, getdate
 from urllib.parse import quote
+
+from ozturkapp.ozturkapp.report.internal_parties import INTERNAL_LABEL, get_internal_parties
+
+INTERNAL_FILTER_ONLY = "Faqat ichki"
+INTERNAL_FILTER_EXCLUDE = "Faqat tashqi"
 
 
 def execute(filters=None):
@@ -41,6 +52,7 @@ def get_columns():
         {"label": _("Kontragent turi"), "fieldname": "party_type", "fieldtype": "Data", "width": 110},
         {"label": _("Kontragent"), "fieldname": "party", "fieldtype": "Dynamic Link", "options": "party_type", "width": 180},
         {"label": _("Nomi"), "fieldname": "party_name", "fieldtype": "Data", "width": 180},
+        {"label": _("Toifa"), "fieldname": "category", "fieldtype": "Data", "width": 130},
         {"label": _("Kompaniya"), "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 150},
         {"label": _("Akt Sverka"), "fieldname": "akt_sverka", "fieldtype": "HTML", "width": 100},
         {"label": _("Debet (dan oldin)"), "fieldname": "opening_debit", "fieldtype": "Currency", "width": 140},
@@ -61,6 +73,13 @@ def get_data(filters):
 
     results = _query_party_based(party_type, party, company, from_date, to_date)
     party_names = get_party_names(party_type, [r.entity for r in results])
+
+    internal = get_internal_parties().get(party_type) or {}
+    internal_filter = filters.get("internal")
+    if internal_filter == INTERNAL_FILTER_ONLY:
+        results = [r for r in results if r.entity in internal]
+    elif internal_filter == INTERNAL_FILTER_EXCLUDE:
+        results = [r for r in results if r.entity not in internal]
 
     data = []
     totals = {"opening_credit": 0, "opening_debit": 0, "period_credit": 0, "period_debit": 0, "closing_credit": 0, "closing_debit": 0}
@@ -91,6 +110,10 @@ def get_data(filters):
             "party": r.entity,
             "party_name": party_names.get(r.entity) or r.entity,
             "company": r.company,
+            # "Ichki: <ifodalangan kompaniya>" — qaysi filial/sklad ekani darhol ko'rinsin
+            "category": (f"Ichki: {internal[r.entity]}" if internal.get(r.entity) else _(INTERNAL_LABEL))
+            if r.entity in internal else "",
+            "is_internal": 1 if r.entity in internal else 0,
             "akt_sverka": akt_link,
             "opening_credit": opening_credit,
             "opening_debit": opening_debit,

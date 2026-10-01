@@ -8,6 +8,7 @@
   "naming_series",
   "date",
   "oborot",
+  "company",
   "column_break_main",
   "source_account",
   "source_balance",
@@ -23,6 +24,7 @@
   "filial",
   "section_break_expense",
   "kontragent",
+  "via_sklad",
   "expense_kontragent",
   "section_summa",
   "summa",
@@ -34,7 +36,8 @@
   "payment_account_2",
   "journal_entry",
   "payment_entry",
-  "company",
+  "payment_entry_receive",
+  "payment_entry_supplier",
   "amended_from"
  ],
  "fields": [
@@ -151,7 +154,7 @@
    "in_standard_filter": 1,
    "label": "Filial",
    "options": "Kassa Filial",
-   "description": "Ixtiyoriy — tanlansa «Xarajat kontragenti» shu filial xarajat guruhi bilan filtrlanadi"
+   "description": "Ixtiyoriy. Xarajat shu filial kompaniyasi kitobiga yoziladi va «Xarajat kontragenti» uning xarajat guruhi bilan filtrlanadi. Filial boshqa kompaniyaniki bo'lsa — kompaniyalararo xarajat (pul o'sha kompaniya kassasi orqali o'tadi)."
   },
   {
    "depends_on": "eval:doc.oborot && doc.oborot!='Перемещение'",
@@ -240,9 +243,11 @@
   {
    "fieldname": "company",
    "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Company",
-   "options": "Company"
+   "label": "Kompaniya",
+   "options": "Company",
+   "in_standard_filter": 1,
+   "in_list_view": 1,
+   "description": "Kassa qaysi kompaniya kitobiga yoziladi. Kassa (Mode of Payment) bitta kompaniyaga tegishli bo'lsa avtomatik to'ladi."
   },
   {
    "fieldname": "amended_from",
@@ -252,12 +257,36 @@
    "options": "Kassa",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.oborot=='Расход' && doc.party_type=='Supplier'",
+   "fieldname": "via_sklad",
+   "fieldtype": "Check",
+   "label": "Sklad nomidan to'lash",
+   "description": "Supplier Sklad kitobida (Sklad xaridi). Pul filial kassasidan chiqadi, lekin Sklad'ning supplierga qarzi yopiladi, filialning Sklad'ga qarzi kamayadi."
+  },
+  {
+   "fieldname": "payment_entry_receive",
+   "fieldtype": "Link",
+   "label": "Payment Entry (2-kompaniya)",
+   "no_copy": 1,
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry_supplier",
+   "fieldtype": "Link",
+   "label": "Payment Entry (Supplier/Employee)",
+   "no_copy": 1,
+   "options": "Payment Entry",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-11 23:00:00.000000",
+ "modified": "2026-10-01 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Ozturkapp",
  "name": "Kassa",

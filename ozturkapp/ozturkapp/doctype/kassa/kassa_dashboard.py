@@ -4,15 +4,12 @@ from frappe import _
 def get_data():
 	"""Kassa formasining pastidagi «Connections» bo'limi.
 
-	Kassa hujjati o'zi Payment Entry / Journal Entry ga link qiladi (reverse emas),
-	shuning uchun internal_links orqali joriy hujjatdagi maydon qiymati ko'rsatiladi.
+	Kompaniyalararo oqimda bitta Kassa 2-4 ta hujjat (ikki kompaniya kitobida)
+	yaratadi — ularning hammasi `custom_kassa` maydoni orqali topiladi
+	(after_migrate: `kassa_setup.ensure_kassa_link_fields`).
 	"""
 	return {
-		"fieldname": "kassa",
-		"internal_links": {
-			"Payment Entry": "payment_entry",
-			"Journal Entry": "journal_entry",
-		},
+		"fieldname": "custom_kassa",
 		"transactions": [
 			{
 				"label": _("Buxgalteriya hujjatlari"),

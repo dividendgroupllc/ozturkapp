@@ -207,6 +207,13 @@ override_whitelisted_methods[
 	"ury.ury.doctype.ury_order.ury_order.sync_order"
 ] = "ozturkapp.ozturkapp.overrides.ury_order.sync_order"
 
+# Upstream `getRestaurantMenu` faqat "URY Menu Item".disabled ni tekshiradi,
+# Item.disabled ni emas — o'chirilgan tovar POS menyusida qolardi. O'ram
+# ularni filtrlaydi. Qarang: overrides/ury_menu.py
+override_whitelisted_methods[
+	"ury.ury_pos.api.getRestaurantMenu"
+] = "ozturkapp.ozturkapp.overrides.ury_menu.getRestaurantMenu"
+
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
 # 	{

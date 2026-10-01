@@ -30,7 +30,7 @@
    "label": "Faol"
   },
   {
-   "description": "Filial kompaniyasi (bitta kompaniyali saytda — asosiy kompaniya)",
+   "description": "Xarajat shu kompaniya kitobiga yoziladi. Kassa boshqa kompaniyaniki bo'lsa — kompaniyalararo xarajat (pul shu kompaniya kassasi orqali o'tadi)",
    "fieldname": "company",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -38,7 +38,7 @@
    "options": "Company"
   },
   {
-   "description": "Bu filialning kassa hisobi (Mode of Payment)",
+   "description": "Ixtiyoriy. Kompaniyalararo xarajatda pul shu kassaga tushib, xarajatga chiqadi. Bo'sh bo'lsa — Ozturk Settings -> Kompaniya kassalari",
    "fieldname": "mode_of_payment",
    "fieldtype": "Link",
    "label": "Kassa hisobi (Mode of Payment)",
@@ -59,7 +59,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-06 10:00:00.000000",
+ "modified": "2026-10-01 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Ozturkapp",
  "name": "Kassa Filial",

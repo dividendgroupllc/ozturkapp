@@ -19,6 +19,10 @@ Ustunlar:
 - Sarflangan (Stock Entry Manufacture / Repack / Disassemble / Material Consumption, actual_qty < 0)
 - Hisobdan chiqarish (Stock Entry Material Issue)
 - Ko'chirish kirim / chiqim (Material Transfer, Transfer for Manufacture, Send to Subcontractor)
+- Ichki kirim / chiqim (filial/sklad) — kompaniyalararo o'tkazma: ichki mijozga
+  yozilgan SI/DN, ichki ta'minotchidan PI/PR yoki Branch Stock Transfer
+  yaratgan hujjat. Ular sotuv/xarid EMAS — tovar guruh ichida tan narxda
+  ko'chadi, shuning uchun "Kirim"/"Sotilgan" ustunlariga tushmaydi.
 - Sotilgan (Sales Invoice / Delivery Note / POS Invoice, actual_qty < 0)
 - Mijoz qaytargan (Sales qaytarish, actual_qty > 0)
 - Inventarizatsiya (Stock Reconciliation: qty_after_transaction - oldingi qoldiq)
@@ -28,6 +32,7 @@ Ustunlar:
 Formula:
 Yakuniy = Boshlang'ich + Kirim - Qaytarish(ta'm.) + Ishlab chiqarilgan - Sarflangan
           - Hisobdan chiqarish + Ko'chirish kirim - Ko'chirish chiqim
+          + Ichki kirim - Ichki chiqim
           - Sotilgan + Mijoz qaytargan + Inventarizatsiya + Boshqa
 
 Stock Reconciliation: ERPNext v15 da oddiy (batch/serial'siz) tovarlar uchun
@@ -45,6 +50,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate
 
+from ozturkapp.ozturkapp.report.internal_parties import get_internal_vouchers
+
 
 SALES_VOUCHERS = ("Sales Invoice", "Delivery Note", "POS Invoice")
 PURCHASE_VOUCHERS = ("Purchase Receipt", "Purchase Invoice")
@@ -60,6 +67,8 @@ MOVEMENT_FIELDS = [
     ("issue_qty", "Hisobdan chiqarish", -1),
     ("transfer_in_qty", "Ko'chirish (kirim)", 1),
     ("transfer_out_qty", "Ko'chirish (chiqim)", -1),
+    ("ic_in_qty", "Ichki kirim (filial/sklad)", 1),
+    ("ic_out_qty", "Ichki chiqim (filial/sklad)", -1),
     ("sales_qty", "Sotilgan", -1),
     ("sales_return_qty", "Mijoz qaytargan", 1),
     ("reconciliation_qty", "Inventarizatsiya", 1),
@@ -74,6 +83,8 @@ MOVEMENT_LABELS = {
     "issue": "Hisobdan chiqarish",
     "transfer_in": "Ko'chirish (kirim)",
     "transfer_out": "Ko'chirish (chiqim)",
+    "ic_in": "Ichki kirim (filial/sklad)",
+    "ic_out": "Ichki chiqim (filial/sklad)",
     "sales": "Sotilgan",
     "sales_return": "Mijoz qaytargan",
     "reconciliation": "Inventarizatsiya",
@@ -197,7 +208,7 @@ def get_sle_entries(filters):
 
     where_clause = " AND ".join(conditions)
 
-    return frappe.db.sql("""
+    entries = frappe.db.sql("""
         SELECT
             sle.item_code,
             item.item_name,
@@ -221,11 +232,21 @@ def get_sle_entries(filters):
         ORDER BY sle.posting_date, sle.posting_time, sle.creation
     """.format(where_clause=where_clause), params, as_dict=True)
 
+    # Kompaniyalararo (ichki) hujjatlarni belgilash — bitta batch so'rov
+    internal = get_internal_vouchers({(e.voucher_type, e.voucher_no) for e in entries})
+    for e in entries:
+        e.is_internal = (e.voucher_type, e.voucher_no) in internal
+    return entries
+
 
 def categorize_movement(entry, qty=None):
     """Bitta SLE uchun kategoriya (qty - ishorali miqdor)."""
     voucher_type = entry.voucher_type
     qty = flt(entry.actual_qty) if qty is None else qty
+
+    # Ichki o'tkazma (filial/sklad) — qaytarish ham shu yerga: belgisiga qarab
+    if entry.get("is_internal"):
+        return "ic_in" if qty > 0 else "ic_out"
 
     if voucher_type in PURCHASE_VOUCHERS:
         return "purchase" if qty > 0 else "purchase_return"
@@ -388,7 +409,7 @@ def get_stock_movement_details(item_code, from_date, to_date, warehouse=None, mo
     Get detailed stock movements for drill-down.
 
     movement_type: purchase / purchase_return / manufacture_in / manufacture_out /
-                   issue / transfer_in / transfer_out / sales / sales_return /
+                   issue / transfer_in / transfer_out / ic_in / ic_out / sales / sales_return /
                    reconciliation / other
     """
     _check_permission()

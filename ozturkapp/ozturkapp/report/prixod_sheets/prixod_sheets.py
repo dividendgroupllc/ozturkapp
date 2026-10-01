@@ -1,9 +1,18 @@
 # Copyright (c) 2026, Ozturkapp and contributors
 # For license information, please see license.txt
 
+"""Prixod Sheets — ta'minotchilardan kirim (Purchase Invoice qatorlari).
+
+Ichki ta'minotchi (sklad/filial) dan kelgan PI — Branch Stock Transfer
+o'tkazmasi, haqiqiy xarid emas. Standart holatda CHIQARILADI; "Ички
+таъминотчиларни қўшиш" belgilansa qo'shiladi va "Ички" ustunida belgilanadi.
+"""
+
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import cint, flt, getdate
+
+from ozturkapp.ozturkapp.report.internal_parties import internal_supplier_sql
 
 
 def execute(filters=None):
@@ -31,6 +40,7 @@ def get_columns():
         {"fieldname": "rate", "label": _("Нархи"), "fieldtype": "Currency", "options": "currency", "width": 120},
         {"fieldname": "amount", "label": _("Суммаси"), "fieldtype": "Currency", "options": "currency", "width": 140},
         {"fieldname": "is_return", "label": _("Қайтариш"), "fieldtype": "Check", "width": 80},
+        {"fieldname": "is_internal", "label": _("Ички"), "fieldtype": "Check", "width": 60},
         {"fieldname": "company", "label": _("Компания"), "fieldtype": "Link", "options": "Company", "width": 150},
         {"fieldname": "purchase_invoice", "label": _("Ҳужжат"), "fieldtype": "Link", "options": "Purchase Invoice", "width": 170},
         {"fieldname": "currency", "label": _("Валюта"), "fieldtype": "Link", "options": "Currency", "hidden": 1},
@@ -59,6 +69,11 @@ def get_data(filters):
         )
         params.update({"ig_lft": ig.lft, "ig_rgt": ig.rgt})
 
+    # Ichki ta'minotchi (filial/sklad) — tovarning tan narxda ko'chishi, xarid emas.
+    # Ta'minotchi aniq tanlangan bo'lsa — foydalanuvchi aynan shuni so'ragan.
+    if not cint(filters.get("include_internal")) and not filters.get("supplier"):
+        conditions.append(f"NOT {internal_supplier_sql('pi.supplier', 'pi.name')}")
+
     where = " AND ".join(conditions)
 
     # Miqdor - ombor o'lchov birligida (stock_qty), summa - kompaniya valyutasida (base_*)
@@ -74,6 +89,7 @@ def get_data(filters):
             pii.base_amount / NULLIF(pii.stock_qty, 0) AS rate,
             pii.base_amount AS amount,
             pi.is_return,
+            {internal_supplier_sql("pi.supplier", "pi.name")} AS is_internal,
             comp.default_currency AS currency
         FROM `tabPurchase Invoice Item` pii
         INNER JOIN `tabPurchase Invoice` pi ON pi.name = pii.parent

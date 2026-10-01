@@ -409,7 +409,9 @@ def build_menu(scope, room=None, order_type=None) -> dict:
             hisob ochish huquqi bor foydalanuvchi (kassir) uchun hisobga
             oladi — ofitsantga ta'siri yo'q.
     """
-    from ury.ury_pos.api import getRestaurantMenu
+    # URY'ning o'z funksiyasi + o'chirilgan (Item.disabled) tovarlarni yashirish
+    # — POS'dagi `getRestaurantMenu` override'i bilan bir xil (overrides/ury_menu.py).
+    from ozturkapp.ozturkapp.overrides.ury_menu import getRestaurantMenu
 
     menu = getRestaurantMenu(scope.pos_profile, room=room or None, order_type=order_type or None)
 

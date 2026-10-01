@@ -38,6 +38,14 @@ frappe.query_reports["Prixod Sheets"] = {
             "label": __("Товар"),
             "fieldtype": "Link",
             "options": "Item"
+        },
+        {
+            // Belgilanmasa (standart) — ichki ta'minotchidan (sklad/filial)
+            // kelgan PI'lar, ya'ni Branch Stock Transfer kirimi chiqariladi.
+            "fieldname": "include_internal",
+            "label": __("Ички таъминотчиларни қўшиш (филиал/склад)"),
+            "fieldtype": "Check",
+            "default": 0
         }
     ],
 

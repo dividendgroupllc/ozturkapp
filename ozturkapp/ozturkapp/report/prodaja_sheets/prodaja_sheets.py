@@ -1,9 +1,23 @@
 # Copyright (c) 2026, Ozturkapp and contributors
 # For license information, please see license.txt
 
+"""Prodaja Sheets — sotuv qatorlari: summa, tannarx (СС), ustama va marja.
+
+Manba: Sales Invoice (shu jumladan POS yopilishidagi konsolidatsiya SI) va hali
+konsolidatsiya qilinmagan POS Invoice.
+
+* Taom (Product Bundle) tannarxi masalliqlar yig'indisidan olinadi —
+  qarang `attach_costs`.
+* Ichki mijozlar (filial/sklad, Branch Stock Transfer SI'lari) standart
+  holatda CHIQARILADI: bu sotuv emas, tovarning tan narxda ko'chishi.
+  "Ички мижозларни қўшиш" belgilansa qo'shiladi va "Ички" ustunida belgilanadi.
+"""
+
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import cint, flt, getdate
+
+from ozturkapp.ozturkapp.report.internal_parties import internal_customer_sql
 
 
 def execute(filters=None):
@@ -29,6 +43,7 @@ def get_columns():
         {"fieldname": "rate", "label": _("Нарх"), "fieldtype": "Currency", "options": "currency", "width": 110},
         {"fieldname": "amount", "label": _("Сумма"), "fieldtype": "Currency", "options": "currency", "width": 130},
         {"fieldname": "customer", "label": _("Клиент"), "fieldtype": "Data", "width": 150},
+        {"fieldname": "is_internal", "label": _("Ички"), "fieldtype": "Check", "width": 60},
         {"fieldname": "item_group", "label": _("Тип"), "fieldtype": "Data", "width": 120},
         {"fieldname": "cost_rate", "label": _("СС товар"), "fieldtype": "Currency", "options": "currency", "width": 110},
         {"fieldname": "cost_amount", "label": _("СС Сумма"), "fieldtype": "Currency", "options": "currency", "width": 130},
@@ -66,6 +81,12 @@ def get_conditions(filters, alias, item_alias, params):
             f"{item_alias}.item_group IN (SELECT name FROM `tabItem Group` WHERE lft >= %(ig_lft)s AND rgt <= %(ig_rgt)s)"
         )
         params.update({"ig_lft": ig.lft, "ig_rgt": ig.rgt})
+    # Ichki mijoz (filial/sklad) — Branch Stock Transfer SI'lari sotuv emas,
+    # tovarning tan narxda ko'chishi. Standart holatda chiqarib tashlanadi
+    # (mijoz aniq tanlangan bo'lsa — foydalanuvchi aynan shuni so'ragan).
+    if not cint(filters.get("include_internal")) and not filters.get("customer"):
+        voucher_col = f"{alias}.name" if alias == "si" else None
+        conditions.append(f"NOT {internal_customer_sql(alias + '.customer', voucher_col)}")
     return " AND ".join(conditions)
 
 
@@ -75,21 +96,26 @@ def get_rows(filters):
     pos_where = get_conditions(filters, "pi", "pii", params)
 
     # Summa - kompaniya valyutasida, chek chegirmasidan keyin (base_net_amount).
-    # Tannarx: incoming_rate - ombor o'lchov birligi uchun, shuning uchun stock_qty ga ko'paytiriladi.
+    # Tannarx keyin, Python'da hisoblanadi (`attach_costs`) — qarang o'sha yerdagi izoh.
     # POS Invoice: faqat hali Sales Invoice'ga konsolidatsiya qilinmaganlari
     # (yoki konsolidatsiya SI bekor qilingan) - ikki marta hisoblanmasligi uchun.
-    # POS Invoice Item'da incoming_rate yo'q - Bin/Item valuation_rate olinadi.
     return frappe.db.sql(f"""
         SELECT
             si.posting_date,
             si.posting_time,
             sii.idx,
+            sii.name AS row_name,
+            sii.item_code,
             sii.item_name,
             sii.qty,
+            sii.stock_qty,
+            sii.warehouse,
             sii.base_net_amount AS amount,
             IFNULL(si.customer_name, si.customer) AS customer,
+            {internal_customer_sql("si.customer", "si.name")} AS is_internal,
             sii.item_group,
-            sii.incoming_rate * sii.stock_qty AS cost_amount,
+            IFNULL(sii.incoming_rate, 0) * sii.stock_qty AS item_cost,
+            si.update_stock,
             si.is_return,
             COALESCE(NULLIF(si.branch, ''), si.company) AS branch,
             si.remarks,
@@ -107,16 +133,18 @@ def get_rows(filters):
             pi.posting_date,
             pi.posting_time,
             pii.idx,
+            pii.name AS row_name,
+            pii.item_code,
             pii.item_name,
             pii.qty,
+            pii.stock_qty,
+            pii.warehouse,
             pii.base_net_amount AS amount,
             IFNULL(pi.customer_name, pi.customer) AS customer,
+            {internal_customer_sql("pi.customer")} AS is_internal,
             pii.item_group,
-            COALESCE(
-                NULLIF((SELECT b.valuation_rate FROM `tabBin` b
-                        WHERE b.item_code = pii.item_code AND b.warehouse = pii.warehouse), 0),
-                item.valuation_rate, 0
-            ) * pii.stock_qty AS cost_amount,
+            0 AS item_cost,
+            0 AS update_stock,
             pi.is_return,
             COALESCE(NULLIF(pi.branch, ''), pi.company) AS branch,
             pi.remarks,
@@ -126,7 +154,6 @@ def get_rows(filters):
         FROM `tabPOS Invoice Item` pii
         INNER JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
         INNER JOIN `tabCompany` comp ON comp.name = pi.company
-        LEFT JOIN `tabItem` item ON item.name = pii.item_code
         WHERE {pos_where}
           AND (
               IFNULL(pi.consolidated_invoice, '') = ''
@@ -140,8 +167,140 @@ def get_rows(filters):
     """, params, as_dict=True)
 
 
+# =============================================================================
+# TANNARX
+# =============================================================================
+#
+# Taom — zaxirasiz (non-stock) tovar + Product Bundle. ERPNext tannarxni
+# (`incoming_rate`) taom qatoriga EMAS, uning `Packed Item` qatorlariga
+# (masalliqlarga) yozadi; taom qatorida incoming_rate = 0. Avvalgi versiya
+# faqat `sii.incoming_rate` ni o'qigani uchun taomlar tannarxi 0 chiqardi.
+#
+# Sales Invoice qatori tannarxi (ustuvorlik tartibida):
+#   1. update_stock=1 bo'lsa — shu qatorga yozilgan Stock Ledger Entry'lar
+#      (`voucher_detail_no` = qator nomi, masalliqlar ham shu nom bilan
+#      yoziladi): −Σ stock_value_difference. Bu GL'dagi COGS bilan AYNAN
+#      teng va orqa sana bilan qayta baholash (repost) bo'lsa ham yangilanadi.
+#      Submit paytida u Σ(packed.incoming_rate × packed.qty) ga teng.
+#   2. SLE yo'q bo'lsa — Σ(packed.incoming_rate × packed.qty)
+#      (`parent_detail_docname` bo'yicha) + qatorning o'z incoming_rate × stock_qty.
+#
+# POS Invoice (hali konsolidatsiya qilinmagan) — ombor harakati hali yo'q,
+# shuning uchun JORIY baho: masalliq qatorlari (Packed Item) bo'lsa ular,
+# bo'lmasa Product Bundle tarkibi × miqdor; oddiy tovar — o'zi. Baho: Bin
+# (masalliq ombori) valuation_rate, bo'lmasa Item.valuation_rate.
+
+def attach_costs(rows):
+    si_rows = [r for r in rows if r.voucher_type == "Sales Invoice"]
+    pos_rows = [r for r in rows if r.voucher_type == "POS Invoice"]
+
+    if si_rows:
+        si_names = list({r.sales_invoice for r in si_rows})
+        sle_cost = _sle_costs(si_names)
+        packed_si = _packed_rows("Sales Invoice", si_names)
+        for r in si_rows:
+            key = (r.sales_invoice, r.row_name)
+            if cint(r.update_stock) and key in sle_cost:
+                r.cost_amount = sle_cost[key]
+            else:
+                packed = packed_si.get(key) or []
+                r.cost_amount = flt(r.item_cost) + sum(
+                    flt(p.incoming_rate) * flt(p.qty) for p in packed
+                )
+
+    if pos_rows:
+        pos_names = list({r.sales_invoice for r in pos_rows})
+        packed_pos = _packed_rows("POS Invoice", pos_names)
+        bundles = _bundle_components({r.item_code for r in pos_rows})
+        valuation = _ValuationCache()
+        for r in pos_rows:
+            packed = packed_pos.get((r.sales_invoice, r.row_name))
+            if packed:
+                r.cost_amount = sum(
+                    flt(p.qty) * valuation.get(p.item_code, p.warehouse or r.warehouse) for p in packed
+                )
+            elif r.item_code in bundles:
+                r.cost_amount = sum(
+                    flt(c.qty) * flt(r.stock_qty) * valuation.get(c.item_code, r.warehouse)
+                    for c in bundles[r.item_code]
+                )
+            else:
+                r.cost_amount = flt(r.stock_qty) * valuation.get(r.item_code, r.warehouse)
+
+
+def _chunks(seq, size=500):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def _sle_costs(si_names):
+    """{(SI, qator nomi): tannarx} — SLE'dan, masalliqlar ham qatorga yig'iladi."""
+    result = {}
+    for chunk in _chunks(si_names):
+        for r in frappe.db.sql("""
+            SELECT voucher_no, voucher_detail_no, -SUM(stock_value_difference) AS cost
+            FROM `tabStock Ledger Entry`
+            WHERE voucher_type = 'Sales Invoice'
+              AND voucher_no IN %(names)s
+              AND is_cancelled = 0
+            GROUP BY voucher_no, voucher_detail_no
+        """, {"names": tuple(chunk)}, as_dict=True):
+            result[(r.voucher_no, r.voucher_detail_no)] = flt(r.cost)
+    return result
+
+
+def _packed_rows(parenttype, parents):
+    """{(hujjat, ota qator nomi): [Packed Item]}."""
+    result = {}
+    for chunk in _chunks(parents):
+        for p in frappe.db.sql("""
+            SELECT parent, parent_detail_docname, item_code, warehouse, qty, incoming_rate
+            FROM `tabPacked Item`
+            WHERE parenttype = %(pt)s AND parent IN %(names)s
+        """, {"pt": parenttype, "names": tuple(chunk)}, as_dict=True):
+            result.setdefault((p.parent, p.parent_detail_docname), []).append(p)
+    return result
+
+
+def _bundle_components(item_codes):
+    """{taom: [Product Bundle Item]} — faqat faol bundle'lar."""
+    item_codes = [i for i in item_codes if i]
+    if not item_codes:
+        return {}
+    result = {}
+    for c in frappe.db.sql("""
+        SELECT pb.new_item_code AS parent_item, pbi.item_code, pbi.qty
+        FROM `tabProduct Bundle Item` pbi
+        INNER JOIN `tabProduct Bundle` pb ON pb.name = pbi.parent
+        WHERE pb.new_item_code IN %(items)s AND IFNULL(pb.disabled, 0) = 0
+    """, {"items": tuple(item_codes)}, as_dict=True):
+        result.setdefault(c.parent_item, []).append(c)
+    return result
+
+
+class _ValuationCache:
+    """Joriy baho: Bin.valuation_rate (ombor bo'yicha), bo'lmasa Item.valuation_rate."""
+
+    def __init__(self):
+        self._bin = {}
+        self._item = {}
+
+    def get(self, item_code, warehouse):
+        key = (item_code, warehouse)
+        if key not in self._bin:
+            self._bin[key] = flt(frappe.db.get_value(
+                "Bin", {"item_code": item_code, "warehouse": warehouse}, "valuation_rate"
+            )) if warehouse else 0
+        if self._bin[key] > 0:
+            return self._bin[key]
+        if item_code not in self._item:
+            self._item[item_code] = flt(frappe.db.get_value("Item", item_code, "valuation_rate"))
+        return self._item[item_code]
+
+
 def get_data(filters):
     rows = get_rows(filters)
+    attach_costs(rows)
 
     data = []
     tot_amount = 0
@@ -170,6 +329,7 @@ def get_data(filters):
             "rate": (amount / qty) if qty else 0,
             "amount": amount,
             "customer": r.customer,
+            "is_internal": cint(r.is_internal),
             "item_group": r.item_group,
             "cost_rate": (cost_amount / qty) if qty else 0,
             "cost_amount": cost_amount,

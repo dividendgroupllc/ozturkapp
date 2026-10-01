@@ -102,6 +102,7 @@ function fetch_rate(frm, cdt, cdn, item_code, qty) {
 			from_company: frm.doc.from_company,
 			qty: qty,
 			posting_date: frm.doc.posting_date,
+			posting_time: frm.doc.posting_time,
 		},
 		callback(r) {
 			if (r.message) {

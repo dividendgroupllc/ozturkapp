@@ -50,11 +50,22 @@ frappe.query_reports["Kontragent Otchet"] = {
                 }
                 return party_type;
             }
+        },
+        {
+            // Ichki kontragentlar — sklad/filial kompaniyalari (Branch Stock Transfer)
+            fieldname: "internal",
+            label: __("Ichki (filial/sklad)"),
+            fieldtype: "Select",
+            options: "\nFaqat tashqi\nFaqat ichki"
         }
     ],
     
     formatter: function(value, row, column, data, default_formatter) {
         value = default_formatter(value, row, column, data);
+
+        if (data && data.is_internal && column.fieldname === "category") {
+            value = `<span style="color:#6a1b9a;font-weight:600;">${value}</span>`;
+        }
         
         // JAMI qatori - birinchi qator
         if (data && data.bold) {

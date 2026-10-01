@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "creation": "2026-10-01 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "account",
+  "account_name",
+  "net_amount",
+  "allocated_amount",
+  "remaining_amount",
+  "currency"
+ ],
+ "fields": [
+  {
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Hisob",
+   "options": "Account",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 4
+  },
+  {
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "label": "Hisob nomi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_amount",
+   "fieldtype": "Currency",
+   "label": "Davr xarajati",
+   "options": "currency",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "allocated_amount",
+   "fieldtype": "Currency",
+   "label": "Filiallarga",
+   "options": "currency",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "remaining_amount",
+   "fieldtype": "Currency",
+   "label": "Manbada qoladi",
+   "options": "currency",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Valyuta",
+   "options": "Currency",
+   "hidden": 1,
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-01 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ozturkapp",
+ "name": "Expense Allocation Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

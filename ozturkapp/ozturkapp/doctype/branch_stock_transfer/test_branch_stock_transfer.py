@@ -10,10 +10,16 @@ bo'lmasa SKIP.
 """
 
 import unittest
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import flt, get_time, today
+from frappe.utils import add_days, flt, get_time, today
+
+from ozturkapp.ozturkapp.doctype.branch_stock_transfer.branch_stock_transfer import (
+    BranchStockTransfer,
+    get_stock_shortages,
+)
 
 FROM_COMPANY = "O'zturk Sklad"
 TO_COMPANY = "O'zturk Maksim Gorkiy"
@@ -144,3 +150,125 @@ class TestBranchStockTransfer(FrappeTestCase):
         self.assertEqual(doc.items[0].source_type, "Item")
         self.assertEqual(doc.items[0].from_bom, bom.name)
         self.assertAlmostEqual(flt(doc.items[0].qty), 2)    # 4 × 1 / 2
+
+
+def _gl_income_cogs(si_name):
+    """SI bo'yicha (tushum, tannarx) — GL'dan."""
+    income = frappe.db.sql("""select sum(credit) - sum(debit) from `tabGL Entry` gle
+        join tabAccount a on a.name = gle.account
+        where gle.voucher_no = %s and gle.is_cancelled = 0 and a.root_type = 'Income'""", si_name)[0][0]
+    cogs = frappe.db.sql("""select sum(debit) - sum(credit) from `tabGL Entry` gle
+        join tabAccount a on a.name = gle.account
+        where gle.voucher_no = %s and gle.is_cancelled = 0 and a.account_type = 'Cost of Goods Sold'""",
+                         si_name)[0][0]
+    return flt(income), flt(cogs)
+
+
+@unittest.skipUnless(_prereqs_ok(), "Kompaniyalar yoki ichki kontragentlar topilmadi")
+class TestBranchStockTransferHistoricalRate(FrappeTestCase):
+    """Orqa sana bilan o'tkazma: narx HUJJAT VAQTIDAGI tan narx, joriy Bin bahosi emas.
+
+    Tarix (shu test uchun yangi tovar):
+        bugun−10  kirim 10 × 1 000
+        bugun     kirim 10 × 3 000   → joriy baho 2 000
+        bugun−5   o'tkazma 4 dona    → to'g'ri narx 1 000 (o'sha paytdagi)
+    """
+
+    OLD_RATE, NEW_RATE = 1000, 3000
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        frappe.set_user("Administrator")
+        cls.from_wh = _from_warehouse()
+        cls.item = frappe.get_doc({
+            "doctype": "Item", "item_name": "_Test BST Tarixiy " + frappe.generate_hash(length=6),
+            "item_group": "All Item Groups", "stock_uom": "Kg", "is_stock_item": 1,
+        }).insert(ignore_permissions=True).name
+        cls._receipt(add_days(today(), -10), "10:00:00", cls.OLD_RATE)
+        cls._receipt(today(), None, cls.NEW_RATE)
+
+    @classmethod
+    def _receipt(cls, posting_date, posting_time, rate):
+        se = frappe.get_doc({
+            "doctype": "Stock Entry", "stock_entry_type": "Material Receipt", "company": FROM_COMPANY,
+            "posting_date": posting_date, "set_posting_time": 1 if posting_time else 0,
+            "items": [{"item_code": cls.item, "qty": 10, "t_warehouse": cls.from_wh,
+                       "basic_rate": rate, "uom": "Kg", "conversion_factor": 1}],
+        })
+        if posting_time:
+            se.posting_time = posting_time
+        se.insert(ignore_permissions=True)
+        se.submit()
+
+    def _new(self, qty=4):
+        doc = frappe.new_doc("Branch Stock Transfer")
+        doc.posting_date = add_days(today(), -5)
+        doc.posting_time = "12:00:00"
+        doc.from_company, doc.from_warehouse = FROM_COMPANY, self.from_wh
+        doc.to_company, doc.to_warehouse = TO_COMPANY, TO_WAREHOUSE
+        doc.append("items", {"source_type": "Item", "reference": self.item, "qty": qty})
+        return doc
+
+    def _assert_at_historical_cost(self, doc):
+        si = frappe.get_doc("Sales Invoice", doc.sales_invoice)
+        pi = frappe.get_doc("Purchase Invoice", doc.purchase_invoice)
+        self.assertAlmostEqual(flt(si.items[0].rate), self.OLD_RATE, places=2)
+        self.assertAlmostEqual(flt(pi.items[0].rate), self.OLD_RATE, places=2)
+        self.assertAlmostEqual(flt(si.grand_total), flt(pi.grand_total), places=2)
+
+        income, cogs = _gl_income_cogs(si.name)
+        self.assertAlmostEqual(income, 4 * self.OLD_RATE, places=2)
+        self.assertAlmostEqual(income, cogs, places=2)          # skladda foyda/zarar yo'q
+
+        # Filialda kirim ham o'sha narxda
+        in_rate = frappe.db.get_value("Stock Ledger Entry",
+                                      {"voucher_no": pi.name, "is_cancelled": 0}, "incoming_rate")
+        self.assertAlmostEqual(flt(in_rate), self.OLD_RATE, places=2)
+
+        # BST qatorlari va jami yakuniy narxda
+        doc.reload()
+        self.assertAlmostEqual(flt(doc.items[0].rate), self.OLD_RATE, places=2)
+        self.assertAlmostEqual(flt(doc.total_amount), 4 * self.OLD_RATE, places=2)
+
+    def test_current_bin_rate_differs(self):
+        """Tekshiruv sharti: joriy baho tarixiy bahodan farq qiladi."""
+        bin_rate = flt(frappe.db.get_value("Bin", {"item_code": self.item, "warehouse": self.from_wh},
+                                           "valuation_rate"))
+        self.assertNotAlmostEqual(bin_rate, self.OLD_RATE, places=2)
+
+    def test_backdated_transfer_uses_historical_rate(self):
+        doc = self._new()
+        doc.insert()
+        self.assertAlmostEqual(flt(doc.items[0].rate), self.OLD_RATE, places=2)
+        doc.submit()
+        self._assert_at_historical_cost(doc)
+
+    def test_si_incoming_rate_overrides_preview_rate(self):
+        """Ko'rish narxi noto'g'ri bo'lsa ham (masalan joriy baho), SI narxi
+        ERPNext hisoblagan incoming_rate ga tenglashadi — tushum == tannarx."""
+        with patch.object(BranchStockTransfer, "_get_valuation_rate", return_value=2000):
+            doc = self._new()
+            doc.insert()
+            self.assertAlmostEqual(flt(doc.items[0].rate), 2000, places=2)
+            doc.submit()
+        self._assert_at_historical_cost(doc)
+
+    def test_negative_stock_warning(self):
+        """Hujjat vaqtida qoldiq yetmasa — ro'yxat bilan ogohlantirish (taqiq emas)."""
+        doc = self._new(qty=15)     # bugun−5 da faqat 10 bor
+        doc.posting_time = "11:00:00"   # boshqa testlarning 12:00 dagi o'tkazmasidan oldin
+        shortages = get_stock_shortages(self.from_wh, [{"item_code": self.item, "qty": 15}],
+                                        doc.posting_date, doc.posting_time)
+        self.assertEqual(len(shortages), 1)
+        self.assertAlmostEqual(shortages[0]["available"], 10)
+        self.assertAlmostEqual(shortages[0]["shortage"], 5)
+
+        frappe.clear_messages()
+        doc.insert()
+        messages = " ".join(str(m) for m in frappe.get_message_log())
+        self.assertIn("MANFIY", messages)
+
+        # Yetarli bo'lsa — ogohlantirish yo'q
+        self.assertEqual(get_stock_shortages(self.from_wh, [{"item_code": self.item, "qty": 4}],
+                                             doc.posting_date, doc.posting_time), [])

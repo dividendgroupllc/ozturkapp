@@ -15,6 +15,19 @@ Cancel: teskari tartibda — avval PI, keyin SI.
 Narx doim manba ombordagi tan narx (valuation), USTAMASIZ — SI va PI summalari
 teng, sklad kompaniyasida foyda/zarar chiqmaydi.
 
+Tan narx HUJJAT SANASI VA VAQTIGA olinadi (tarixiy chiqim narxi), joriy Bin
+bahosiga emas. Sabab: orqa sana bilan o'tkazma qilinsa, ERPNext SI tannarxini
+(COGS) o'sha paytdagi narxda yozadi; narx joriy bahodan olinsa, tushum ≠
+tannarx bo'lib, skladda soxta foyda/zarar chiqardi. Shuning uchun:
+  * validate'da narx `get_incoming_rate(posting_date, posting_time)` dan
+    (ko'rish uchun);
+  * submit'da SI insert qilingach, ERPNext o'zi hisoblagan har qator
+    `incoming_rate` i SI narxiga yoziladi (SI tushumi == SI tannarxi), PI va
+    BST qatorlari ham AYNAN shu narxga keltiriladi.
+
+Manba omborda hujjat vaqtida yetarli qoldiq bo'lmasa — ro'yxat bilan ogohlantirish
+(`_warn_negative_stock`). Taqiqlanmaydi: manfiy qoldiqqa ruxsat Stock Settings'da.
+
 Jazira (`jazira_app`) dagi shu nomli DocType'dan ko'chirilgan. Farqlar:
   * narx turi (`price_basis`) yo'q — faqat tan narx. Jazira'da "Manual" tanlansa
     narx 0 ga yozilib ketardi;
@@ -28,6 +41,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, get_link_to_form, nowtime, today
+from frappe.utils import escape_html
 
 from erpnext.stock.utils import validate_warehouse_company
 
@@ -39,6 +53,7 @@ class BranchStockTransfer(Document):
         self._validate_warehouses()
         self._explode_and_rate()
         self._compute_totals()
+        self._warn_negative_stock()
 
     def _set_status(self):
         self.status = {0: "Draft", 1: "Completed", 2: "Cancelled"}.get(self.docstatus, "Draft")
@@ -112,13 +127,12 @@ class BranchStockTransfer(Document):
         ]
 
     def _get_valuation_rate(self, item_code, qty):
-        """Manba ombordagi joriy tan narx: avval Bin, bo'lmasa ERPNext'ning chiqim narxi."""
-        rate = flt(frappe.db.get_value(
-            "Bin", {"item_code": item_code, "warehouse": self.from_warehouse}, "valuation_rate"
-        ))
-        if rate > 0:
-            return rate
+        """Manba ombordagi tan narx HUJJAT SANASI/VAQTI holatiga (tarixiy chiqim narxi).
 
+        Avval ERPNext'ning chiqim narxi (`get_incoming_rate` — SI submit'da COGS
+        aynan shu bilan yoziladi), topilmasa joriy Bin bahosi (masalan, o'sha
+        paytgacha omborda harakat bo'lmagan bo'lsa). Yakuniy narx baribir
+        submit'da SI'ning o'z `incoming_rate` iga tenglashtiriladi."""
         from erpnext.stock.utils import get_incoming_rate
 
         try:
@@ -139,6 +153,11 @@ class BranchStockTransfer(Document):
             rate = 0
 
         if rate <= 0:
+            rate = flt(frappe.db.get_value(
+                "Bin", {"item_code": item_code, "warehouse": self.from_warehouse}, "valuation_rate"
+            ))
+
+        if rate <= 0:
             frappe.msgprint(
                 _("{0} uchun {1} omborida tan narx topilmadi — 0 olindi.").format(item_code, self.from_warehouse),
                 indicator="orange",
@@ -149,6 +168,36 @@ class BranchStockTransfer(Document):
     def _compute_totals(self):
         self.total_qty = sum(flt(r.qty) for r in self.items)
         self.total_amount = sum(flt(r.amount) for r in self.items)
+
+    def _warn_negative_stock(self):
+        """Hujjat sanasi/vaqtida manba omborda yetarli qoldiq bo'lmasa — ro'yxat bilan ogohlantirish."""
+        shortages = get_stock_shortages(
+            self.from_warehouse, self.items, self.posting_date or today(), self.posting_time or nowtime()
+        )
+        if not shortages:
+            return
+        rows = "".join(
+            "<tr><td>{0}</td><td style='text-align:right'>{1}</td>"
+            "<td style='text-align:right'>{2}</td><td style='text-align:right'><b>{3}</b></td></tr>".format(
+                escape_html(s["item_name"] or s["item_code"]),
+                frappe.format(s["available"], {"fieldtype": "Float"}),
+                frappe.format(s["required"], {"fieldtype": "Float"}),
+                frappe.format(s["shortage"], {"fieldtype": "Float"}),
+            )
+            for s in shortages
+        )
+        frappe.msgprint(
+            _("{0} omborida {1} {2} holatiga quyidagi tovarlar yetarli emas — o'tkazmadan keyin qoldiq MANFIY bo'ladi:").format(
+                escape_html(self.from_warehouse or ""), self.posting_date, self.posting_time or ""
+            )
+            + "<table class='table table-bordered table-condensed' style='margin-top:8px'>"
+            + "<tr><th>{0}</th><th>{1}</th><th>{2}</th><th>{3}</th></tr>".format(
+                _("Tovar"), _("Mavjud"), _("Kerak"), _("Yetmaydi")
+            )
+            + rows + "</table>",
+            title=_("Manfiy qoldiq xavfi"),
+            indicator="orange",
+        )
 
     # ── Submit: inter-company SI + PI ─────────────────────────────
     def on_submit(self):
@@ -206,8 +255,44 @@ class BranchStockTransfer(Document):
         si.flags.ignore_permissions = True
         si.run_method("calculate_taxes_and_totals")
         si.insert(ignore_permissions=True)
+
+        # ERPNext insert'da har qatorga hujjat vaqtidagi chiqim narxini
+        # (`incoming_rate`) qo'ydi — COGS aynan shu bilan yoziladi. Narxni unga
+        # tenglaymiz: tushum == tannarx (orqa sanali o'tkazmada ham).
+        if self._sync_rates_to_incoming(si):
+            si.run_method("calculate_taxes_and_totals")
+            si.save(ignore_permissions=True)
+
         si.submit()
+        self._store_final_rates(si)
         return si
+
+    def _sync_rates_to_incoming(self, si):
+        """SI qatorlari narxini ERPNext hisoblagan `incoming_rate` ga keltiradi.
+        O'zgarish bo'lsa True."""
+        changed = False
+        for row in si.items:
+            incoming = flt(row.incoming_rate)
+            if incoming <= 0:
+                continue        # tan narx topilmadi — validate'da ogohlantirilgan
+            if abs(flt(row.rate) - incoming) > 1e-6:
+                row.rate = incoming
+                row.price_list_rate = incoming
+                row.discount_percentage = 0
+                row.discount_amount = 0
+                changed = True
+        return changed
+
+    def _store_final_rates(self, si):
+        """Yakuniy (SI) narxlarni BST qatorlari va jamiga yozadi — PI shu qatorlardan tuziladi."""
+        for line, si_item in zip(self.items, si.items):
+            rate = flt(si_item.rate)
+            if abs(flt(line.rate) - rate) > 1e-6:
+                line.rate = rate
+                line.amount = flt(line.qty) * rate
+                line.db_update()
+        self._compute_totals()
+        self.db_set("total_amount", self.total_amount, update_modified=False)
 
     def _create_purchase_invoice(self, si, supplier):
         """Maqsad kompaniya: omborga kirim, SI ga bog'langan.
@@ -265,6 +350,45 @@ class BranchStockTransfer(Document):
         self.db_set("status", "Cancelled")
 
 
+def get_stock_shortages(warehouse, items, posting_date, posting_time):
+    """Hujjat vaqtida (`posting_date` + `posting_time`) yetmaydigan tovarlar.
+
+    Bir tovar bir necha qatorda bo'lsa miqdorlari qo'shiladi. Qoldiq — shu
+    vaqtgacha bo'lgan oxirgi SLE'ning `qty_after_transaction` i (ERPNext
+    `get_stock_balance` bilan bir xil mantiq, ruxsat tekshiruvisiz).
+    """
+    if not warehouse:
+        return []
+    from erpnext.stock.stock_ledger import get_previous_sle
+
+    required, names = {}, {}
+    for row in items:
+        code = row.get("item_code")
+        if not code:
+            continue
+        required[code] = required.get(code, 0) + flt(row.get("qty"))
+        names[code] = row.get("item_name")
+
+    shortages = []
+    for code, qty in required.items():
+        prev = get_previous_sle({
+            "item_code": code,
+            "warehouse": warehouse,
+            "posting_date": posting_date,
+            "posting_time": posting_time,
+        })
+        available = flt((prev or {}).get("qty_after_transaction"))
+        if available + 1e-9 < qty:
+            shortages.append({
+                "item_code": code,
+                "item_name": names.get(code),
+                "available": available,
+                "required": qty,
+                "shortage": qty - available,
+            })
+    return shortages
+
+
 def get_internal_party(doctype, company):
     """`company` ni ifodalovchi ichki Customer/Supplier."""
     flag = "is_internal_customer" if doctype == "Customer" else "is_internal_supplier"
@@ -295,8 +419,8 @@ def explode_boms(docname):
 
 
 @frappe.whitelist()
-def get_item_rate(item_code, from_warehouse, from_company, qty=1, posting_date=None):
-    """Bitta tovarning tan narxi (formadagi qator uchun)."""
+def get_item_rate(item_code, from_warehouse, from_company, qty=1, posting_date=None, posting_time=None):
+    """Bitta tovarning tan narxi (formadagi qator uchun) — hujjat sanasi/vaqti holatiga."""
     frappe.has_permission("Branch Stock Transfer", "read", throw=True)
     if not item_code:
         return {"rate": 0, "uom": None}
@@ -304,6 +428,7 @@ def get_item_rate(item_code, from_warehouse, from_company, qty=1, posting_date=N
     tmp.from_warehouse = from_warehouse
     tmp.from_company = from_company
     tmp.posting_date = posting_date or today()
+    tmp.posting_time = posting_time or nowtime()
     return {
         "rate": tmp._get_valuation_rate(item_code, flt(qty)),
         "uom": frappe.get_cached_value("Item", item_code, "stock_uom"),
