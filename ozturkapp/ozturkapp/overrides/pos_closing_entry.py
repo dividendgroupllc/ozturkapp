@@ -56,9 +56,36 @@ def consolidate_by_day(closing_entry):
     by_customer = invoice_map_by_day(invoices)
     if len(invoices) >= QUEUE_THRESHOLD:
         closing_entry.set_status(update=True, status="Queued")
-        merge.enqueue_job(merge.create_merge_logs, invoice_by_customer=by_customer, closing_entry=closing_entry)
+        _enqueue_after_commit(by_customer, closing_entry)
     else:
         merge.create_merge_logs(by_customer, closing_entry)
+
+
+def _enqueue_after_commit(by_customer, closing_entry):
+    """Konsolidatsiya fon vazifasi — FAQAT tranzaksiya commit bo'lgandan keyin.
+
+    ERPNext `enqueue_job` vazifani darhol navbatga qo'yadi. Kassa yopilishi
+    (`api/cashier.close_shift`) esa submit'dan keyin Z-hisobotni ham tuzadi —
+    ko'p chekli smenada worker vazifani so'rov commit bo'lmasdan olib,
+    «Could not find POS Closing Entry» bilan yiqilardi (2026-10-02,
+    POS-CLO-2026-00003). `enqueue_after_commit` bu poygani yo'q qiladi.
+    """
+    merge.check_scheduler_status()
+    job_id = f"pos_invoice_merge::{closing_entry.get('name')}"
+    if merge.is_job_enqueued(job_id):
+        return
+    frappe.enqueue(
+        merge.create_merge_logs,
+        queue="long",
+        timeout=10000,
+        event="processing_merge_logs",
+        job_id=job_id,
+        enqueue_after_commit=True,
+        now=frappe.conf.developer_mode or frappe.flags.in_test,
+        invoice_by_customer=by_customer,
+        closing_entry=closing_entry,
+    )
+    frappe.msgprint(frappe._("POS Invoices will be consolidated in a background process"), alert=1)
 
 
 class OzturkPOSClosingEntry(POSClosingEntry):

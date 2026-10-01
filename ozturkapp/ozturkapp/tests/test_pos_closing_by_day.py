@@ -60,11 +60,19 @@ class TestPOSClosingByDay(FrappeTestCase):
     def test_large_closing_is_queued_with_day_map(self):
         closing = frappe._dict(pos_transactions=[ref(f"INV-{i}") for i in range(12)])
         closing.set_status = lambda **kw: None
+        closing.name = "POS-CLO-TEST"
         with patch.object(ov, "invoice_map_by_day", return_value={"M": {}}) as by_day, \
-                patch.object(ov.merge, "enqueue_job") as enqueue, \
+                patch.object(ov.merge, "check_scheduler_status"), \
+                patch.object(ov.merge, "is_job_enqueued", return_value=False), \
+                patch.object(ov.frappe, "enqueue") as enqueue, \
                 patch.object(ov.merge, "create_merge_logs") as direct:
             ov.consolidate_by_day(closing)
         by_day.assert_called_once()
         enqueue.assert_called_once()
-        self.assertEqual(enqueue.call_args.kwargs["invoice_by_customer"], {"M": {}})
+        kwargs = enqueue.call_args.kwargs
+        self.assertEqual(kwargs["invoice_by_customer"], {"M": {}})
+        # Poyga bo'lmasligi uchun: vazifa faqat commit'dan keyin navbatga tushadi.
+        self.assertTrue(kwargs["enqueue_after_commit"])
+        self.assertEqual(kwargs["job_id"], "pos_invoice_merge::POS-CLO-TEST")
+        self.assertEqual(kwargs["queue"], "long")
         direct.assert_not_called()
