@@ -312,7 +312,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<span class="sd-bar-value">${money ? this.money(r.value) : this.num(r.value)}
 						<span class="text-muted">· ${this.pct((flt(r.value) / total) * 100)}</span></span>
 				</div>
-				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-${tone}" style="width:${(Math.abs(flt(r.value)) / max) * 100}%"></div></div>
+				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-${tone}" style="width:${(Math.abs(flt(r.value)) / max) * 100}%${r.color ? `;background:${r.color}` : ""}"></div></div>
 				${r.hint ? `<div class="sd-bar-hint">${r.hint}</div>` : ""}
 			</div>`).join("")}</div>`;
 	}
@@ -429,7 +429,15 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					{ name: __("Chegirma"), chartType: "line", values: tl.rows.map((r) => flt(r.discount)) },
 				],
 			},
-			axisOptions: { xIsSeries: 1, xAxisMode: "tick", shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
+			axisOptions: {
+				// Bitta kun (bitta ustun) bo'lganda ham o'q 0 dan boshlanadi — aks holda
+				// frappe-charts o'qni qiymat atrofidan boshlab, ustun legenda ustiga tushardi.
+				yAxisRange: { min: 0 },
+				xIsSeries: tl.rows.length > 1 ? 1 : 0,
+				xAxisMode: "tick",
+				shortenYAxisNumbers: 1,
+				numberFormatter: (v) => this.short_money(v),
+			},
 			barOptions: { spaceRatio: 0.4 },
 			lineOptions: { regionFill: 0, dotSize: 3 },
 			tooltipOptions: { formatTooltipY: (v) => this.money(v) },
@@ -466,56 +474,30 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			return;
 		}
 
-		// Kim bergan + sabab bitta blokda: har bir kishining jami chegirmasi va
-		// uning ostida qaysi sababga qancha bergani (chek qatorlaridan yig'iladi).
-		const people = {};
+		// Chegirma turlari (sabab) — har biri alohida qator va o'z rangida;
+		// qatorda kim bergani va nechta chek ekani ham ko'rinadi.
+		const types = {};
 		for (const r of d.rows) {
-			const p = (people[r.user_name] ||= { name: r.user_name, discount: 0, count: 0, reasons: {} });
-			p.discount += flt(r.discount);
-			p.count += 1;
-			const why = (p.reasons[r.reason] ||= { reason: r.reason, discount: 0, count: 0 });
-			why.discount += flt(r.discount);
-			why.count += 1;
+			const t = (types[r.reason] ||= { reason: r.reason, discount: 0, count: 0, by: {} });
+			t.discount += flt(r.discount);
+			t.count += 1;
+			t.by[r.user_name] = (t.by[r.user_name] || 0) + flt(r.discount);
 		}
-		const by_person = Object.values(people).sort((a, b) => b.discount - a.discount);
-		const total = by_person.reduce((sum, p) => sum + p.discount, 0) || 1;
-		const max = Math.max(...by_person.map((p) => p.discount)) || 1;
-
-		// Har bir sababga o'z rangi — barcha xodimlarda bir xil (ko'proq
-		// berilgan sabab birinchi rangni oladi).
-		const reason_totals = {};
-		for (const r of d.rows) reason_totals[r.reason] = (reason_totals[r.reason] || 0) + flt(r.discount);
 		const palette = ["#e24c4c", "#f59e0b", "#2490ef", "#10b981", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
-		const color = {};
-		Object.keys(reason_totals).sort((a, b) => reason_totals[b] - reason_totals[a])
-			.forEach((reason, i) => { color[reason] = palette[i % palette.length]; });
-
-		const who_why = by_person.map((p) => {
-			const reasons = Object.values(p.reasons).sort((a, b) => b.discount - a.discount);
-			// Umumiy chiziq sabablar bo'yicha rangli bo'laklarga bo'linadi.
-			const segments = reasons.map((w) =>
-				`<div class="sd-seg" style="width:${(w.discount / p.discount) * 100}%;background:${color[w.reason]}"
-					title="${this.esc(w.reason)}: ${this.money(w.discount)}"></div>`).join("");
-			return `
-			<div class="sd-person">
-				<div class="sd-bar-top">
-					<span class="sd-bar-label">${this.esc(p.name)}</span>
-					<span class="sd-bar-value">${this.money(p.discount)}
-						<span class="text-muted">· ${this.pct((p.discount / total) * 100)} · ${__("{0} ta chek", [p.count])}</span></span>
-				</div>
-				<div class="sd-bar-track"><div class="sd-segs" style="width:${(p.discount / max) * 100}%">${segments}</div></div>
-				<div class="sd-reasons">${reasons.map((w) => `
-					<div class="sd-reason-row">
-						<div class="sd-reason">
-							<span class="sd-reason-label"><i class="sd-dot" style="background:${color[w.reason]}"></i>${this.esc(w.reason)}</span>
-							<span class="sd-bar-value">${this.money(w.discount)}
-								<span class="text-muted">· ${this.pct((w.discount / p.discount) * 100)} · ${__("{0} ta chek", [w.count])}</span></span>
-						</div>
-						<div class="sd-bar-track sd-bar-thin"><div class="sd-bar-fill" style="width:${(w.discount / p.discount) * 100}%;background:${color[w.reason]}"></div></div>
-					</div>`).join("")}
-				</div>
-			</div>`;
-		}).join("");
+		const discount_types = Object.values(types)
+			.sort((a, b) => b.discount - a.discount)
+			.map((t, i) => {
+				const by = Object.entries(t.by).sort((a, b) => b[1] - a[1]);
+				const who = by.length === 1
+					? by[0][0]
+					: by.map(([name, amount]) => `${name} ${this.short_money(amount)}`).join(", ");
+				return {
+					label: t.reason,
+					value: t.discount,
+					color: palette[i % palette.length],
+					hint: `${__("{0} ta chek", [t.count])} · ${this.esc(who)}`,
+				};
+			});
 
 		// Taomlar — hammasi, blok ichida vertikal scroll (yon blok kichik:
 		// sahifalashdan ko'ra aylantirish tezroq va qulayroq).
@@ -557,9 +539,9 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		$card.html(`
 			${head}
 			<div class="sd-discount-layout">
-				<div class="sd-summary">
-					<div class="sd-summary-title">${__("Kim bergan va sababi")}</div>
-					<div class="sd-people">${who_why}</div>
+				<div class="sd-summary sd-summary-scroll">
+					<div class="sd-summary-title">${__("Chegirma turlari")} <span class="text-muted">· ${discount_types.length}</span></div>
+					<div class="sd-scroll">${this.bar_list(discount_types, { tone: "red" })}</div>
 				</div>
 				<div class="sd-summary sd-summary-scroll">
 					<div class="sd-summary-title">${__("Taomlar")} <span class="text-muted">· ${dishes.length}</span></div>

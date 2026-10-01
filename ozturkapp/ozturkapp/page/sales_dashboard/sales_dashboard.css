@@ -215,7 +215,7 @@
 }
 
 /* ── Chegirmalar ── */
-/* Chegirmalar: chapda «kim + sabab», o'ngda taomlar */
+/* Chegirmalar: chapda chegirma turlari, o'ngda taomlar */
 .sd-discount-layout {
 	display: grid;
 	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -234,39 +234,7 @@
 	overscroll-behavior: contain;
 }
 
-.sd-people { display: flex; flex-direction: column; gap: 14px; }
 
-.sd-reasons {
-	margin-top: 6px;
-	padding-left: 12px;
-	border-left: 2px solid var(--sd-border);
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.sd-reason {
-	display: flex;
-	justify-content: space-between;
-	gap: 8px;
-	font-size: 12px;
-}
-
-.sd-reason-label { color: var(--sd-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Sabablar: har biri o'z rangidagi alohida chiziq */
-.sd-segs { display: flex; height: 100%; border-radius: 999px; overflow: hidden; }
-.sd-seg { height: 100%; }
-.sd-reason-row { display: flex; flex-direction: column; gap: 3px; }
-.sd-bar-thin { height: 4px; }
-.sd-dot {
-	display: inline-block;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	margin-right: 6px;
-	vertical-align: middle;
-}
 
 .sd-summary {
 	border: 1px solid var(--sd-border);
