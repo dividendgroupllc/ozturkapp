@@ -1,25 +1,9 @@
 # Copyright (c) 2026, abdulloh and contributors
 # For license information, please see license.txt
 
-"""DDS (pul oqimi) — kassa hisoblaridagi kirim/chiqim toifalar bo'yicha.
-
-Ichki kontragentlar (is_internal_customer / is_internal_supplier — sklad va
-filial kompaniyalari) bilan hisob-kitob alohida "Ички (филиал/склад)"
-toifasida, qator nomi "Kompaniyalararo: <kompaniya>" bo'lib ko'rsatiladi: bu
-tashqi mijoz/ta'minotchi bilan pul aylanmasi emas, guruh ichidagi qarzni
-yopish. Jami summalar o'zgarmaydi — faqat toifa boshqa. Kompaniya filtrisiz
-(butun guruh) ko'rilganda bir kompaniya kassasidan chiqim = ikkinchisiga
-kirim, ya'ni bu toifa kirim/chiqimi o'zaro teng (nolga yopiladi).
-
-Kassa hujjati: avval PE/JE.custom_kassa (Kassa ikkinchi kompaniyada ham PE
-yaratadi), bo'lmasa Kassa'dagi havola maydonlari.
-"""
-
 import frappe
 from frappe import _
 from frappe.utils import escape_html, flt
-
-from ozturkapp.ozturkapp.report.internal_parties import INTERNAL_LABEL_CYR, get_internal_parties
 
 
 CATEGORY_MAP = {
@@ -30,7 +14,6 @@ CATEGORY_MAP = {
     "Сотрудники": "employee",
     "Акционеры": "shareholder",
     "Перемещения": "transfer",
-    INTERNAL_LABEL_CYR: "internal",
 }
 
 CATEGORY_LABELS = {
@@ -41,7 +24,6 @@ CATEGORY_LABELS = {
     "employee": "Сотрудники",
     "shareholder": "Акционеры",
     "transfer": "Перемещения",
-    "internal": INTERNAL_LABEL_CYR,
     "other": "Прочие",
 }
 
@@ -105,7 +87,6 @@ def get_data(filters):
         mop_by_account=get_mop_by_account_map(),
         account_cache={},
         party_name_cache={},
-        internal_parties=get_internal_parties(),
     )
 
     data = []
@@ -314,15 +295,15 @@ def get_mop_by_account_map():
     return result
 
 
-KASSA_LINK_FIELDS = ("journal_entry", "payment_entry", "payment_entry_receive", "payment_entry_supplier")
+KASSA_LINK_FIELDS = ("journal_entry", "payment_entry")
 
 
 def get_kassa_map_batch(voucher_nos):
     """
     Kassa doctype'ni voucher (PE/JE) bo'yicha topish.
-    1. PE/JE.custom_kassa — Kassa yaratgan barcha hujjatlarda (ikkinchi
-       kompaniyadagi PE ham) turadi;
-    2. zaxira: Kassa'dagi havola maydonlari (eski yozuvlar uchun).
+    1. PE/JE.custom_kassa — Kassa yaratgan hujjatlarda turadi;
+    2. zaxira: Kassa'dagi havola maydonlari (journal_entry, payment_entry —
+       eski yozuvlar uchun).
     Qaytaradi: {voucher_no: {"name": kassa_nomi, "remark": izoh}}
     """
     if not voucher_nos:
@@ -343,17 +324,16 @@ def get_kassa_map_batch(voucher_nos):
             result[e.voucher] = {"name": e.name, "remark": e.primechaniya or ""}
 
     missing = voucher_set - set(result)
-    fields = [f for f in KASSA_LINK_FIELDS if frappe.db.has_column("Kassa", f)]
-    if missing and fields:
-        where = " OR ".join(f"{f} IN %(v)s" for f in fields)
-        entries = frappe.db.sql(f"""
-            SELECT name, primechaniya, {", ".join(fields)}
+    if missing:
+        entries = frappe.db.sql("""
+            SELECT name, primechaniya, journal_entry, payment_entry
             FROM `tabKassa`
-            WHERE docstatus = 1 AND ({where})
+            WHERE docstatus = 1
+              AND (journal_entry IN %(v)s OR payment_entry IN %(v)s)
         """, {"v": tuple(missing)}, as_dict=True)
         for e in entries:
             info = {"name": e.name, "remark": e.primechaniya or ""}
-            for f in fields:
+            for f in KASSA_LINK_FIELDS:
                 link = e.get(f)
                 if link and link in missing:
                     result[link] = info
@@ -398,18 +378,6 @@ def strip_category_prefix(desc):
 
 
 def resolve_transaction_info(row, pe_info, je_info, inv_info, ctx):
-    info = _resolve_transaction_info(row, pe_info, je_info, inv_info, ctx)
-    # Ichki kontragent (sklad/filial) — Покупатели/Поставщики o'rniga alohida toifa
-    internal = (ctx.get("internal_parties") or {}).get(info.get("party_type")) or {}
-    if info.get("party") and info["party"] in internal:
-        info["category"] = "internal"
-        company = internal.get(info["party"])
-        if company:
-            info["description"] = f"Kompaniyalararo: {company}"
-    return info
-
-
-def _resolve_transaction_info(row, pe_info, je_info, inv_info, ctx):
     # 1. GL Entry'da party bor
     if row.party_type and row.party:
         party_name = get_party_name(row.party_type, row.party, ctx)
@@ -544,8 +512,6 @@ def get_summary_html(data, expense_summaries=None, balances=None):
     shareholder_chiqim = 0
     other_kirim = 0
     other_chiqim = 0
-    internal_kirim = 0
-    internal_chiqim = 0
 
     for row in data:
         if row.get("is_total"):
@@ -576,15 +542,12 @@ def get_summary_html(data, expense_summaries=None, balances=None):
         elif category == "shareholder":
             shareholder_kirim += kirim
             shareholder_chiqim += chiqim
-        elif category == "internal":
-            internal_kirim += kirim
-            internal_chiqim += chiqim
         else:
             other_kirim += kirim
             other_chiqim += chiqim
 
-    total_kirim = customer_kirim + supplier_kirim + expense_kirim + dividend_kirim + transfer_kirim + employee_kirim + shareholder_kirim + internal_kirim + other_kirim
-    total_chiqim = customer_chiqim + supplier_chiqim + expense_chiqim + dividend_chiqim + transfer_chiqim + employee_chiqim + shareholder_chiqim + internal_chiqim + other_chiqim
+    total_kirim = customer_kirim + supplier_kirim + expense_kirim + dividend_kirim + transfer_kirim + employee_kirim + shareholder_kirim + other_kirim
+    total_chiqim = customer_chiqim + supplier_chiqim + expense_chiqim + dividend_chiqim + transfer_chiqim + employee_chiqim + shareholder_chiqim + other_chiqim
 
     total_label = "Итого по фильтру" if is_filtered else "Итого за период"
 
@@ -663,11 +626,6 @@ def get_summary_html(data, expense_summaries=None, balances=None):
                     <td style="padding: 10px; border: 1px solid #ddd;">Перемещения</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #388e3c;">{fmt(transfer_kirim) if transfer_kirim else '—'}</td>
                     <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(transfer_chiqim) if transfer_chiqim else '—'}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;">{INTERNAL_LABEL_CYR}</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #388e3c;">{fmt(internal_kirim) if internal_kirim else '—'}</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #d32f2f;">{fmt(internal_chiqim) if internal_chiqim else '—'}</td>
                 </tr>
                 <tr style="background-color: #fafafa;">
                     <td style="padding: 10px; border: 1px solid #ddd;">Прочие</td>

@@ -6,18 +6,13 @@
 Manba: Sales Invoice (shu jumladan POS yopilishidagi konsolidatsiya SI) va hali
 konsolidatsiya qilinmagan POS Invoice.
 
-* Taom (Product Bundle) tannarxi masalliqlar yig'indisidan olinadi —
-  qarang `attach_costs`.
-* Ichki mijozlar (filial/sklad, Branch Stock Transfer SI'lari) standart
-  holatda CHIQARILADI: bu sotuv emas, tovarning tan narxda ko'chishi.
-  "Ички мижозларни қўшиш" belgilansa qo'shiladi va "Ички" ustunida belgilanadi.
+Taom (Product Bundle) tannarxi masalliqlar yig'indisidan olinadi —
+qarang `attach_costs`.
 """
 
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate
-
-from ozturkapp.ozturkapp.report.internal_parties import internal_customer_sql
 
 
 def execute(filters=None):
@@ -43,7 +38,6 @@ def get_columns():
         {"fieldname": "rate", "label": _("Нарх"), "fieldtype": "Currency", "options": "currency", "width": 110},
         {"fieldname": "amount", "label": _("Сумма"), "fieldtype": "Currency", "options": "currency", "width": 130},
         {"fieldname": "customer", "label": _("Клиент"), "fieldtype": "Data", "width": 150},
-        {"fieldname": "is_internal", "label": _("Ички"), "fieldtype": "Check", "width": 60},
         {"fieldname": "item_group", "label": _("Тип"), "fieldtype": "Data", "width": 120},
         {"fieldname": "cost_rate", "label": _("СС товар"), "fieldtype": "Currency", "options": "currency", "width": 110},
         {"fieldname": "cost_amount", "label": _("СС Сумма"), "fieldtype": "Currency", "options": "currency", "width": 130},
@@ -81,12 +75,6 @@ def get_conditions(filters, alias, item_alias, params):
             f"{item_alias}.item_group IN (SELECT name FROM `tabItem Group` WHERE lft >= %(ig_lft)s AND rgt <= %(ig_rgt)s)"
         )
         params.update({"ig_lft": ig.lft, "ig_rgt": ig.rgt})
-    # Ichki mijoz (filial/sklad) — Branch Stock Transfer SI'lari sotuv emas,
-    # tovarning tan narxda ko'chishi. Standart holatda chiqarib tashlanadi
-    # (mijoz aniq tanlangan bo'lsa — foydalanuvchi aynan shuni so'ragan).
-    if not cint(filters.get("include_internal")) and not filters.get("customer"):
-        voucher_col = f"{alias}.name" if alias == "si" else None
-        conditions.append(f"NOT {internal_customer_sql(alias + '.customer', voucher_col)}")
     return " AND ".join(conditions)
 
 
@@ -112,7 +100,6 @@ def get_rows(filters):
             sii.warehouse,
             sii.base_net_amount AS amount,
             IFNULL(si.customer_name, si.customer) AS customer,
-            {internal_customer_sql("si.customer", "si.name")} AS is_internal,
             sii.item_group,
             IFNULL(sii.incoming_rate, 0) * sii.stock_qty AS item_cost,
             si.update_stock,
@@ -141,7 +128,6 @@ def get_rows(filters):
             pii.warehouse,
             pii.base_net_amount AS amount,
             IFNULL(pi.customer_name, pi.customer) AS customer,
-            {internal_customer_sql("pi.customer")} AS is_internal,
             pii.item_group,
             0 AS item_cost,
             0 AS update_stock,
@@ -329,7 +315,6 @@ def get_data(filters):
             "rate": (amount / qty) if qty else 0,
             "amount": amount,
             "customer": r.customer,
-            "is_internal": cint(r.is_internal),
             "item_group": r.item_group,
             "cost_rate": (cost_amount / qty) if qty else 0,
             "cost_amount": cost_amount,

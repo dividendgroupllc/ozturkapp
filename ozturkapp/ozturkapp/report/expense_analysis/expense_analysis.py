@@ -10,30 +10,11 @@ oshgan/tushgan xarajatlarni aniqlash, har bir tranzaksiyani drill-down qilish.
 
 Manba: GL Entry (account.root_type = 'Expense' | 'Income')
        voucher_type IN ('Payment Entry', 'Journal Entry', 'Purchase Invoice', 'Expense Claim')
-
-Ichki (guruh ichidagi) harakatlar — ichki kontragent (sklad/filial) bilan
-hujjatlar yoki Branch Stock Transfer yaratgan PI — alohida "Ички (филиал/склад)"
-toifasiga ajratiladi va "Ички" ustunida belgilanadi. Boshqa kontragent
-toifalari (Поставщики, Покупатели...) ularni o'z ichiga OLMAYDI — toifalar
-kesishmaydi, umumiy jami o'zgarmaydi.
-
-Xarajat taqsimoti (Expense Allocation JE'lari — Sklad ma'muriy xarajatini
-filiallarga qayta yozish) "Тақсимланган (склад харажати)" toifasida alohida
-turadi: Sklad kitobida manfiy, filialda musbat. "Тақсимотни чиқариш"
-belgilansa — hisobotdan butunlay chiqariladi (xarajat qayerda yuzaga kelgan
-bo'lsa, o'sha yerda ko'rinadi).
 """
 
 import frappe
 from frappe import _
 from frappe.utils import flt, getdate, add_days, date_diff, formatdate, today, add_months, nowdate
-
-from ozturkapp.ozturkapp.report.internal_parties import (
-    ALLOCATION_LABEL_CYR,
-    INTERNAL_LABEL_CYR,
-    allocation_gl_sql,
-    internal_gl_sql,
-)
 
 
 # Qaysi voucher type'lar hisoblanadi
@@ -51,8 +32,6 @@ CATEGORY_FILTERS = {
     "Сотрудники": {"party_type": "Employee"},
     "Покупатели": {"party_type": "Customer"},
     "Прочие": {"no_party": True},
-    INTERNAL_LABEL_CYR: {"internal": True},
-    ALLOCATION_LABEL_CYR: {"allocation": True},
 }
 
 
@@ -137,12 +116,6 @@ def get_columns():
             "width": 280,
         },
         {
-            "fieldname": "is_internal",
-            "label": _("Ички"),
-            "fieldtype": "Check",
-            "width": 60,
-        },
-        {
             "fieldname": "voucher_type",
             "label": _("Ҳужжат тури"),
             "fieldtype": "Data",
@@ -211,8 +184,6 @@ def get_data(filters):
             "party_name": party_display,
             "amount": amount,
             "remarks": clean_remarks(remarks),
-            "is_internal": 1 if r.is_internal else 0,
-            "is_allocation": 1 if r.is_allocation else 0,
             "voucher_type": r.voucher_type,
             "voucher_no": r.voucher_no,
         })
@@ -283,24 +254,10 @@ def build_conditions(filters, from_date, to_date):
         conditions.append("acc.root_type = %(specific_root_type)s")
         params["specific_root_type"] = root_type_filter
 
-    # Xarajat taqsimoti JE'larini butunlay chiqarish
-    if filters.get("exclude_allocation"):
-        conditions.append(f"NOT {allocation_gl_sql('gle')}")
-
     # Kategoriya filter (DDS uslubi)
     category = filters.get("category")
     if category and category in CATEGORY_FILTERS:
         cat_cfg = CATEGORY_FILTERS[category]
-        # Toifalar kesishmasin: taqsimot > ichki > kontragent turi (summary bilan bir xil)
-        if cat_cfg.get("allocation"):
-            conditions.append(allocation_gl_sql("gle"))
-        else:
-            conditions.append(f"NOT {allocation_gl_sql('gle')}")
-            if cat_cfg.get("internal"):
-                conditions.append(internal_gl_sql("gle"))
-            else:
-                conditions.append(f"NOT {internal_gl_sql('gle')}")
-
         if cat_cfg.get("no_party"):
             conditions.append("(gle.party_type IS NULL OR gle.party_type = '')")
         elif cat_cfg.get("party_type"):
@@ -335,9 +292,7 @@ def get_gl_entries(filters, from_date, to_date):
             gle.remarks,
             gle.cost_center,
             acc.account_name,
-            acc.root_type,
-            {internal_gl_sql("gle")} AS is_internal,
-            {allocation_gl_sql("gle")} AS is_allocation
+            acc.root_type
         FROM `tabGL Entry` gle
         INNER JOIN `tabAccount` acc ON acc.name = gle.account
         WHERE {where_clause}
@@ -394,8 +349,8 @@ def get_kassa_remarks(voucher_nos):
     """Kassa hujjatining o'z izohini (primechaniya) shu Kassa yaratgan
     PE/JE voucher_no'siga bog'lab qaytaradi ({voucher_no: izoh}).
 
-    Avval PE/JE.custom_kassa (ikkinchi kompaniyadagi PE ham), keyin Kassa'dagi
-    havola maydonlari (eski yozuvlar) — DDS bilan bir xil."""
+    Avval PE/JE.custom_kassa, keyin Kassa'dagi havola maydonlari (eski
+    yozuvlar) — DDS bilan bir xil."""
     if not voucher_nos:
         return {}
     from ozturkapp.ozturkapp.report.dds.dds import get_kassa_map_batch
@@ -459,15 +414,6 @@ CATEGORY_DEFINITIONS = [
         "is_income": True,
     },
     {
-        "key": "internal_income",
-        "label": INTERNAL_LABEL_CYR + " — даромад",
-        "root_type": "Income",
-        "party_type": None,
-        "no_party": False,
-        "color": "#6a1b9a",
-        "is_income": True,
-    },
-    {
         "key": "supplier_expense",
         "label": "Поставщиклар (Харажат)",
         "root_type": "Expense",
@@ -503,33 +449,6 @@ CATEGORY_DEFINITIONS = [
         "color": "#d32f2f",
         "is_income": False,
     },
-    {
-        "key": "allocation_expense",
-        "label": ALLOCATION_LABEL_CYR,
-        "root_type": "Expense",
-        "party_type": None,
-        "no_party": False,
-        "color": "#00695c",
-        "is_income": False,
-    },
-    {
-        "key": "allocation_income",
-        "label": ALLOCATION_LABEL_CYR + " — даромад",
-        "root_type": "Income",
-        "party_type": None,
-        "no_party": False,
-        "color": "#00695c",
-        "is_income": True,
-    },
-    {
-        "key": "internal_expense",
-        "label": INTERNAL_LABEL_CYR + " — харажат",
-        "root_type": "Expense",
-        "party_type": None,
-        "no_party": False,
-        "color": "#6a1b9a",
-        "is_income": False,
-    },
 ]
 
 
@@ -537,12 +456,6 @@ def categorize_account(account_data):
     """Account ma'lumotini kategoriyaga biriktiradi."""
     root_type = account_data.get("root_type")
     party_type = account_data.get("party_type")
-
-    if account_data.get("is_allocation"):
-        return "allocation_income" if root_type == "Income" else "allocation_expense"
-
-    if account_data.get("is_internal"):
-        return "internal_income" if root_type == "Income" else "internal_expense"
 
     if root_type == "Income":
         return "income"
@@ -576,8 +489,6 @@ def get_category_breakdown(filters, from_date, to_date):
             acc.account_name,
             acc.root_type,
             COALESCE(NULLIF(gle.party_type, ''), '') AS party_type,
-            {internal_gl_sql("gle")} AS is_internal,
-            {allocation_gl_sql("gle")} AS is_allocation,
             CASE
                 WHEN acc.root_type = 'Income' THEN SUM(gle.credit) - SUM(gle.debit)
                 ELSE SUM(gle.debit) - SUM(gle.credit)
@@ -590,7 +501,7 @@ def get_category_breakdown(filters, from_date, to_date):
           AND gle.voucher_type IN %(voucher_types)s
           AND acc.root_type IN %(root_types)s
           AND (gle.debit > 0 OR gle.credit > 0)
-        GROUP BY gle.account, acc.account_name, acc.root_type, gle.party_type, is_internal, is_allocation
+        GROUP BY gle.account, acc.account_name, acc.root_type, gle.party_type
         HAVING total <> 0
         ORDER BY acc.root_type, total DESC
     """, params, as_dict=True)
@@ -705,10 +616,8 @@ def render_dds_summary(filters, prior_from, prior_to, category_data):
             return f'<span style="background: #e8f5e9; color: #2e7d32; padding: 2px 7px; border-radius: 10px; font-size: 10px; margin-left: 5px; font-weight: 600;">{label}</span>'
 
     # Umumiy summalar
-    total_income_cur = sum(category_data.get(c["key"], {}).get("total_current", 0)
-                           for c in CATEGORY_DEFINITIONS if c["is_income"])
-    total_income_pri = sum(category_data.get(c["key"], {}).get("total_prior", 0)
-                           for c in CATEGORY_DEFINITIONS if c["is_income"])
+    total_income_cur = category_data.get("income", {}).get("total_current", 0)
+    total_income_pri = category_data.get("income", {}).get("total_prior", 0)
     total_expense_cur = sum(category_data.get(c["key"], {}).get("total_current", 0)
                             for c in CATEGORY_DEFINITIONS if not c["is_income"])
     total_expense_pri = sum(category_data.get(c["key"], {}).get("total_prior", 0)

@@ -5,3 +5,5 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 ozturkapp.patches.v1_0.rename_kassa_workspace
+ozturkapp.patches.v1_0.remove_intercompany_features
+ozturkapp.patches.v1_0.remove_intercompany_kassa

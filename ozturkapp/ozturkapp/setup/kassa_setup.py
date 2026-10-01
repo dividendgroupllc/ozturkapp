@@ -66,20 +66,15 @@ def run_full_setup():
     print("\n✅ SETUP TAYYOR")
 
 
-# Kassa yaratadigan hujjatlarga havola maydonlari (Kassa.ACCOUNTING_LINK_FIELDS bilan bir xil)
-KASSA_PE_FIELDS = ("payment_entry", "payment_entry_receive", "payment_entry_supplier")
-
-
 def ensure_kassa_link_fields():
     """Payment Entry va Journal Entry'ga «Kassa» Link maydonini qo'shadi va
     eski hujjatlarni to'ldiradi (idempotent).
 
-    NEGA. Kassa endi bitta emas, bir nechta hujjat yaratadi (kompaniyalararo
-    oqimda ikki kompaniya kitobida 2-4 ta PE/JE). `reference_no`/`user_remark`
-    oddiy matn — bosib o'tib bo'lmaydi va hisobot (DDS) qaysi kassa ekanini
-    ishonchli topa olmaydi. Link maydoni bilan hujjatdan Kassa'ga o'tiladi,
-    Kassa'ning «Connections» bo'limida esa barcha yaratilgan hujjatlar
-    ko'rinadi. `no_copy` — PE/JE nusxalanganda havola ko'chib qolmasin.
+    NEGA. `reference_no`/`user_remark` oddiy matn — bosib o'tib bo'lmaydi va
+    hisobot (DDS) qaysi kassa ekanini ishonchli topa olmaydi. Link maydoni
+    bilan hujjatdan Kassa'ga o'tiladi, Kassa'ning «Connections» bo'limida esa
+    yaratilgan hujjatlar ko'rinadi. `no_copy` — PE/JE nusxalanganda havola
+    ko'chib qolmasin.
     """
     from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
@@ -111,11 +106,8 @@ def _backfill_kassa_links():
     (bekor qilingan) JE kassadan uzilib qoladi — ular uchun zaxira sifatida
     «Kassa: KASSA-... - ...» remark'i o'qiladi.
     """
-    kassa_cols = set(frappe.db.get_table_columns("Kassa"))
-    pe_fields = [f for f in KASSA_PE_FIELDS if f in kassa_cols]
-
     for dt, join in (
-        ("Payment Entry", "d.name IN ({0})".format(", ".join(f"k.{f}" for f in pe_fields))),
+        ("Payment Entry", "d.name = k.payment_entry"),
         ("Journal Entry", "d.name = k.journal_entry"),
     ):
         pairs = frappe.db.sql(

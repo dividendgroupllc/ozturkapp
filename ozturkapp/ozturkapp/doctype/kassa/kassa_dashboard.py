@@ -4,9 +4,9 @@ from frappe import _
 def get_data():
 	"""Kassa formasining pastidagi «Connections» bo'limi.
 
-	Kompaniyalararo oqimda bitta Kassa 2-4 ta hujjat (ikki kompaniya kitobida)
-	yaratadi — ularning hammasi `custom_kassa` maydoni orqali topiladi
-	(after_migrate: `kassa_setup.ensure_kassa_link_fields`).
+	PE/JE `custom_kassa` maydoni orqali topiladi (after_migrate:
+	`kassa_setup.ensure_kassa_link_fields`) — PE/JE tomonida ham Kassa'ga
+	bosiladigan havola bor, eski hujjatlar migrate'da to'ldiriladi.
 	"""
 	return {
 		"fieldname": "custom_kassa",

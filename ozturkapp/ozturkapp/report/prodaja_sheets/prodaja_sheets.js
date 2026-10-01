@@ -38,14 +38,6 @@ frappe.query_reports["Prodaja Sheets"] = {
             "label": __("Филиал"),
             "fieldtype": "Link",
             "options": "Branch"
-        },
-        {
-            // Belgilanmasa (standart) — ichki mijozga (filial/sklad) yozilgan
-            // SI'lar, ya'ni Branch Stock Transfer o'tkazmalari sotuvga kirmaydi.
-            "fieldname": "include_internal",
-            "label": __("Ички мижозларни қўшиш (филиал/склад)"),
-            "fieldtype": "Check",
-            "default": 0
         }
     ],
 

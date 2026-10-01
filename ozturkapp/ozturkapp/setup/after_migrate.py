@@ -16,7 +16,6 @@ import frappe
 def run():
 	from ozturkapp.ozturkapp.setup.custom_fields import create_fields, create_property_setters
 	from ozturkapp.ozturkapp.setup.kassa_setup import create_party_types, ensure_kassa_link_fields
-	from ozturkapp.ozturkapp.setup.intercompany_setup import run as setup_intercompany
 	from ozturkapp.ozturkapp.setup.print_format_setup import create_sales_order_print_format
 	from ozturkapp.ozturkapp.setup.receipt_format import setup as setup_receipt_format
 	from ozturkapp.ozturkapp.setup.cancelled_orders import (
@@ -41,7 +40,6 @@ def run():
 	from ozturkapp.ozturkapp.setup.cashier_shift_setup import setup as setup_cashier_shift
 	from ozturkapp.ozturkapp.setup.kot_failsafe_setup import setup as setup_kot_failsafe
 	from ozturkapp.ozturkapp.setup.currency_setup import setup as setup_currency
-	from ozturkapp.ozturkapp.setup.expense_allocation_setup import setup as setup_expense_allocation
 
 	tasks = [
 		create_fields,
@@ -56,10 +54,7 @@ def run():
 		reconcile_cancel_kots,
 		create_permissions,
 		create_party_types,
-		# Kompaniyalararo kassa: ichki Customer/Supplier + o'zaro ruxsatlar,
-		# `Ozturk Settings` boshlang'ich qiymati (Sklad kompaniyasi).
-		setup_intercompany,
-		# PE/JE -> Kassa havolasi (bitta Kassa bir nechta hujjat yaratadi).
+		# PE/JE -> Kassa havolasi (bosiladigan link + Kassa «Connections»).
 		ensure_kassa_link_fields,
 		create_sales_order_print_format,
 		# Xizmat haqi (12%) — ERPNext soliq shabloni orqali (TZ §8).
@@ -100,9 +95,6 @@ def run():
 		setup_kot_failsafe,
 		# Kompaniya bitta valyutada — "лв" (UZS belgisi) hech qayerda chiqmaydi.
 		setup_currency,
-		# Xarajat taqsimoti — Journal Entry'dagi havola maydoni (taqsimot
-		# JE'lari keyingi hovuzga qayta kirmasligi uchun).
-		setup_expense_allocation,
 	]
 	for fn in tasks:
 		try:

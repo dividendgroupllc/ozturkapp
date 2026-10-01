@@ -59,17 +59,7 @@ frappe.query_reports["Expense Analysis"] = {
 				"Сотрудники",
 				"Покупатели",
 				"Прочие",
-				"Ички (филиал/склад)",
-				"Тақсимланган (склад харажати)",
 			].join("\n"),
-		},
-		{
-			// Expense Allocation JE'lari (Sklad xarajatini filiallarga qayta
-			// yozish) — belgilansa hisobotdan butunlay chiqariladi.
-			fieldname: "exclude_allocation",
-			label: __("Тақсимотни чиқариш"),
-			fieldtype: "Check",
-			default: 0,
 		},
 		{
 			fieldname: "cost_center",

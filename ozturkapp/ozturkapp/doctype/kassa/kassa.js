@@ -1,16 +1,16 @@
 /**
  * Kassa — Client Script
  *
+ * Bitta kompaniyali kassa (kassa.py docstring):
  * 1. Oborot tanlash
- * 2. Kompaniya tanlash (yoki kassa bitta kompaniyaga tegishli bo'lsa — avtomatik)
- * 3. Kassa (Mode of Payment) — faqat shu kompaniyaning kassalari
- * 4. Kontragent. Boshqa kompaniyani ifodalovchi ichki Customer/Supplier,
- *    boshqa kompaniya filiali yoki ishchisi tanlansa — server ikkala
- *    kompaniya kitobida hujjat yaratadi (kassa.py docstring).
+ * 2. Kassa (Mode of Payment) — kompaniya kassadan avtomatik aniqlanadi.
+ *    Kassa bir nechta kompaniyada hisobga ega bo'lsa — «Kompaniya» maydonidagi
+ *    qator olinadi (guruh kompaniyasi «O'zturk» hisobga olinmaydi).
+ * 3. Kontragent / xarajat hisobi — shu kompaniya bo'yicha filtrlanadi
  */
 
 const KASSA_API = 'ozturkapp.ozturkapp.doctype.kassa.kassa.';
-const LINK_FIELDS = ['journal_entry', 'payment_entry', 'payment_entry_receive', 'payment_entry_supplier'];
+const LINK_FIELDS = ['journal_entry', 'payment_entry'];
 
 function mop_query(frm, exclude) {
     // Kompaniya tanlangan bo'lsa — faqat shu kompaniyada hisobi bor kassalar
@@ -75,10 +75,6 @@ frappe.ui.form.on('Kassa', {
                 });
             }
         }
-        frappe.call({
-            method: KASSA_API + 'get_kassa_context',
-            callback(r) { frm._sklad_company = (r.message || {}).sklad_company || null; }
-        });
         frm.trigger('setup_filters');
     },
 
@@ -114,8 +110,6 @@ frappe.ui.form.on('Kassa', {
         frm.set_query('party_type', () => ({}));
 
         // Kontragent filtri — faqat faol (disabled bo'lmagan) kontragentlar.
-        // Ichki (boshqa kompaniyani ifodalovchi) Customer/Supplier ham chiqadi —
-        // kompaniyalararo hisob-kitob uchun. O'ziga to'lovni server bloklaydi.
         frm.set_query('kontragent', () => {
             const party_type = frm.doc.party_type;
             if (party_type === 'Customer' || party_type === 'Supplier') {
@@ -124,8 +118,9 @@ frappe.ui.form.on('Kassa', {
             return {};
         });
 
-        // Xarajat kontragenti — filial (bo'lmasa kassa) kompaniyasining xarajat
-        // hisoblari; filialning «Xarajat guruhi» bo'lsa shu guruh ostidagilar.
+        // Xarajat kontragenti — kompaniyaning xarajat hisoblari.
+        // Filial tanlangan bo'lsa, uning «Xarajat guruhi» ostidagilar bilan
+        // filtrlanadi; tanlanmagan bo'lsa barcha xarajat hisoblari chiqadi.
         frm.set_query('expense_kontragent', () => ({
             query: KASSA_API + 'get_filial_expense_accounts',
             filters: {
@@ -156,7 +151,6 @@ frappe.ui.form.on('Kassa', {
         } else {
             frm.set_value('payment_account', '');
         }
-        frm.trigger('set_via_sklad_default');
     },
 
     // =========================================================================
@@ -175,7 +169,6 @@ frappe.ui.form.on('Kassa', {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
         frm.set_value('filial', '');
-        frm.set_value('via_sklad', 0);
         frm.set_value('payment_account', '');
         frm.set_value('payment_account_2', '');
 
@@ -254,37 +247,15 @@ frappe.ui.form.on('Kassa', {
     },
 
     // =========================================================================
-    // PARTY TYPE / KONTRAGENT
+    // PARTY TYPE
     // =========================================================================
 
     party_type(frm) {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
         frm.set_value('filial', '');
-        frm.set_value('via_sklad', 0);
 
         frm.trigger('toggle_fields');
-    },
-
-    kontragent(frm) {
-        frm.trigger('set_via_sklad_default');
-    },
-
-    // Filial kassasidan supplierga to'lov odatda Sklad nomidan (supplier
-    // fakturalari Sklad kitobida). Ichki (kompaniyani ifodalovchi) supplier
-    // uchun emas. Foydalanuvchi belgini olib tashlashi mumkin.
-    set_via_sklad_default(frm) {
-        const applicable = frm.doc.oborot === 'Расход' && frm.doc.party_type === 'Supplier'
-            && frm.doc.kontragent && frm._sklad_company && frm.doc.company
-            && frm.doc.company !== frm._sklad_company;
-        if (!applicable) {
-            if (frm.doc.via_sklad) frm.set_value('via_sklad', 0);
-            return;
-        }
-        frappe.db.get_value('Supplier', frm.doc.kontragent, 'represents_company').then((r) => {
-            const internal = r && r.message && r.message.represents_company;
-            frm.set_value('via_sklad', internal ? 0 : 1);
-        });
     },
 
     // =========================================================================

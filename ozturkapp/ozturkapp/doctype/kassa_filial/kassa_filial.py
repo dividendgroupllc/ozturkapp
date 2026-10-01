@@ -2,11 +2,13 @@
 # Copyright (c) 2026, Ozturkapp
 # License: MIT
 
-"""Kassa Filial — xarajat egasi (filial) va uning kompaniyasi.
+"""Kassa Filial — xarajatlarni guruhlash birligi (zal, oshxona, ma'muriyat...).
 
-`company` kompaniyalararo xarajatni belgilaydi: Kassa boshqa kompaniya
-kassasidan to'lasa, xarajat shu kompaniya kitobiga yoziladi. Guruh kompaniyasi
-(yoki bo'sh) — eski xatti-harakat: xarajat kassa kompaniyasi kitobida.
+Bitta kompaniyali saytda filial = kassa kompaniyasi ichidagi xarajat egasi.
+Saytda guruh kompaniyasi («O'zturk») ham bor — xarajat guruhi yoki kassa
+boshqa kompaniyaniki bo'lsa, Kassa'da «Xarajat kontragenti» ro'yxati bo'sh
+chiqardi yoki xarajat noto'g'ri kitobga ketardi. Shuning uchun saqlashdayoq
+tekshiriladi.
 """
 
 import frappe
@@ -21,6 +23,6 @@ class KassaFilial(Document):
             if acc_company and acc_company != self.company:
                 frappe.throw(_("Xarajat guruhi '{0}' kompaniyasiga tegishli bo'lishi kerak.").format(self.company))
         if self.mode_of_payment and self.company:
-            from ozturkapp.ozturkapp.utils.intercompany import resolve_mop_account
+            from ozturkapp.ozturkapp.doctype.kassa.kassa import resolve_mop_account
 
             resolve_mop_account(self.mode_of_payment, self.company)
