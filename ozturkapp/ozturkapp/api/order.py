@@ -294,7 +294,7 @@ def get_paid_order_filter_options():
 
 @frappe.whitelist()
 def get_paid_orders(
-    date_from=None, date_to=None, search=None, table=None, waiter=None, limit=100, shift=None
+    date_from=None, date_to=None, search=None, table=None, waiter=None, limit=500, shift=None
 ):
     """Kassa tarixi — bergiliy davrda to'langan cheklar ro'yxati.
 
@@ -349,7 +349,7 @@ def get_paid_orders(
     conditions = ["branch = %(branch)s", "docstatus = 1"]
     params = {
         "branch": scope.branch,
-        "limit": min(max(cint(limit), 0) or 100, MAX_PAID_ROWS),
+        "limit": min(max(cint(limit), 0) or 500, MAX_PAID_ROWS),
     }
 
     if shift:
