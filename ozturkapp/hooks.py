@@ -366,6 +366,12 @@ permission_query_conditions = {
 # 	"ToDo": "custom_app.overrides.CustomToDo"
 # }
 
+# POS smena bir necha kun ochiq tursa ham sotuv buxgalteriyaga o'z KUNiga tushadi:
+# cheklar kun bo'yicha alohida Sales Invoice'larga konsolidatsiya qilinadi.
+override_doctype_class = {
+	"POS Closing Entry": "ozturkapp.ozturkapp.overrides.pos_closing_entry.OzturkPOSClosingEntry",
+}
+
 # Document Events
 # ---------------
 # Hook on document methods and events
