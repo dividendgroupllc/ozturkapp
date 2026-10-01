@@ -143,6 +143,28 @@ class TestDashboard(DashboardCase):
         )
         self.assertAlmostEqual(by_mode[self.CARD], row["discount"] * 20000 / row["amount"], places=2)
 
+    def test_discount_by_reason_and_payment_mode(self):
+        """Tur × to'lov usuli jadvali: ustunlar `by_mode` ga, qatorlar `by_reason` ga teng."""
+        self._discounted_and_split_paid()
+        d = self._dashboard()["discounts"]
+
+        matrix = d["by_reason_mode"]
+        by_mode = {m["mode"]: m["discount"] for m in d["by_mode"]}
+        columns = {}
+        for line in matrix:
+            self.assertAlmostEqual(sum(line["modes"].values()), line["discount"], places=2)
+            for mode, amount in line["modes"].items():
+                columns[mode] = columns.get(mode, 0) + amount
+        self.assertEqual(set(columns), set(by_mode))
+        for mode, amount in by_mode.items():
+            self.assertAlmostEqual(columns[mode], amount, places=2)
+
+        by_reason = {r["reason"]: r["discount"] for r in d["by_reason"]}
+        self.assertEqual({line["reason"]: round(line["discount"], 2) for line in matrix},
+                         {k: round(v, 2) for k, v in by_reason.items()})
+        aksiya = next(line for line in matrix if line["reason"] == "Aksiya")
+        self.assertIn(self.CARD, aksiya["modes"])
+
     def _version(self, invoice, owner, data):
         version = frappe.get_doc({
             "doctype": "Version", "ref_doctype": "POS Invoice", "docname": invoice,

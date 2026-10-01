@@ -227,6 +227,18 @@
 /* Taomlar bloki: balandligi cheklangan, ichida vertikal scroll */
 .sd-summary-scroll { display: flex; flex-direction: column; }
 
+/* Chegirma turi × to'lov usuli jadvali */
+.sd-discount-modes { margin: 0 0 16px; }
+.sd-discount-modes tfoot td { border-top: 2px solid var(--sd-border); }
+.sd-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	margin-right: 6px;
+	vertical-align: middle;
+}
+
 .sd-scroll {
 	max-height: 340px;
 	overflow-y: auto;

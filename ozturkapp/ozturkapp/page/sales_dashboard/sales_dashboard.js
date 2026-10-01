@@ -513,6 +513,42 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 				};
 			});
 
+		// Tur × to'lov usuli: qaysi to'lovdan qancha chegirma ketgani (server
+		// chegirmani bo'lib to'langan chekda to'lov ulushiga qarab bo'ladi).
+		const type_color = Object.fromEntries(discount_types.map((t) => [t.label, t.color]));
+		const matrix = d.by_reason_mode || [];
+		const mode_totals = {};
+		for (const line of matrix) {
+			for (const [mode, amount] of Object.entries(line.modes)) mode_totals[mode] = (mode_totals[mode] || 0) + flt(amount);
+		}
+		const modes = Object.keys(mode_totals).sort((a, b) => mode_totals[b] - mode_totals[a]);
+		const cell = (v) => (Math.abs(flt(v)) > 0.5 ? this.money(v) : `<span class="text-muted">—</span>`);
+		const by_payment = matrix.length ? `
+			<div class="sd-summary sd-discount-modes">
+				<div class="sd-summary-title">${__("To'lov usuli bo'yicha")}</div>
+				<div class="sd-table-wrap">
+					<table class="sd-table">
+						<thead><tr>
+							<th>${__("Chegirma turi")}</th>
+							${modes.map((m) => `<th class="text-right">${this.esc(m)}</th>`).join("")}
+							<th class="text-right">${__("Jami")}</th>
+						</tr></thead>
+						<tbody>${matrix.map((line) => `
+							<tr>
+								<td><i class="sd-dot" style="background:${type_color[line.reason] || "#94a3b8"}"></i>${this.esc(line.reason)}</td>
+								${modes.map((m) => `<td class="text-right">${cell(line.modes[m])}</td>`).join("")}
+								<td class="text-right"><b>${this.money(line.discount)}</b></td>
+							</tr>`).join("")}
+						</tbody>
+						<tfoot><tr>
+							<td><b>${__("Jami")}</b></td>
+							${modes.map((m) => `<td class="text-right"><b>${this.money(mode_totals[m])}</b></td>`).join("")}
+							<td class="text-right"><b>${this.money(Object.values(mode_totals).reduce((a, b) => a + b, 0))}</b></td>
+						</tr></tfoot>
+					</table>
+				</div>
+			</div>` : "";
+
 		// Taomlar — hammasi, blok ichida vertikal scroll (yon blok kichik:
 		// sahifalashdan ko'ra aylantirish tezroq va qulayroq).
 		const dishes = d.by_item.map((r) => ({ label: r.item_name, value: r.discount, hint: __("{0} dona", [this.num(r.qty)]) }));
@@ -562,6 +598,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<div class="sd-scroll">${this.bar_list(dishes, { tone: "indigo" })}</div>
 				</div>
 			</div>
+			${by_payment}
 			<div class="sd-table-wrap">
 				<table class="sd-table">
 					<thead><tr>

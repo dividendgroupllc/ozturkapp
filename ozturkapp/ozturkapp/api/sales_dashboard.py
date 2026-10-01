@@ -393,7 +393,7 @@ def _waiters(invoices, labels):
 def _discounts(invoices, labels):
 	"""Chegirmali cheklar: kim, qachon, nima sababdan, qaysi taomga, qaysi to'lov bilan."""
 	rows = [x for x in invoices if not cint(x.is_return) and abs(x.discount) > EPSILON]
-	empty = {"rows": [], "by_user": [], "by_reason": [], "by_mode": [], "by_item": []}
+	empty = {"rows": [], "by_user": [], "by_reason": [], "by_mode": [], "by_item": [], "by_reason_mode": []}
 	if not rows:
 		return empty
 
@@ -427,6 +427,8 @@ def _discounts(invoices, labels):
 		})
 
 	result, by_user, by_reason, by_mode, by_item = [], {}, {}, {}, {}
+	# Chegirma turi × to'lov usuli (dashboarddagi jadval uchun) — `by_mode` bilan bir xil ulush.
+	reason_mode = {}
 	for inv in rows:
 		user, given_at = inv.get("custom_discount_by"), inv.get("custom_discount_at")
 		if not user and inv.name in givers:
@@ -464,10 +466,13 @@ def _discounts(invoices, labels):
 
 		# Bo'lib to'langan chekda chegirma to'lov ulushiga qarab taqsimlanadi.
 		paid = sum(abs(a) for _m, a in inv.payments)
+		cell = reason_mode.setdefault(reason, {})
 		for mode, amount in inv.payments:
+			share = inv.discount * abs(amount) / paid if paid else 0
 			m = by_mode.setdefault(mode, {"mode": mode, "count": 0, "discount": 0})
 			m["count"] += 1
-			m["discount"] += inv.discount * abs(amount) / paid if paid else 0
+			m["discount"] += share
+			cell[mode] = cell.get(mode, 0) + share
 
 		for it in items:
 			if abs(it["discount"]) <= EPSILON:
@@ -482,6 +487,10 @@ def _discounts(invoices, labels):
 	result.sort(key=lambda r: (r["date"], r["time"]), reverse=True)
 	return {
 		"rows": result,
+		"by_reason_mode": [
+			{"reason": reason, "modes": modes, "discount": sum(modes.values())}
+			for reason, modes in sorted(reason_mode.items(), key=lambda kv: -sum(kv[1].values()))
+		],
 		"by_user": sorted(by_user.values(), key=by_discount),
 		"by_reason": sorted(by_reason.values(), key=by_discount),
 		"by_mode": sorted(by_mode.values(), key=by_discount),
