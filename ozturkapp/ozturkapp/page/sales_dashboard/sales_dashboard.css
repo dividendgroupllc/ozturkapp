@@ -215,7 +215,7 @@
 }
 
 /* ── Chegirmalar ── */
-/* Chegirmalar: chapda «kim + sabab», o'ngda to'lov turi va taomlar */
+/* Chegirmalar: chapda «kim + sabab», o'ngda taomlar */
 .sd-discount-layout {
 	display: grid;
 	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -224,7 +224,15 @@
 	align-items: start;
 }
 
-.sd-discount-side { display: flex; flex-direction: column; gap: var(--sd-gap); }
+/* Taomlar bloki: balandligi cheklangan, ichida vertikal scroll */
+.sd-summary-scroll { display: flex; flex-direction: column; }
+
+.sd-scroll {
+	max-height: 340px;
+	overflow-y: auto;
+	padding-right: 6px;
+	overscroll-behavior: contain;
+}
 
 .sd-people { display: flex; flex-direction: column; gap: 14px; }
 

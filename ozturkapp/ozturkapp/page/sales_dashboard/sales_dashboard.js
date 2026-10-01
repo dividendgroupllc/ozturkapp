@@ -497,13 +497,9 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 				</div>
 			</div>`).join("");
 
-		const side = [
-			[__("To'lov turi"), d.by_mode.map((r) => ({ label: r.mode, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "primary"],
-			[__("Taomlar"), d.by_item.slice(0, 8).map((r) => ({ label: r.item_name, value: r.discount, hint: __("{0} dona", [this.num(r.qty)]) })), "indigo"],
-		];
-
-		const pays = (r) => r.payments.map((p) =>
-			`<span class="sd-chip">${this.esc(p.mode)}${r.payments.length > 1 ? ` ${this.short_money(p.amount)}` : ""}</span>`).join(" ");
+		// Taomlar — hammasi, blok ichida vertikal scroll (yon blok kichik:
+		// sahifalashdan ko'ra aylantirish tezroq va qulayroq).
+		const dishes = d.by_item.map((r) => ({ label: r.item_name, value: r.discount, hint: __("{0} dona", [this.num(r.qty)]) }));
 
 		const rows = d.rows.map((r) => {
 			const open = this.open_discounts.has(r.invoice);
@@ -526,11 +522,10 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<td class="text-right">${this.money(r.gross)}</td>
 					<td class="text-right sd-neg">−${this.money(r.discount)}</td>
 					<td class="text-right"><b>${this.money(r.amount)}</b></td>
-					<td>${pays(r)}</td>
 					<td>${this.esc(r.waiter_name)}${r.table ? `<div class="sd-code">${this.esc(r.table)}</div>` : ""}</td>
 				</tr>
 				<tr class="sd-discount-items" data-for="${this.esc(r.invoice)}" ${open ? "" : 'style="display:none"'}>
-					<td colspan="10">
+					<td colspan="9">
 						<table class="sd-subtable">
 							<thead><tr><th>${__("Taom")}</th><th class="text-right">${__("Soni")}</th><th class="text-right">${__("Narxi")}</th><th class="text-right">${__("Chegirma ulushi")}</th><th class="text-right">${__("Sof")}</th></tr></thead>
 							<tbody>${items}</tbody>
@@ -546,12 +541,9 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<div class="sd-summary-title">${__("Kim bergan va sababi")}</div>
 					<div class="sd-people">${who_why}</div>
 				</div>
-				<div class="sd-discount-side">
-					${side.map(([title, list, tone]) => `
-						<div class="sd-summary">
-							<div class="sd-summary-title">${title}</div>
-							${this.bar_list(list, { tone })}
-						</div>`).join("")}
+				<div class="sd-summary sd-summary-scroll">
+					<div class="sd-summary-title">${__("Taomlar")} <span class="text-muted">· ${dishes.length}</span></div>
+					<div class="sd-scroll">${this.bar_list(dishes, { tone: "indigo" })}</div>
 				</div>
 			</div>
 			<div class="sd-table-wrap">
@@ -560,12 +552,12 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 						<th>${__("Chek")}</th><th>${__("Sana")}</th><th>${__("Kim berdi")}</th><th>${__("Sabab")}</th>
 						<th class="text-right">${__("Foiz")}</th><th class="text-right">${__("Chegirmagacha")}</th>
 						<th class="text-right">${__("Chegirma")}</th><th class="text-right">${__("To'langan")}</th>
-						<th>${__("To'lov turi")}</th><th>${__("Ofitsiant / stol")}</th>
+						<th>${__("Ofitsiant / stol")}</th>
 					</tr></thead>
 					<tbody>${rows}</tbody>
 				</table>
 			</div>
-			<div class="sd-hint">${__("Qatorni bosing — chegirma qaysi taomlarga taqsimlangani ko'rinadi. Bo'lib to'langan chekda chegirma to'lov turlari orasida to'lov ulushiga qarab bo'linadi.")}</div>
+			<div class="sd-hint">${__("Qatorni bosing — chegirma qaysi taomlarga taqsimlangani ko'rinadi.")}</div>
 		`);
 	}
 
