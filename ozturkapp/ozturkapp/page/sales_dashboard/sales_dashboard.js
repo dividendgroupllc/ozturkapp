@@ -28,7 +28,6 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		this.data = null;
 		this.search = "";
 		this.sort = { field: "net_amount", dir: "desc" };
-		this.top_by = "net_amount";
 		this.open_discounts = new Set();
 
 		this.make_filters();
@@ -160,22 +159,6 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 						<div class="sd-payments"></div>
 					</div>
 				</div>
-				<div class="sd-grid">
-					<div class="sd-card">
-						<div class="sd-card-title">${__("Soatlar bo'yicha sotuv")} <span class="sd-hourly-note text-muted"></span></div>
-						<div class="sd-chart-hourly"></div>
-					</div>
-					<div class="sd-card">
-						<div class="sd-card-head">
-							<div class="sd-card-title">${__("Top-10 mahsulot")}</div>
-							<div class="sd-toggle">
-								<button data-top="net_amount" class="active">${__("Summa")}</button>
-								<button data-top="qty">${__("Soni")}</button>
-							</div>
-						</div>
-						<div class="sd-chart-top"></div>
-					</div>
-				</div>
 				<div class="sd-card sd-discounts"></div>
 				<div class="sd-card sd-waiters"></div>
 				<div class="sd-card sd-table-card">
@@ -205,12 +188,6 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			const dir = this.sort.field === field && this.sort.dir === "desc" ? "asc" : "desc";
 			this.sort = { field, dir };
 			this.render_items();
-		});
-		this.$root.on("click", "[data-top]", (e) => {
-			this.top_by = $(e.currentTarget).data("top");
-			this.$root.find("[data-top]").removeClass("active");
-			$(e.currentTarget).addClass("active");
-			this.render_top();
 		});
 		this.$root.on("click", ".sd-discount-row", (e) => {
 			const invoice = $(e.currentTarget).data("invoice");
@@ -264,8 +241,6 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		this.render_kpis();
 		this.render_timeline();
 		this.render_payments();
-		this.render_hourly();
-		this.render_top();
 		this.render_discounts();
 		this.render_waiters();
 		this.render_items();
@@ -473,55 +448,6 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			${Math.abs(paid - flt(c.revenue)) > 1
 				? `<div class="sd-hint">${__("Tushumdan farq: {0}", [this.money(paid - c.revenue)])}</div>` : ""}
 		`);
-	}
-
-	render_hourly() {
-		const $el = this.$root.find(".sd-chart-hourly").empty();
-		const $note = this.$root.find(".sd-hourly-note").empty();
-		const rows = this.data.hourly;
-		if (!rows.length) return $el.html(this.empty_state());
-
-		const hour = (h) => `${String(h).padStart(2, "0")}:00`;
-		const peak = rows.reduce((a, b) => (flt(b.net_amount) > flt(a.net_amount) ? b : a));
-		$note.text(__("eng gavjum: {0}–{1}, {2} chek", [hour(peak.hour), hour(peak.hour + 1), peak.invoices]));
-
-		new frappe.Chart($el[0], {
-			type: "bar",
-			height: 240,
-			colors: ["#7c3aed"],
-			data: {
-				labels: rows.map((r) => hour(r.hour)),
-				datasets: [{ name: __("Sof sotuv"), values: rows.map((r) => flt(r.net_amount)) }],
-			},
-			axisOptions: { xAxisMode: "tick", shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
-			barOptions: { spaceRatio: 0.3 },
-			tooltipOptions: { formatTooltipY: (v) => this.money(v) },
-		});
-	}
-
-	render_top() {
-		if (!this.data) return;
-		const $el = this.$root.find(".sd-chart-top").empty();
-		if (!this.data.items.length) return $el.html(this.empty_state());
-
-		const field = this.top_by;
-		const top = [...this.data.items].sort((a, b) => flt(b[field]) - flt(a[field])).slice(0, 10);
-		new frappe.Chart($el[0], {
-			type: "bar",
-			height: 240,
-			colors: [field === "qty" ? "#29cd42" : "#2490ef"],
-			data: {
-				labels: top.map((r) => this.truncate(r.item_name || r.item_code, 14)),
-				datasets: [{ name: field === "qty" ? __("Soni") : __("Sof summa"), values: top.map((r) => flt(r[field])) }],
-			},
-			axisOptions: field === "qty" ? {} : { shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
-			barOptions: { spaceRatio: 0.35 },
-			tooltipOptions: { formatTooltipY: (v) => (field === "qty" ? this.num(v) : this.money(v)) },
-		});
-	}
-
-	truncate(s, n) {
-		return s.length > n ? s.slice(0, n - 1) + "…" : s;
 	}
 
 	/* ─────────────────────────── Chegirmalar ─────────────────────────── */

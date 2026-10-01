@@ -153,7 +153,6 @@ def get_dashboard(from_date=None, to_date=None, company=None, branch=None, item_
 		"previous": {"from_date": str(prev.from_date), "to_date": str(prev.to_date)},
 		"payments": _payment_summary(invoices),
 		"timeline": _timeline(filters),
-		"hourly": _hourly(filters),
 		"waiters": _waiters(invoices, labels),
 		"discounts": _discounts(invoices, labels),
 		"open_orders": _open_orders(filters, labels),
@@ -243,33 +242,6 @@ def _timeline(filters):
 			for key in keys
 		],
 	}
-
-
-def _hourly(filters):
-	"""Soat bo'yicha sof sotuv va cheklar soni — faqat sotuv bo'lgan soatlar oralig'i."""
-	rows = frappe.db.sql(
-		f"""
-		SELECT HOUR(pi.posting_time) AS hour, SUM({NET_SQL}) AS net_amount,
-			COUNT(DISTINCT CASE WHEN pi.is_return = 0 THEN pi.name END) AS invoices
-		FROM `tabPOS Invoice Item` i
-		JOIN `tabPOS Invoice` pi ON pi.name = i.parent
-		WHERE {_item_where(filters)}
-		GROUP BY hour
-		""",
-		filters,
-		as_dict=True,
-	)
-	if not rows:
-		return []
-	by_hour = {cint(r.hour): r for r in rows}
-	return [
-		{
-			"hour": h,
-			"net_amount": flt(by_hour[h].net_amount) if h in by_hour else 0,
-			"invoices": cint(by_hour[h].invoices) if h in by_hour else 0,
-		}
-		for h in range(min(by_hour), max(by_hour) + 1)
-	]
 
 
 # ─────────────────────────── Chek darajasi ───────────────────────────
