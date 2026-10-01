@@ -480,22 +480,42 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		const by_person = Object.values(people).sort((a, b) => b.discount - a.discount);
 		const total = by_person.reduce((sum, p) => sum + p.discount, 0) || 1;
 		const max = Math.max(...by_person.map((p) => p.discount)) || 1;
-		const who_why = by_person.map((p) => `
+
+		// Har bir sababga o'z rangi — barcha xodimlarda bir xil (ko'proq
+		// berilgan sabab birinchi rangni oladi).
+		const reason_totals = {};
+		for (const r of d.rows) reason_totals[r.reason] = (reason_totals[r.reason] || 0) + flt(r.discount);
+		const palette = ["#e24c4c", "#f59e0b", "#2490ef", "#10b981", "#8b5cf6", "#ec4899", "#14b8a6", "#64748b"];
+		const color = {};
+		Object.keys(reason_totals).sort((a, b) => reason_totals[b] - reason_totals[a])
+			.forEach((reason, i) => { color[reason] = palette[i % palette.length]; });
+
+		const who_why = by_person.map((p) => {
+			const reasons = Object.values(p.reasons).sort((a, b) => b.discount - a.discount);
+			// Umumiy chiziq sabablar bo'yicha rangli bo'laklarga bo'linadi.
+			const segments = reasons.map((w) =>
+				`<div class="sd-seg" style="width:${(w.discount / p.discount) * 100}%;background:${color[w.reason]}"
+					title="${this.esc(w.reason)}: ${this.money(w.discount)}"></div>`).join("");
+			return `
 			<div class="sd-person">
 				<div class="sd-bar-top">
 					<span class="sd-bar-label">${this.esc(p.name)}</span>
 					<span class="sd-bar-value">${this.money(p.discount)}
 						<span class="text-muted">· ${this.pct((p.discount / total) * 100)} · ${__("{0} ta chek", [p.count])}</span></span>
 				</div>
-				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-red" style="width:${(p.discount / max) * 100}%"></div></div>
-				<div class="sd-reasons">${Object.values(p.reasons).sort((a, b) => b.discount - a.discount).map((w) => `
-					<div class="sd-reason">
-						<span class="sd-reason-label">${this.esc(w.reason)}</span>
-						<span class="sd-bar-value">${this.money(w.discount)}
-							<span class="text-muted">· ${__("{0} ta chek", [w.count])}</span></span>
+				<div class="sd-bar-track"><div class="sd-segs" style="width:${(p.discount / max) * 100}%">${segments}</div></div>
+				<div class="sd-reasons">${reasons.map((w) => `
+					<div class="sd-reason-row">
+						<div class="sd-reason">
+							<span class="sd-reason-label"><i class="sd-dot" style="background:${color[w.reason]}"></i>${this.esc(w.reason)}</span>
+							<span class="sd-bar-value">${this.money(w.discount)}
+								<span class="text-muted">· ${this.pct((w.discount / p.discount) * 100)} · ${__("{0} ta chek", [w.count])}</span></span>
+						</div>
+						<div class="sd-bar-track sd-bar-thin"><div class="sd-bar-fill" style="width:${(w.discount / p.discount) * 100}%;background:${color[w.reason]}"></div></div>
 					</div>`).join("")}
 				</div>
-			</div>`).join("");
+			</div>`;
+		}).join("");
 
 		// Taomlar — hammasi, blok ichida vertikal scroll (yon blok kichik:
 		// sahifalashdan ko'ra aylantirish tezroq va qulayroq).
