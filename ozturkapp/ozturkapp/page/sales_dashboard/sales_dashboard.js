@@ -466,9 +466,38 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			return;
 		}
 
-		const summaries = [
-			[__("Kim bergan"), d.by_user.map((r) => ({ label: r.name, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "red"],
-			[__("Sabab"), d.by_reason.map((r) => ({ label: r.reason, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "orange"],
+		// Kim bergan + sabab bitta blokda: har bir kishining jami chegirmasi va
+		// uning ostida qaysi sababga qancha bergani (chek qatorlaridan yig'iladi).
+		const people = {};
+		for (const r of d.rows) {
+			const p = (people[r.user_name] ||= { name: r.user_name, discount: 0, count: 0, reasons: {} });
+			p.discount += flt(r.discount);
+			p.count += 1;
+			const why = (p.reasons[r.reason] ||= { reason: r.reason, discount: 0, count: 0 });
+			why.discount += flt(r.discount);
+			why.count += 1;
+		}
+		const by_person = Object.values(people).sort((a, b) => b.discount - a.discount);
+		const total = by_person.reduce((sum, p) => sum + p.discount, 0) || 1;
+		const max = Math.max(...by_person.map((p) => p.discount)) || 1;
+		const who_why = by_person.map((p) => `
+			<div class="sd-person">
+				<div class="sd-bar-top">
+					<span class="sd-bar-label">${this.esc(p.name)}</span>
+					<span class="sd-bar-value">${this.money(p.discount)}
+						<span class="text-muted">· ${this.pct((p.discount / total) * 100)} · ${__("{0} ta chek", [p.count])}</span></span>
+				</div>
+				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-red" style="width:${(p.discount / max) * 100}%"></div></div>
+				<div class="sd-reasons">${Object.values(p.reasons).sort((a, b) => b.discount - a.discount).map((w) => `
+					<div class="sd-reason">
+						<span class="sd-reason-label">${this.esc(w.reason)}</span>
+						<span class="sd-bar-value">${this.money(w.discount)}
+							<span class="text-muted">· ${__("{0} ta chek", [w.count])}</span></span>
+					</div>`).join("")}
+				</div>
+			</div>`).join("");
+
+		const side = [
 			[__("To'lov turi"), d.by_mode.map((r) => ({ label: r.mode, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "primary"],
 			[__("Taomlar"), d.by_item.slice(0, 8).map((r) => ({ label: r.item_name, value: r.discount, hint: __("{0} dona", [this.num(r.qty)]) })), "indigo"],
 		];
@@ -512,12 +541,18 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 
 		$card.html(`
 			${head}
-			<div class="sd-summary-grid">
-				${summaries.map(([title, list, tone]) => `
-					<div class="sd-summary">
-						<div class="sd-summary-title">${title}</div>
-						${this.bar_list(list, { tone })}
-					</div>`).join("")}
+			<div class="sd-discount-layout">
+				<div class="sd-summary">
+					<div class="sd-summary-title">${__("Kim bergan va sababi")}</div>
+					<div class="sd-people">${who_why}</div>
+				</div>
+				<div class="sd-discount-side">
+					${side.map(([title, list, tone]) => `
+						<div class="sd-summary">
+							<div class="sd-summary-title">${title}</div>
+							${this.bar_list(list, { tone })}
+						</div>`).join("")}
+				</div>
 			</div>
 			<div class="sd-table-wrap">
 				<table class="sd-table">

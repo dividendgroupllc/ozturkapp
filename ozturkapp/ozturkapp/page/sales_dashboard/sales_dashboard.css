@@ -215,12 +215,36 @@
 }
 
 /* ── Chegirmalar ── */
-.sd-summary-grid {
+/* Chegirmalar: chapda «kim + sabab», o'ngda to'lov turi va taomlar */
+.sd-discount-layout {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
 	gap: var(--sd-gap);
 	margin: 8px 0 16px;
+	align-items: start;
 }
+
+.sd-discount-side { display: flex; flex-direction: column; gap: var(--sd-gap); }
+
+.sd-people { display: flex; flex-direction: column; gap: 14px; }
+
+.sd-reasons {
+	margin-top: 6px;
+	padding-left: 12px;
+	border-left: 2px solid var(--sd-border);
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.sd-reason {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 12px;
+}
+
+.sd-reason-label { color: var(--sd-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sd-summary {
 	border: 1px solid var(--sd-border);
@@ -278,7 +302,8 @@
 }
 
 @media (max-width: 991px) {
-	.sd-grid { grid-template-columns: 1fr; }
+	.sd-grid,
+	.sd-discount-layout { grid-template-columns: 1fr; }
 }
 
 .sd-empty {
