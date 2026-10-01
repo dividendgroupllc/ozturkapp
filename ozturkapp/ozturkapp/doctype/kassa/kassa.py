@@ -56,7 +56,7 @@ class Kassa(Document):
 
     # Submit yaratadigan buxgalteriya havola maydonlari. Bular faqat shu
     # hujjatning O'ZIGA yoziladi — yangi yozuvda doim bo'sh bo'lishi shart.
-    ACCOUNTING_LINK_FIELDS = ("payment_entry", "journal_entry", "pos_opening_entry")
+    ACCOUNTING_LINK_FIELDS = ("payment_entry", "journal_entry")
 
     def insert(self, *args, **kwargs):
         # Duplicate/Amend'da eski Kassaning JE/PE havolalari ko'chib qolmasin.
@@ -246,11 +246,6 @@ class Kassa(Document):
             self.create_payment_entry()
         else:
             self.create_journal_entry()
-
-        # G'aladon naqdi bo'lsa — POS smenasiga avtomatik bog'lanadi (utils/kassa_shift.py).
-        from ozturkapp.ozturkapp.utils import kassa_shift
-
-        kassa_shift.link(self)
 
     def on_cancel(self):
         """Cancel bo'lganda yaratilgan hujjatni (PE yoki JE) bekor qilish."""

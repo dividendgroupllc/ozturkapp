@@ -9,8 +9,6 @@
   "date",
   "oborot",
   "company",
-  "pos_opening_entry",
-  "pos_shift_after_close",
   "column_break_main",
   "source_account",
   "source_balance",
@@ -249,22 +247,6 @@
    "description": "Kassa yoziladigan kompaniya. Kassa (Mode of Payment) bitta kompaniyada hisobga ega bo'lsa avtomatik to'ladi; bir nechtasida bo'lsa — shu maydondagi kompaniya qatori olinadi."
   },
   {
-   "fieldname": "pos_opening_entry",
-   "fieldtype": "Link",
-   "options": "POS Opening Entry",
-   "label": "Smena (avtomatik)",
-   "read_only": 1,
-   "no_copy": 1,
-   "description": "G'aladon naqdidan bo'lsa — smenaga o'zi bog'lanadi (ochiq smena yoki FIFO bo'yicha yopilgan smena)."
-  },
-  {
-   "fieldname": "pos_shift_after_close",
-   "fieldtype": "Check",
-   "label": "Smena yopilgandan keyin",
-   "read_only": 1,
-   "no_copy": 1
-  },
-  {
    "fieldname": "amended_from",
    "fieldtype": "Link",
    "label": "Amended From",
@@ -277,7 +259,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-10-01 23:00:00.000000",
+ "modified": "2026-10-01 23:45:00.000000",
  "modified_by": "Administrator",
  "module": "Ozturkapp",
  "name": "Kassa",

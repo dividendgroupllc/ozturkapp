@@ -196,13 +196,6 @@ def _assemble(kind: str, scope, shift) -> dict:
     payments = _payments(invoices, shift.reconciliation, modes)
     cash = _cash(shift.reconciliation, modes, closed)
     movements = movements_summary(opening.name)
-    # Operator Kassa harakatlari: ochiq paytdagisi kutilgan summada; yopilgandan
-    # KEYIN bog'langani farqni qayta hisoblaydi (kassir kamomadi bo'lib qolmasin).
-    from ozturkapp.ozturkapp.utils import kassa_shift
-
-    operator = kassa_shift.operator_summary(opening.name)
-    if closed and cash.get("difference") is not None:
-        cash["difference"] = flt(cash["difference"] - operator["after"], 2)
 
     drawer = _drawer_openings(opening.branch or scope.branch, opening.period_start_date, shift.period_end)
     counts["cancelled_orders"] = _cancelled_orders(
@@ -220,7 +213,6 @@ def _assemble(kind: str, scope, shift) -> dict:
     return {
         "kind": kind,
         "restricted": not full,
-        "operator": operator,
         "restaurant": scope.restaurant,
         "company": opening.company,
         "branch": opening.branch or scope.branch,

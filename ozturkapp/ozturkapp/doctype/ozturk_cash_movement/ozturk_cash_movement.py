@@ -58,7 +58,7 @@ CATEGORIES = {
 }
 
 #: Kassir ekranida taklif QILINMAYDIGAN turlar: xarajatni operator «Kassa» (Расход)
-#: orqali yozadi va u smenaga o'zi bog'lanadi (utils/kassa_shift.py).
+#: orqali yozadi — u kassir smenasiga bog'lanmaydi (naqd hisobidan to'g'ridan-to'g'ri).
 CASHIER_HIDDEN = {"Xarajat"}
 
 
