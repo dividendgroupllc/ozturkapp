@@ -496,7 +496,7 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
     if bill.get("paid") and bill.get("payments"):
         r.feed(1)
         for p in bill["payments"]:
-            r.pair(f"{p.get('mode_of_payment') or ''}:", money(p.get("amount")))
+            r.pair(f"{p.get('label') or p.get('mode_of_payment') or ''}:", money(p.get("amount")))
         if flt(bill.get("change_amount")):
             r.pair("Qaytim:", money(bill.get("change_amount")))
 
@@ -667,7 +667,7 @@ def build_shift_report(report: dict, printer, header: dict | None = None) -> byt
         r.bold(True).line("TO'LOV USULLARI")
         r.bold(False)
         for pay in payments:
-            name = pay.get("mode_of_payment") or ""
+            name = pay.get("label") or pay.get("mode_of_payment") or ""
             count = cint(pay.get("sales_count"))
             if pay.get("net_amount") is None:
                 r.pair(f"{name}:", f"{count} ta")

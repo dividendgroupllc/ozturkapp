@@ -153,11 +153,14 @@ def get_refundable(doc) -> dict:
         )
 
     paid = []
-    for mode, amount in net_paid_by_mode(doc).items():
+    by_mode = net_paid_by_mode(doc)
+    labels = cashier_billing.pos_labels(by_mode)
+    for mode, amount in by_mode.items():
         back = flt(refunded.get(mode, 0))
         paid.append(
             {
                 "mode_of_payment": mode,
+                "label": labels.get(mode) or mode,
                 "paid": flt(amount),
                 "refunded": back,
                 "refundable": max(flt(amount - back), 0),
@@ -315,10 +318,10 @@ def refund(doc, scope, items, reason) -> dict:
         "return_against": doc.name,
         "docstatus": ret.docstatus,
         "refunded": abs(flt(ret.rounded_total) or flt(ret.grand_total)),
-        "payments": [
+        "payments": cashier_billing.with_labels(
             {"mode_of_payment": row.mode_of_payment, "amount": flt(row.amount)}
             for row in ret.payments
-        ],
+        ),
         "final": final,
         "approved_by": approver,
     }

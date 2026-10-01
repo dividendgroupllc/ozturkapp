@@ -60,6 +60,19 @@ CUSTOM_FIELDS = {
             "translatable": 0,
         }
     ],
+    # Kassir ekrani va chekdagi nom. Kassa moduli naqd egalarini ajratish
+    # uchun usullar «Нахт Davron», «Kassa Oybek» deb nomlanadi — kassirga
+    # esa qisqa «Нахт» ko'rinsin (utils/cashier_billing.pos_label).
+    "Mode of Payment": [
+        {
+            "fieldname": "custom_pos_label",
+            "label": "POS'dagi nomi",
+            "fieldtype": "Data",
+            "insert_after": "type",
+            "description": "Kassa ekrani va chekda ko'rinadigan nom. Bo'sh bo'lsa — to'lov turi nomi.",
+            "translatable": 0,
+        }
+    ],
 }
 
 # (doctype, fieldname, property, value, property_type)

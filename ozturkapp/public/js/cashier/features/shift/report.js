@@ -19,7 +19,16 @@
  * qiymatni oladi va ular shu yo'l bilan ko'rinadi.
  */
 
-import { esc, features, hhmm, isHidden, shiftIsOpen, slots, ui } from "./shared.js";
+import {
+	esc,
+	features,
+	hhmm,
+	isHidden,
+	modeLabel,
+	shiftIsOpen,
+	slots,
+	ui,
+} from "./shared.js";
 
 const SALES_LINES = [
 	{ key: "gross_sales", label: __("Yalpi savdo") },
@@ -91,7 +100,7 @@ function paymentsHtml(screen, payments) {
 		<tbody>${payments
 			.map(
 				(pay) => `<tr>
-				<td>${esc(pay.mode_of_payment)}${
+				<td>${esc(modeLabel(pay, screen.ctx))}${
 					pay.is_cash ? ` <span class="rc-tag">${esc(__("Naqd"))}</span>` : ""
 				}</td>
 				<td class="rc-shift-xr__num">${cint(pay.sales_count)}</td>

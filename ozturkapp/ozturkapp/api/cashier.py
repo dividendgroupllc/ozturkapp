@@ -609,6 +609,7 @@ def _withhold_cash_figures(result: dict):
     report["payments"] = [
         {
             "mode_of_payment": row.get("mode_of_payment"),
+            "label": row.get("label") or cashier_billing.pos_label(row.get("mode_of_payment")),
             "closing_amount": row.get("closing_amount"),
         }
         for row in report.get("payments") or []

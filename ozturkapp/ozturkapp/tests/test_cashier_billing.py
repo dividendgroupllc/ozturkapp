@@ -1110,7 +1110,10 @@ class TestRefunds(BillingCase):
 
         result = self._refund(doc, self._all(doc))
 
-        self.assertEqual(result["payments"], [{"mode_of_payment": self.cash, "amount": -payable}])
+        self.assertEqual(
+            result["payments"],
+            [{"mode_of_payment": self.cash, "amount": -payable, "label": self.cash}],
+        )
         self.assertEqual(refunds.net_paid_by_mode(doc), {self.cash: payable})
 
     def test_refund_is_split_over_the_original_modes_to_the_cent(self):

@@ -398,10 +398,15 @@ def get_paid_orders(
         filters={"parent": ["in", [r.name for r in rows]], "parenttype": "POS Invoice"},
         fields=["parent", "mode_of_payment", "amount"],
     )
+    mode_labels = cashier_billing.pos_labels(p.mode_of_payment for p in payments)
     payments_by_invoice = {}
     for p in payments:
         payments_by_invoice.setdefault(p.parent, []).append(
-            {"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount)}
+            {
+                "mode_of_payment": p.mode_of_payment,
+                "label": mode_labels.get(p.mode_of_payment) or p.mode_of_payment,
+                "amount": flt(p.amount),
+            }
         )
 
     return [

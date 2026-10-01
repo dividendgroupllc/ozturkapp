@@ -908,7 +908,10 @@ class TestBlindCountRoutes(MoneyCase):
         self.assertNotIn("expected_cash", report)
         self.assertNotIn("cash_diff", report)
         self.assertNotIn("total_sales", report)
-        self.assertEqual(report["payments"], [{"mode_of_payment": "Нахт", "closing_amount": 8}])
+        self.assertEqual(
+            report["payments"],
+            [{"mode_of_payment": "Нахт", "label": "Нахт", "closing_amount": 8}],
+        )
 
     def test_underpayment_through_the_generic_submit_is_a_known_config_risk(self):
         """Hujjatlangan qoldiq xavf: profilda `allow_partial_payment` yoqilgan bo'lsa generic submit

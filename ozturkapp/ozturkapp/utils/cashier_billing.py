@@ -36,7 +36,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
+from frappe.utils import cint, cstr, flt
 
 #: Xizmat haqi uchun standart hisob va shablon nomlari (setup ishlatadi).
 SERVICE_CHARGE_ACCOUNT_NAME = "Service Charge"
@@ -351,6 +351,8 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
         "payments": [
             {
                 "mode_of_payment": row.mode_of_payment,
+                # Ekran va chekda ko'rinadigan nom (`pos_label`).
+                "label": pos_label(row.mode_of_payment),
                 "amount": flt(row.amount),
             }
             for row in doc.get("payments") or []
@@ -470,10 +472,14 @@ def get_payment_methods(pos_profile: str) -> list:
             fields=["name", "type"],
         )
     } if rows else {}
+    labels = pos_labels([r.mode_of_payment for r in rows])
 
     methods = [
         {
             "mode_of_payment": row.mode_of_payment,
+            # Kassirga ko'rinadigan nom. Mijoz serverga baribir
+            # `mode_of_payment` (haqiqiy nom) ni yuboradi.
+            "label": labels.get(row.mode_of_payment) or row.mode_of_payment,
             "default": bool(cint(row.default)),
             "type": types.get(row.mode_of_payment),
             "allow_in_returns": bool(cint(row.allow_in_returns)),
@@ -482,6 +488,56 @@ def get_payment_methods(pos_profile: str) -> list:
     ]
     cache[pos_profile] = methods
     return methods
+
+
+POS_LABEL_FIELD = "custom_pos_label"
+
+
+def pos_labels(modes) -> dict:
+    """`{usul: ko'rinadigan nom}` — bir nechta usul uchun BITTA so'rov.
+
+    `Mode of Payment.custom_pos_label` (setup/custom_fields.py) bo'sh bo'lsa
+    — usulning o'z nomi. Ma'lumotda (chek, smena, Kassa) doim HAQIQIY nom
+    saqlanadi; bu faqat kassir ekrani va chop etiladigan chek uchun.
+    Masalan: «Нахт Davron» -> «Нахт». So'rov ichida keshlanadi.
+    """
+    cache = getattr(frappe.local, "_ozturk_pos_labels", None)
+    if cache is None:
+        cache = frappe.local._ozturk_pos_labels = {}
+
+    wanted = {m for m in modes or () if m}
+    missing = [m for m in wanted if m not in cache]
+    if missing:
+        found = {}
+        if frappe.get_meta("Mode of Payment").has_field(POS_LABEL_FIELD):
+            found = {
+                row.name: (row.get(POS_LABEL_FIELD) or "").strip()
+                for row in frappe.get_all(
+                    "Mode of Payment",
+                    filters={"name": ["in", missing]},
+                    fields=["name", POS_LABEL_FIELD],
+                )
+            }
+        for mode in missing:
+            cache[mode] = found.get(mode) or mode
+    return {mode: cache[mode] for mode in wanted}
+
+
+def pos_label(mode_of_payment: str) -> str:
+    """Bitta usulning kassir ekrani/chekdagi nomi (bo'sh bo'lsa — o'z nomi)."""
+    if not mode_of_payment:
+        return mode_of_payment or ""
+    return pos_labels([mode_of_payment]).get(mode_of_payment) or mode_of_payment
+
+
+def with_labels(rows, key: str = "mode_of_payment") -> list:
+    """To'lov qatorlari (dict) ga `label` qo'shadi — joyida, ro'yxatni qaytaradi."""
+    rows = list(rows or [])
+    labels = pos_labels([row.get(key) for row in rows])
+    for row in rows:
+        mode = row.get(key)
+        row["label"] = labels.get(mode) or mode or ""
+    return rows
 
 
 def cash_modes(pos_profile: str) -> list:
@@ -657,7 +713,12 @@ URY_SPLIT_FLAG = "ury_bill_split"
 _DISCOUNT_EPSILON_PERCENT = 1e-9
 _DISCOUNT_EPSILON_AMOUNT = 0.005
 
-AUDIT_FIELDS = ("custom_discount_approved_by", "custom_discount_reason")
+AUDIT_FIELDS = (
+    "custom_discount_approved_by",
+    "custom_discount_reason",
+    "custom_discount_by",
+    "custom_discount_at",
+)
 
 
 @contextmanager
@@ -735,8 +796,9 @@ def guard_invoice_cancel(doc, method=None):
 
 def _guard_audit_fields(doc, before):
     for fieldname in AUDIT_FIELDS:
-        now = doc.get(fieldname) or None
-        was = (before.get(fieldname) if before else None) or None
+        # Matn sifatida: forma sanani satr qilib yuboradi, bazadan esa datetime keladi.
+        now = cstr(doc.get(fieldname)) or None
+        was = cstr(before.get(fieldname) if before else None) or None
         if now != was:
             _forbid(
                 _("Chegirma tasdig'i va sababi faqat chegirma oynasi orqali yoziladi."),

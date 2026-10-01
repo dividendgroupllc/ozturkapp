@@ -3,7 +3,7 @@
  */
 
 import { ui } from "../kit/index.js";
-import { esc, parseAmount, bindAmountInput } from "../util/format.js";
+import { esc, modeLabel, parseAmount, bindAmountInput } from "../util/format.js";
 
 export class ShiftMethods {
 	/**
@@ -54,11 +54,11 @@ export class ShiftMethods {
 						${modes
 							.map(
 								(mode) => `<tr>
-									<td>${esc(mode)}</td>
+									<td>${esc(modeLabel(mode, this.ctx))}</td>
 									<td class="rc-num">
 										<input class="rc-shift-input" type="text" inputmode="${ui.virtualKeyboard ? "none" : "numeric"}"
 											value="" placeholder="0" data-mode="${esc(mode)}"
-											aria-label="${esc(mode)}">
+											aria-label="${esc(modeLabel(mode, this.ctx))}">
 									</td>
 								</tr>`
 							)
@@ -235,12 +235,12 @@ export class ShiftMethods {
 			${modes
 				.map(
 					(mode) => `<div class="rc-count__row">
-						<span>${esc(mode)}</span>
+						<span>${esc(modeLabel(mode, this.ctx))}</span>
 						<input class="rc-pay__input rc-count-input" type="text" inputmode="${
 							ui.virtualKeyboard ? "none" : "numeric"
 						}"
 							value="" placeholder="0" data-mode="${esc(mode)}"
-							aria-label="${esc(mode)}">
+							aria-label="${esc(modeLabel(mode, this.ctx))}">
 					</div>`
 				)
 				.join("")}

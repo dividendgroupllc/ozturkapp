@@ -7,7 +7,7 @@
  */
 
 import { slots } from "../core/slots.js";
-import { esc, fmtQty, hhmm, orderTypeLabel, taxLabel } from "../util/format.js";
+import { esc, fmtQty, hhmm, modeLabel, orderTypeLabel, taxLabel } from "../util/format.js";
 
 /**
  * Qaytarish chekining qizil belgisi. Qaytarish cheki tarixda manfiy summa bilan
@@ -229,7 +229,7 @@ export class HistoryMethods {
 		$list.html(
 			rows
 				.map((r) => {
-					const modes = (r.payments || []).map((p) => esc(p.mode_of_payment)).join(", ");
+					const modes = (r.payments || []).map((p) => esc(modeLabel(p, this.ctx))).join(", ");
 					return `<div class="rc-history__row ${
 						r.is_return ? "rc-history__row--return" : ""
 					}" data-invoice="${esc(r.invoice)}">
@@ -280,7 +280,7 @@ export class HistoryMethods {
 
 		const payments = bill.payments || [];
 		const paymentTypes = payments.length
-			? payments.map((p) => p.mode_of_payment).join(", ")
+			? payments.map((p) => modeLabel(p, this.ctx)).join(", ")
 			: "—";
 
 		const paymentDetails = payments.length
@@ -289,7 +289,7 @@ export class HistoryMethods {
 					${payments
 						.map(
 							(p) => `<div class="rc-total rc-total--payment">
-								<span>${esc(p.mode_of_payment)}</span>
+								<span>${esc(modeLabel(p, this.ctx))}</span>
 								<span>${esc(this.money(p.amount))}</span>
 							</div>`
 						)

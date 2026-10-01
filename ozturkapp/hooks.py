@@ -293,7 +293,11 @@ doctype_js = {
 # Chop etish shakllarida summani probel bilan ko'rsatish uchun
 # (`{{ format_amount(doc.rounded_total) }}`). Qoida `utils/money.py` da.
 jinja = {
-	"methods": ["ozturkapp.ozturkapp.utils.money.format_amount"],
+	"methods": [
+		"ozturkapp.ozturkapp.utils.money.format_amount",
+		# To'lov usulining chekdagi nomi (`Mode of Payment.custom_pos_label`).
+		"ozturkapp.ozturkapp.utils.cashier_billing.pos_label",
+	],
 }
 
 # jinja = {

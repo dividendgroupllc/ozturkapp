@@ -19,6 +19,7 @@
 
 const { slots, ui, util } = ozturk.cashier;
 const { esc, fmtQty, num } = util;
+const modeLabel = util.modeLabel || ((mode) => (mode && (mode.label || mode.mode_of_payment)) || "");
 
 const LOOKUP = "ozturkapp.ozturkapp.api.billing.get_refundable";
 const REFUND = "ozturkapp.ozturkapp.api.billing.refund_invoice";
@@ -103,7 +104,7 @@ function refundDialog(screen, info) {
 					? " rc-payment-refund__mode--blocked"
 					: ""
 			}">
-				<span>${esc(mode.mode_of_payment)}</span>
+				<span>${esc(modeLabel(mode, screen.ctx))}</span>
 				<span>${esc(__("To'langan"))} ${esc(screen.money(mode.paid))} · ${esc(__("qaytadi"))} ${esc(
 				screen.money(mode.refundable)
 			)}</span>
@@ -119,6 +120,7 @@ function refundDialog(screen, info) {
 				? `<p class="rc-payment-refund__warn" role="alert">⚠ ${esc(
 						__(
 							"«{0}» usuli bilan qaytarish ruxsat etilmagan. POS Profile → To'lov usullari jadvalida shu usul uchun «Qaytarishda ruxsat» (Allow In Returns) belgisini yoqing.",
+							// Haqiqiy nom: menejer uni POS Profile jadvalida qidiradi.
 							[blocked.map((mode) => mode.mode_of_payment).join(", ")]
 						)
 				  )}</p>`
@@ -220,7 +222,7 @@ function refundDialog(screen, info) {
 			});
 
 			d.close(result);
-			const by = (result.payments || []).map((row) => row.mode_of_payment).join(", ");
+			const by = (result.payments || []).map((row) => modeLabel(row, screen.ctx)).join(", ");
 			ui.toast(
 				`${screen.money(result.refunded)}${by ? ` (${by})` : ""} · ${result.invoice}`,
 				{ title: __("Qaytarildi"), seconds: 9 }

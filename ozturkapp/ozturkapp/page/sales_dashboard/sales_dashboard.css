@@ -97,6 +97,7 @@
 .sd-tone-indigo { --sd-tone: #6366f1; }
 .sd-tone-red { --sd-tone: #e24c4c; }
 .sd-tone-orange { --sd-tone: #f59e0b; }
+.sd-tone-teal { --sd-tone: #14b8a6; }
 .sd-tone-gray { --sd-tone: #94a3b8; }
 
 .sd-kpi-label {
@@ -122,15 +123,179 @@
 	color: var(--sd-muted);
 }
 
+.sd-kpi-delta { min-height: 18px; }
+
+.sd-delta {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--sd-muted);
+}
+
+.sd-delta.sd-good { color: #16a34a; }
+.sd-delta.sd-bad { color: #e24c4c; }
+
+.sd-compare { font-size: 12px; margin-left: auto; align-self: center; }
+
+.sd-badge {
+	display: inline-block;
+	padding: 0 6px;
+	border-radius: 6px;
+	background: var(--sd-sunken);
+	color: var(--sd-muted);
+	font-size: 10px;
+	font-weight: 500;
+	text-transform: none;
+	letter-spacing: 0;
+	vertical-align: middle;
+}
+
+/* ── Ogohlantirish ── */
+.sd-alert {
+	border: 1px solid rgba(245, 158, 11, .45);
+	background: rgba(245, 158, 11, .08);
+	border-radius: var(--sd-radius);
+	padding: 10px 14px;
+	font-size: 13px;
+}
+
+.sd-alert .sd-stale-toggle { margin-left: 6px; cursor: pointer; }
+.sd-alert .sd-table { margin-top: 8px; }
+
+/* ── Karta sarlavhasi (o'ngda vosita yoki izoh) ── */
+.sd-card-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-bottom: 8px;
+}
+
+.sd-card-head .sd-card-title { margin: 0; }
+.sd-card-sub { font-size: 12px; color: var(--sd-muted); }
+
+.sd-hint { font-size: 12px; color: var(--sd-muted); margin-top: 8px; }
+
+.sd-toggle {
+	display: inline-flex;
+	border: 1px solid var(--sd-border);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.sd-toggle button {
+	border: 0;
+	background: transparent;
+	padding: 2px 10px;
+	font-size: 12px;
+	color: var(--sd-muted);
+}
+
+.sd-toggle button.active { background: var(--primary, #2490ef); color: #fff; }
+
+/* ── Ulush chiziqlari ── */
+.sd-bars { display: flex; flex-direction: column; gap: 10px; }
+
+.sd-bar-top {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 13px;
+}
+
+.sd-bar-label { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-bar-value { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.sd-bar-track {
+	height: 6px;
+	margin-top: 4px;
+	border-radius: 999px;
+	background: var(--sd-sunken);
+	overflow: hidden;
+}
+
+.sd-bar-fill { height: 100%; border-radius: 999px; }
+.sd-fill-primary { background: #2490ef; }
+.sd-fill-red { background: #e24c4c; }
+.sd-fill-orange { background: #f59e0b; }
+.sd-fill-indigo { background: #6366f1; }
+
+.sd-bar-hint { font-size: 11px; color: var(--sd-muted); margin-top: 2px; }
+
+.sd-total-line {
+	display: flex;
+	justify-content: space-between;
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid var(--sd-border);
+	font-size: 13px;
+}
+
+/* ── Chegirmalar ── */
+.sd-summary-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: var(--sd-gap);
+	margin: 8px 0 16px;
+}
+
+.sd-summary {
+	border: 1px solid var(--sd-border);
+	border-radius: 10px;
+	padding: 12px 14px;
+}
+
+.sd-summary-title {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--sd-muted);
+	text-transform: uppercase;
+	letter-spacing: .04em;
+	margin-bottom: 10px;
+}
+
+.sd-discount-row { cursor: pointer; }
+.sd-caret { display: inline-block; width: 12px; color: var(--sd-muted); transition: transform .15s; }
+.sd-discount-row.open .sd-caret { transform: rotate(90deg); }
+.sd-discount-items > td { background: var(--sd-sunken); padding: 8px 12px 12px 32px !important; }
+
+.sd-subtable { width: 100%; font-size: 12px; }
+.sd-subtable th { color: var(--sd-muted); font-weight: 600; padding: 4px 8px; }
+.sd-subtable td { padding: 4px 8px; border-top: 1px solid var(--sd-border); }
+
+.sd-chip {
+	display: inline-block;
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: var(--sd-sunken);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+/* ── Ulush ustuni ── */
+.sd-share {
+	position: relative;
+	min-width: 70px;
+	height: 18px;
+	border-radius: 4px;
+	background: var(--sd-sunken);
+	overflow: hidden;
+	font-size: 11px;
+	text-align: right;
+}
+
+.sd-share-fill { position: absolute; inset: 0 auto 0 0; background: rgba(36, 144, 239, .25); }
+.sd-share span { position: relative; padding-right: 4px; line-height: 18px; }
+
 /* ── Grafiklar ── */
-.sd-charts {
+.sd-grid {
 	display: grid;
 	grid-template-columns: 3fr 2fr;
 	gap: var(--sd-gap);
 }
 
 @media (max-width: 991px) {
-	.sd-charts { grid-template-columns: 1fr; }
+	.sd-grid { grid-template-columns: 1fr; }
 }
 
 .sd-empty {
@@ -144,17 +309,6 @@
 }
 
 /* ── Jadval ── */
-.sd-table-head {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	flex-wrap: wrap;
-	margin-bottom: 8px;
-}
-
-.sd-table-head .sd-card-title { margin: 0; }
-
 .sd-table-tools {
 	display: flex;
 	gap: 8px;
@@ -209,7 +363,7 @@
 .sd-table th.sd-sortable { cursor: pointer; }
 .sd-table th.sd-sortable:hover { color: var(--text-color); }
 
-.sd-table tbody tr:hover td { background: var(--sd-sunken); }
+.sd-table tbody tr:hover > td { background: var(--sd-sunken); }
 
 .sd-table tfoot td {
 	position: sticky;

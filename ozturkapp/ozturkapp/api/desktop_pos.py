@@ -43,6 +43,8 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime, nowdate
 
+from ozturkapp.ozturkapp.utils import cashier_billing
+
 __all__ = [
     "checkPosOpening",
     "createPosOpening",
@@ -607,7 +609,20 @@ def createPosClosing(pos_opening_entry, payment_reconciliation):
         }
         for p in closing.payment_reconciliation
     ]
+    cashier_billing.with_labels(payments)
+    # Naqd usul — `Mode of Payment.type == "Cash"` bo'yicha (nom «Нахт Davron»
+    # kabi o'zgarishi mumkin); topilmasa eski nom bo'yicha qidiruv.
+    cash_types = set(
+        frappe.get_all(
+            "Mode of Payment",
+            filters={"name": ["in", [p["mode_of_payment"] for p in payments]], "type": "Cash"},
+            pluck="name",
+        )
+    ) if payments else set()
     cash = next(
+        (p for p in payments if p["mode_of_payment"] in cash_types),
+        None,
+    ) or next(
         (
             p
             for p in payments
@@ -1214,6 +1229,10 @@ def getPosProfile():
             "currency": doc.currency,
             "default_customer": doc.customer or "",
             "payment_methods": [p.mode_of_payment for p in doc.payments if p.mode_of_payment],
+            # `{usul: ekrandagi nom}` — Desktop POS ko'rsatish uchun (yuborishda haqiqiy nom).
+            "payment_method_labels": cashier_billing.pos_labels(
+                p.mode_of_payment for p in doc.payments if p.mode_of_payment
+            ),
             "brand_name": (doc.get("custom_company_brand_name") or doc.company or ""),
             "receipt_footer": doc.get("custom_receipt_footer") or "",
             "order_number_type": doc.get("custom_order_number_type") or "Stiker",

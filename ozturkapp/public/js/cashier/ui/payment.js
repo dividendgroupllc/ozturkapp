@@ -27,7 +27,14 @@
 
 import { slots } from "../core/slots.js";
 import { ui } from "../kit/index.js";
-import { bindAmountInput, esc, groupAmount, parseAmount, quickAmounts } from "../util/format.js";
+import {
+	bindAmountInput,
+	esc,
+	groupAmount,
+	modeLabel,
+	parseAmount,
+	quickAmounts,
+} from "../util/format.js";
 import { dueOf } from "./panel.js";
 
 /** Summalar tiyin aniqligida butun songa o'tkaziladi: `0.1 + 0.2` xatosi bo'lmasin. */
@@ -311,12 +318,12 @@ export class PaymentMethods {
 									.map(
 										(m) => `<div class="rc-pay__row">
 											<button class="rc-pay__name" type="button"
-												data-mode="${esc(m.mode_of_payment)}">${esc(m.mode_of_payment)}</button>
+												data-mode="${esc(m.mode_of_payment)}">${esc(modeLabel(m))}</button>
 											<input class="rc-pay__input" type="text" autocomplete="off"
 												data-mode="${esc(m.mode_of_payment)}"
 												inputmode="${ui.virtualKeyboard ? "none" : "numeric"}"
 												placeholder="0"
-												aria-label="${esc(m.mode_of_payment)}">
+												aria-label="${esc(modeLabel(m))}">
 										</div>`
 									)
 									.join("")}

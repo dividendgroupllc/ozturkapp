@@ -339,9 +339,12 @@ def _payments(invoices: list, reconciliation: list, types: dict) -> list:
                     row["sales_count"] += 1
             counted.add(mode)
 
+    labels = cashier_billing.pos_labels(per_mode)
     return [
         {
             "mode_of_payment": mode,
+            # Ekran/chekdagi nom; `mode_of_payment` — haqiqiy nom (ma'lumot).
+            "label": labels.get(mode) or mode,
             "is_cash": types.get(mode) == "Cash",
             "sales_count": row["sales_count"],
             "sales_amount": flt(row["sales_amount"], 2),
@@ -367,6 +370,7 @@ def _cash(reconciliation: list, types: dict, closed: bool) -> dict:
 def movements_summary(opening_name: str) -> dict:
     """Smenaning kassa harakatlari: soni, jami kirim/chiqim va qatorlar."""
     rows = pos_closing.get_cash_movements(opening_name)
+    mode_labels = cashier_billing.pos_labels(row.mode_of_payment for row in rows)
     labels = {
         user: _user_label(user)
         for user in {u for row in rows for u in (row.user, row.approved_by) if u}
@@ -382,6 +386,7 @@ def movements_summary(opening_name: str) -> dict:
                 "category": row.category,
                 "amount": flt(row.amount),
                 "mode_of_payment": row.mode_of_payment,
+                "mode_label": mode_labels.get(row.mode_of_payment) or row.mode_of_payment,
                 "reason": row.reason,
                 "user": row.user,
                 "user_name": labels[row.user],

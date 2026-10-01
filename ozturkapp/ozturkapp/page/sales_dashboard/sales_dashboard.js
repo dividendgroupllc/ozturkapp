@@ -1,8 +1,11 @@
 /**
- * Sotuv dashboardi — mahsulotlar bo'yicha sotuv va chegirma.
+ * Sotuv dashboardi — tushum, mahsulotlar, to'lov turlari, chegirmalar, ofitsiantlar.
  *
  * Barcha hisob-kitob serverda (`api/sales_dashboard.py`). Bu fayl faqat
- * ko'rsatadi: KPI kartalar, ikki grafik va saralanadigan jadval.
+ * ko'rsatadi. Ikki daraja bor (batafsil — server modulining izohida):
+ * mahsulot guruhi filtri faqat mahsulot darajasiga ta'sir qiladi, chek
+ * darajasidagi bloklar (tushum, to'lovlar, chegirmalar, ofitsiantlar) esa
+ * butun filial bo'yicha qoladi va buni belgi bilan ko'rsatadi.
  */
 
 frappe.provide("ozturk.sales_dashboard");
@@ -25,6 +28,8 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		this.data = null;
 		this.search = "";
 		this.sort = { field: "net_amount", dir: "desc" };
+		this.top_by = "net_amount";
+		this.open_discounts = new Set();
 
 		this.make_filters();
 		this.make_layout();
@@ -47,6 +52,14 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		};
 
 		this.fields = {
+			company: this.page.add_field({
+				fieldname: "company",
+				label: __("Kompaniya"),
+				fieldtype: "Link",
+				options: "Company",
+				default: frappe.defaults.get_user_default("Company"),
+				change: refresh,
+			}),
 			from_date: this.page.add_field({
 				fieldname: "from_date",
 				label: __("Boshlanish sanasi"),
@@ -87,6 +100,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			today: [today, today],
 			yesterday: [frappe.datetime.add_days(today, -1), frappe.datetime.add_days(today, -1)],
 			week: [frappe.datetime.add_days(today, -6), today],
+			days30: [frappe.datetime.add_days(today, -29), today],
 			month: [frappe.datetime.month_start(), today],
 			prev_month: [
 				frappe.datetime.add_months(frappe.datetime.month_start(), -1),
@@ -114,6 +128,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		return {
 			from_date,
 			to_date: this.fields.to_date.get_value() || from_date,
+			company: this.fields.company.get_value() || null,
 			branch: this.fields.branch.get_value() || null,
 			item_group: this.fields.item_group.get_value() || null,
 		};
@@ -128,22 +143,43 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 					<button class="sd-period" data-period="today">${__("Bugun")}</button>
 					<button class="sd-period" data-period="yesterday">${__("Kecha")}</button>
 					<button class="sd-period" data-period="week">${__("7 kun")}</button>
+					<button class="sd-period" data-period="days30">${__("30 kun")}</button>
 					<button class="sd-period" data-period="month">${__("Shu oy")}</button>
 					<button class="sd-period" data-period="prev_month">${__("O'tgan oy")}</button>
+					<span class="sd-compare text-muted"></span>
 				</div>
+				<div class="sd-alerts"></div>
 				<div class="sd-kpis"></div>
-				<div class="sd-charts">
+				<div class="sd-grid">
 					<div class="sd-card">
-						<div class="sd-card-title">${__("Kunlik sotuv va chegirma")} <span class="sd-daily-note text-muted"></span></div>
-						<div class="sd-chart-daily"></div>
+						<div class="sd-card-title">${__("Sotuv dinamikasi")} <span class="sd-timeline-note text-muted"></span></div>
+						<div class="sd-chart-timeline"></div>
 					</div>
 					<div class="sd-card">
-						<div class="sd-card-title">${__("Eng ko'p sotilgan 10 mahsulot")}</div>
+						<div class="sd-card-title">${__("To'lov turlari")} <span class="sd-scope"></span></div>
+						<div class="sd-payments"></div>
+					</div>
+				</div>
+				<div class="sd-grid">
+					<div class="sd-card">
+						<div class="sd-card-title">${__("Soatlar bo'yicha sotuv")} <span class="sd-hourly-note text-muted"></span></div>
+						<div class="sd-chart-hourly"></div>
+					</div>
+					<div class="sd-card">
+						<div class="sd-card-head">
+							<div class="sd-card-title">${__("Top-10 mahsulot")}</div>
+							<div class="sd-toggle">
+								<button data-top="net_amount" class="active">${__("Summa")}</button>
+								<button data-top="qty">${__("Soni")}</button>
+							</div>
+						</div>
 						<div class="sd-chart-top"></div>
 					</div>
 				</div>
+				<div class="sd-card sd-discounts"></div>
+				<div class="sd-card sd-waiters"></div>
 				<div class="sd-card sd-table-card">
-					<div class="sd-table-head">
+					<div class="sd-card-head">
 						<div class="sd-card-title">${__("Mahsulotlar bo'yicha sotuv")}</div>
 						<div class="sd-table-tools">
 							<input type="search" class="form-control input-xs sd-search"
@@ -153,7 +189,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 							</button>
 						</div>
 					</div>
-					<div class="sd-table-wrap"></div>
+					<div class="sd-table-wrap sd-items"></div>
 				</div>
 			</div>
 		`).appendTo(this.page.main);
@@ -161,15 +197,28 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		this.$root.on("click", ".sd-period", (e) => this.set_period($(e.currentTarget).data("period")));
 		this.$root.on("input", ".sd-search", frappe.utils.debounce((e) => {
 			this.search = (e.target.value || "").trim().toLowerCase();
-			this.render_table();
+			this.render_items();
 		}, 150));
 		this.$root.on("click", ".sd-export", () => this.export_excel());
-		this.$root.on("click", "th[data-sort]", (e) => {
+		this.$root.on("click", ".sd-items th[data-sort]", (e) => {
 			const field = $(e.currentTarget).data("sort");
 			const dir = this.sort.field === field && this.sort.dir === "desc" ? "asc" : "desc";
 			this.sort = { field, dir };
-			this.render_table();
+			this.render_items();
 		});
+		this.$root.on("click", "[data-top]", (e) => {
+			this.top_by = $(e.currentTarget).data("top");
+			this.$root.find("[data-top]").removeClass("active");
+			$(e.currentTarget).addClass("active");
+			this.render_top();
+		});
+		this.$root.on("click", ".sd-discount-row", (e) => {
+			const invoice = $(e.currentTarget).data("invoice");
+			this.open_discounts.has(invoice) ? this.open_discounts.delete(invoice) : this.open_discounts.add(invoice);
+			$(e.currentTarget).toggleClass("open");
+			this.$root.find(`.sd-discount-items[data-for="${CSS.escape(invoice)}"]`).toggle();
+		});
+		this.$root.on("click", ".sd-stale-toggle", () => this.$root.find(".sd-stale-list").toggle());
 	}
 
 	/* ─────────────────────────── Ma'lumot ─────────────────────────── */
@@ -204,9 +253,22 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 	}
 
 	render() {
+		const prev = this.data.previous;
+		this.$root.find(".sd-compare").text(
+			__("Solishtirish: {0} — {1}", [frappe.datetime.str_to_user(prev.from_date), frappe.datetime.str_to_user(prev.to_date)])
+		);
+		// Guruh filtri yoqilganda chek darajasidagi bloklar butun filial bo'yicha.
+		this.$root.find(".sd-scope").html(this.scope_badge());
+
+		this.render_alerts();
 		this.render_kpis();
-		this.render_charts();
-		this.render_table();
+		this.render_timeline();
+		this.render_payments();
+		this.render_hourly();
+		this.render_top();
+		this.render_discounts();
+		this.render_waiters();
+		this.render_items();
 	}
 
 	/* ─────────────────────────── Formatlash ─────────────────────────── */
@@ -229,56 +291,167 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		return format_number(flt(v), null, flt(v) % 1 ? 2 : 0);
 	}
 
+	pct(v) {
+		return `${format_number(flt(v), null, 1)}%`;
+	}
+
+	esc(v) {
+		return frappe.utils.escape_html(v == null ? "" : String(v));
+	}
+
+	date_time(date, time) {
+		return `${frappe.datetime.str_to_user(date)}${time ? " " + time : ""}`;
+	}
+
+	// O'zgarish belgisi: `invert` — o'sish yomon (masalan chegirma).
+	delta(cur, prev, invert = false) {
+		cur = flt(cur);
+		prev = flt(prev);
+		if (!prev) return "";
+		const change = ((cur - prev) / Math.abs(prev)) * 100;
+		if (Math.abs(change) < 0.05) return `<span class="sd-delta">0%</span>`;
+		const up = change > 0;
+		const good = invert ? !up : up;
+		return `<span class="sd-delta ${good ? "sd-good" : "sd-bad"}">${up ? "▲" : "▼"} ${format_number(Math.abs(change), null, 1)}%</span>`;
+	}
+
+	scope_badge() {
+		return this.data.group_filter
+			? `<span class="sd-badge" title="${__("Mahsulot guruhi filtri chek darajasidagi ko'rsatkichlarga ta'sir qilmaydi")}">${__("butun filial")}</span>`
+			: "";
+	}
+
+	empty_state(text) {
+		return `<div class="sd-empty">${frappe.utils.icon("chart", "lg")}<div>${text || __("Tanlangan davrda sotuv yo'q")}</div></div>`;
+	}
+
+	// Gorizontal ulush chiziqlari: [{label, value, hint}] — eng kattasi 100%.
+	bar_list(rows, { tone = "primary", money = true } = {}) {
+		if (!rows.length) return `<div class="sd-hint">${__("Ma'lumot yo'q")}</div>`;
+		const max = Math.max(...rows.map((r) => Math.abs(flt(r.value)))) || 1;
+		const total = rows.reduce((s, r) => s + flt(r.value), 0) || 1;
+		return `<div class="sd-bars">${rows.map((r) => `
+			<div class="sd-bar-row">
+				<div class="sd-bar-top">
+					<span class="sd-bar-label">${this.esc(r.label)}</span>
+					<span class="sd-bar-value">${money ? this.money(r.value) : this.num(r.value)}
+						<span class="text-muted">· ${this.pct((flt(r.value) / total) * 100)}</span></span>
+				</div>
+				<div class="sd-bar-track"><div class="sd-bar-fill sd-fill-${tone}" style="width:${(Math.abs(flt(r.value)) / max) * 100}%"></div></div>
+				${r.hint ? `<div class="sd-bar-hint">${r.hint}</div>` : ""}
+			</div>`).join("")}</div>`;
+	}
+
+	/* ─────────────────────────── Ogohlantirishlar ─────────────────────────── */
+
+	render_alerts() {
+		const o = this.data.open_orders;
+		const $alerts = this.$root.find(".sd-alerts").empty();
+		if (!o.stale_count) return;
+
+		const list = o.stale.map((r) => `
+			<tr>
+				<td><a href="/app/pos-invoice/${encodeURIComponent(r.invoice)}">${this.esc(r.invoice)}</a></td>
+				<td>${this.date_time(r.date, r.time)}</td>
+				<td>${this.esc(r.table)}</td>
+				<td>${this.esc(r.waiter_name)}</td>
+				<td class="text-right">${this.money(r.amount)}</td>
+			</tr>`).join("");
+
+		$alerts.html(`
+			<div class="sd-alert">
+				<div>
+					${frappe.utils.icon("es-line-alert-circle", "sm")}
+					<b>${__("{0} ta buyurtma yopilmay qolgan", [o.stale_count])}</b>
+					— ${__("jami {0}. Bular kechagi va undan oldingi to'lanmagan cheklar: to'lovini oling yoki bekor qiling.", [this.money(o.stale_amount)])}
+					<a class="sd-stale-toggle">${__("Ro'yxat")}</a>
+				</div>
+				<table class="sd-table sd-stale-list" style="display:none">
+					<thead><tr><th>${__("Chek")}</th><th>${__("Sana")}</th><th>${__("Stol")}</th><th>${__("Ofitsiant")}</th><th class="text-right">${__("Summa")}</th></tr></thead>
+					<tbody>${list}</tbody>
+				</table>
+			</div>
+		`);
+	}
+
 	/* ─────────────────────────── KPI ─────────────────────────── */
 
 	render_kpis() {
-		const t = this.data.totals;
+		const c = this.data.checks, p = this.data.prev_checks;
+		const t = this.data.totals, pt = this.data.prev_totals;
+		const group = this.data.group_filter;
+		const scope = this.scope_badge();
+
 		const cards = [
-			{ label: __("Sof sotuv"), value: this.money(t.net_amount), hint: __("Mijoz to'lagan (chegirmadan keyin)"), tone: "primary" },
-			{ label: __("Sotilgan mahsulot"), value: this.num(t.qty), hint: __("{0} xil mahsulot", [t.items]), tone: "blue" },
-			{ label: __("Cheklar soni"), value: this.num(t.invoices), hint: __("O'rtacha chek: {0}", [this.money(t.avg_check)]), tone: "indigo" },
-			{ label: __("Umumiy chegirma"), value: this.money(t.discount), hint: __("Yalpi sotuvning {0}%", [flt(t.discount_percent, 1)]), tone: "red" },
-			{ label: __("Chegirmada sotilgan"), value: this.num(t.discounted_qty), hint: __("{0} ta chekda chegirma", [t.discounted_invoices]), tone: "orange" },
-			{ label: __("Qaytarishlar"), value: this.money(t.return_amount), hint: __("{0} ta qaytarish cheki", [t.returns]), tone: "gray" },
+			{
+				label: __("Jami tushum"), tone: "primary", scope,
+				value: this.money(c.revenue), delta: this.delta(c.revenue, p.revenue),
+				hint: __("Mijozlar to'lagan: sof sotuv + xizmat haqi + choychaqa"),
+			},
+			group ? {
+				label: __("Guruh sof sotuvi"), tone: "blue",
+				value: this.money(t.net_amount), delta: this.delta(t.net_amount, pt.net_amount),
+				hint: __("{0} dona, {1} xil mahsulot", [this.num(t.qty), t.items]),
+			} : {
+				label: __("Sof sotuv"), tone: "blue",
+				value: this.money(c.net), delta: this.delta(c.net, p.net),
+				hint: __("Taomlar, chegirmadan keyin · {0} dona", [this.num(t.qty)]),
+			},
+			{
+				label: __("Xizmat haqi"), tone: "teal", scope,
+				value: this.money(c.service), delta: this.delta(c.service, p.service),
+				hint: c.tips ? __("Choychaqa alohida: {0}", [this.money(c.tips)]) : __("Ofitsiant xizmati uchun"),
+			},
+			{
+				label: __("Chegirma"), tone: "red", scope,
+				value: this.money(c.discount), delta: this.delta(c.discount, p.discount, true),
+				hint: __("Yalpining {0} · {1} ta chekda", [this.pct(c.discount_percent), c.discounted_invoices]),
+			},
+			{
+				label: __("Cheklar soni"), tone: "indigo", scope,
+				value: this.num(c.invoices), delta: this.delta(c.invoices, p.invoices),
+				hint: c.returns
+					? __("Qaytarish: {0} ta, {1}", [c.returns, this.money(c.return_amount)])
+					: __("Qaytarish yo'q"),
+			},
+			{
+				label: __("O'rtacha chek"), tone: "orange", scope,
+				value: this.money(c.avg_check), delta: this.delta(c.avg_check, p.avg_check),
+				hint: __("Oldingi davr: {0}", [this.money(p.avg_check)]),
+			},
 		];
 
-		this.$root.find(".sd-kpis").html(cards.map((c) => `
-			<div class="sd-kpi sd-tone-${c.tone}">
-				<div class="sd-kpi-label">${c.label}</div>
-				<div class="sd-kpi-value">${c.value}</div>
-				<div class="sd-kpi-hint">${c.hint}</div>
+		this.$root.find(".sd-kpis").html(cards.map((k) => `
+			<div class="sd-kpi sd-tone-${k.tone}">
+				<div class="sd-kpi-label">${k.label} ${k.scope || ""}</div>
+				<div class="sd-kpi-value">${k.value}</div>
+				<div class="sd-kpi-delta">${k.delta || ""}</div>
+				<div class="sd-kpi-hint">${k.hint}</div>
 			</div>
 		`).join(""));
 	}
 
 	/* ─────────────────────────── Grafiklar ─────────────────────────── */
 
-	render_charts() {
-		const daily = this.data.daily;
-		const $daily = this.$root.find(".sd-chart-daily").empty();
-		const $top = this.$root.find(".sd-chart-top").empty();
+	render_timeline() {
+		const tl = this.data.timeline;
+		const $el = this.$root.find(".sd-chart-timeline").empty();
+		this.$root.find(".sd-timeline-note").text(tl.mode === "month" ? __("(oylar bo'yicha)") : "");
+		if (!this.data.items.length) return $el.html(this.empty_state());
 
-		// Uzun davrda ustunlar siqilib, sanalar ustma-ust tushadi — oxirgi 10 kun.
-		const days = daily.slice(-10);
-		this.$root.find(".sd-daily-note").text(
-			this.data.items.length && daily.length > days.length ? __("(oxirgi {0} kun)", [days.length]) : ""
-		);
+		const label = (key) => tl.mode === "month"
+			? moment(key, "YYYY-MM").format("MM.YYYY")
+			: frappe.datetime.str_to_user(key).slice(0, 5);
 
-		if (!this.data.items.length) {
-			$daily.html(this.empty_state());
-			$top.html(this.empty_state());
-			return;
-		}
-
-		new frappe.Chart($daily[0], {
+		new frappe.Chart($el[0], {
 			type: "axis-mixed",
 			height: 260,
 			colors: ["#2490ef", "#e24c4c"],
 			data: {
-				labels: days.map((d) => frappe.datetime.str_to_user(d.date).slice(0, 5)),
+				labels: tl.rows.map((r) => label(r.key)),
 				datasets: [
-					{ name: __("Sof sotuv"), chartType: "bar", values: days.map((d) => flt(d.net_amount)) },
-					{ name: __("Chegirma"), chartType: "line", values: days.map((d) => flt(d.discount)) },
+					{ name: __("Sof sotuv"), chartType: "bar", values: tl.rows.map((r) => flt(r.net_amount)) },
+					{ name: __("Chegirma"), chartType: "line", values: tl.rows.map((r) => flt(r.discount)) },
 				],
 			},
 			axisOptions: { xIsSeries: 1, xAxisMode: "tick", shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
@@ -286,18 +459,64 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			lineOptions: { regionFill: 0, dotSize: 3 },
 			tooltipOptions: { formatTooltipY: (v) => this.money(v) },
 		});
+	}
 
-		const top = [...this.data.items].sort((a, b) => flt(b.qty) - flt(a.qty)).slice(0, 10);
-		new frappe.Chart($top[0], {
+	render_payments() {
+		const c = this.data.checks;
+		const rows = this.data.payments.map((p) => ({
+			label: p.mode, value: p.amount, hint: __("{0} ta chek", [p.invoices]),
+		}));
+		const paid = this.data.payments.reduce((s, p) => s + flt(p.amount), 0);
+		this.$root.find(".sd-payments").html(`
+			${this.bar_list(rows)}
+			<div class="sd-total-line"><span>${__("Jami")}</span><b>${this.money(paid)}</b></div>
+			${Math.abs(paid - flt(c.revenue)) > 1
+				? `<div class="sd-hint">${__("Tushumdan farq: {0}", [this.money(paid - c.revenue)])}</div>` : ""}
+		`);
+	}
+
+	render_hourly() {
+		const $el = this.$root.find(".sd-chart-hourly").empty();
+		const $note = this.$root.find(".sd-hourly-note").empty();
+		const rows = this.data.hourly;
+		if (!rows.length) return $el.html(this.empty_state());
+
+		const hour = (h) => `${String(h).padStart(2, "0")}:00`;
+		const peak = rows.reduce((a, b) => (flt(b.net_amount) > flt(a.net_amount) ? b : a));
+		$note.text(__("eng gavjum: {0}–{1}, {2} chek", [hour(peak.hour), hour(peak.hour + 1), peak.invoices]));
+
+		new frappe.Chart($el[0], {
 			type: "bar",
-			height: 260,
-			colors: ["#29cd42"],
+			height: 240,
+			colors: ["#7c3aed"],
+			data: {
+				labels: rows.map((r) => hour(r.hour)),
+				datasets: [{ name: __("Sof sotuv"), values: rows.map((r) => flt(r.net_amount)) }],
+			},
+			axisOptions: { xAxisMode: "tick", shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
+			barOptions: { spaceRatio: 0.3 },
+			tooltipOptions: { formatTooltipY: (v) => this.money(v) },
+		});
+	}
+
+	render_top() {
+		if (!this.data) return;
+		const $el = this.$root.find(".sd-chart-top").empty();
+		if (!this.data.items.length) return $el.html(this.empty_state());
+
+		const field = this.top_by;
+		const top = [...this.data.items].sort((a, b) => flt(b[field]) - flt(a[field])).slice(0, 10);
+		new frappe.Chart($el[0], {
+			type: "bar",
+			height: 240,
+			colors: [field === "qty" ? "#29cd42" : "#2490ef"],
 			data: {
 				labels: top.map((r) => this.truncate(r.item_name || r.item_code, 14)),
-				datasets: [{ name: __("Soni"), values: top.map((r) => flt(r.qty)) }],
+				datasets: [{ name: field === "qty" ? __("Soni") : __("Sof summa"), values: top.map((r) => flt(r[field])) }],
 			},
+			axisOptions: field === "qty" ? {} : { shortenYAxisNumbers: 1, numberFormatter: (v) => this.short_money(v) },
 			barOptions: { spaceRatio: 0.35 },
-			tooltipOptions: { formatTooltipY: (v) => this.num(v) },
+			tooltipOptions: { formatTooltipY: (v) => (field === "qty" ? this.num(v) : this.money(v)) },
 		});
 	}
 
@@ -305,11 +524,126 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		return s.length > n ? s.slice(0, n - 1) + "…" : s;
 	}
 
-	empty_state() {
-		return `<div class="sd-empty">${frappe.utils.icon("chart", "lg")}<div>${__("Tanlangan davrda sotuv yo'q")}</div></div>`;
+	/* ─────────────────────────── Chegirmalar ─────────────────────────── */
+
+	render_discounts() {
+		const d = this.data.discounts, c = this.data.checks;
+		const $card = this.$root.find(".sd-discounts");
+		const head = `
+			<div class="sd-card-head">
+				<div class="sd-card-title">${__("Chegirmalar")} ${this.scope_badge()}</div>
+				<div class="sd-card-sub">${__("{0} ta chek · jami {1} · yalpining {2}", [d.rows.length, this.money(c.discount), this.pct(c.discount_percent)])}</div>
+			</div>`;
+
+		if (!d.rows.length) {
+			$card.html(`${head}<div class="sd-hint">${__("Tanlangan davrda chegirma berilmagan.")}</div>`);
+			return;
+		}
+
+		const summaries = [
+			[__("Kim bergan"), d.by_user.map((r) => ({ label: r.name, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "red"],
+			[__("Sabab"), d.by_reason.map((r) => ({ label: r.reason, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "orange"],
+			[__("To'lov turi"), d.by_mode.map((r) => ({ label: r.mode, value: r.discount, hint: __("{0} ta chek", [r.count]) })), "primary"],
+			[__("Taomlar"), d.by_item.slice(0, 8).map((r) => ({ label: r.item_name, value: r.discount, hint: __("{0} dona", [this.num(r.qty)]) })), "indigo"],
+		];
+
+		const pays = (r) => r.payments.map((p) =>
+			`<span class="sd-chip">${this.esc(p.mode)}${r.payments.length > 1 ? ` ${this.short_money(p.amount)}` : ""}</span>`).join(" ");
+
+		const rows = d.rows.map((r) => {
+			const open = this.open_discounts.has(r.invoice);
+			const items = r.items.map((it) => `
+				<tr>
+					<td>${this.esc(it.item_name)}</td>
+					<td class="text-right">${this.num(it.qty)}</td>
+					<td class="text-right">${this.money(it.gross)}</td>
+					<td class="text-right sd-neg">${Math.abs(it.discount) > 0.5 ? "−" + this.money(it.discount) : "—"}</td>
+					<td class="text-right">${this.money(it.gross - it.discount)}</td>
+				</tr>`).join("");
+			return `
+				<tr class="sd-discount-row ${open ? "open" : ""}" data-invoice="${this.esc(r.invoice)}">
+					<td><span class="sd-caret">▸</span>
+						<a href="/app/pos-invoice/${encodeURIComponent(r.invoice)}" onclick="event.stopPropagation()">${this.esc(r.invoice)}</a></td>
+					<td>${this.date_time(r.date, r.time)}</td>
+					<td><b>${this.esc(r.user_name)}</b>${r.given_at ? `<div class="sd-code">${this.esc(r.given_at.slice(11))}</div>` : ""}</td>
+					<td>${this.esc(r.reason)}</td>
+					<td class="text-right"><span class="sd-pill sd-pill-orange">${this.pct(r.percent)}</span></td>
+					<td class="text-right">${this.money(r.gross)}</td>
+					<td class="text-right sd-neg">−${this.money(r.discount)}</td>
+					<td class="text-right"><b>${this.money(r.amount)}</b></td>
+					<td>${pays(r)}</td>
+					<td>${this.esc(r.waiter_name)}${r.table ? `<div class="sd-code">${this.esc(r.table)}</div>` : ""}</td>
+				</tr>
+				<tr class="sd-discount-items" data-for="${this.esc(r.invoice)}" ${open ? "" : 'style="display:none"'}>
+					<td colspan="10">
+						<table class="sd-subtable">
+							<thead><tr><th>${__("Taom")}</th><th class="text-right">${__("Soni")}</th><th class="text-right">${__("Narxi")}</th><th class="text-right">${__("Chegirma ulushi")}</th><th class="text-right">${__("Sof")}</th></tr></thead>
+							<tbody>${items}</tbody>
+						</table>
+					</td>
+				</tr>`;
+		}).join("");
+
+		$card.html(`
+			${head}
+			<div class="sd-summary-grid">
+				${summaries.map(([title, list, tone]) => `
+					<div class="sd-summary">
+						<div class="sd-summary-title">${title}</div>
+						${this.bar_list(list, { tone })}
+					</div>`).join("")}
+			</div>
+			<div class="sd-table-wrap">
+				<table class="sd-table">
+					<thead><tr>
+						<th>${__("Chek")}</th><th>${__("Sana")}</th><th>${__("Kim berdi")}</th><th>${__("Sabab")}</th>
+						<th class="text-right">${__("Foiz")}</th><th class="text-right">${__("Chegirmagacha")}</th>
+						<th class="text-right">${__("Chegirma")}</th><th class="text-right">${__("To'langan")}</th>
+						<th>${__("To'lov turi")}</th><th>${__("Ofitsiant / stol")}</th>
+					</tr></thead>
+					<tbody>${rows}</tbody>
+				</table>
+			</div>
+			<div class="sd-hint">${__("Qatorni bosing — chegirma qaysi taomlarga taqsimlangani ko'rinadi. Bo'lib to'langan chekda chegirma to'lov turlari orasida to'lov ulushiga qarab bo'linadi.")}</div>
+		`);
 	}
 
-	/* ─────────────────────────── Jadval ─────────────────────────── */
+	/* ─────────────────────────── Ofitsiantlar ─────────────────────────── */
+
+	render_waiters() {
+		const rows = this.data.waiters;
+		const $card = this.$root.find(".sd-waiters");
+		const head = `<div class="sd-card-title">${__("Ofitsiantlar")} ${this.scope_badge()}</div>`;
+		if (!rows.length) return $card.html(`${head}<div class="sd-hint">${__("Ma'lumot yo'q")}</div>`);
+
+		const total = rows.reduce((s, r) => s + flt(r.revenue), 0) || 1;
+		$card.html(`
+			${head}
+			<div class="sd-table-wrap">
+				<table class="sd-table">
+					<thead><tr>
+						<th>${__("Ofitsiant")}</th><th class="text-right">${__("Cheklar")}</th>
+						<th class="text-right">${__("Tushum")}</th><th class="text-right">${__("Ulushi")}</th>
+						<th class="text-right">${__("O'rtacha chek")}</th><th class="text-right">${__("Xizmat haqi")}</th>
+						<th class="text-right">${__("Chegirma")}</th>
+					</tr></thead>
+					<tbody>${rows.map((r) => `
+						<tr>
+							<td><b>${this.esc(r.name)}</b></td>
+							<td class="text-right">${this.num(r.invoices)}</td>
+							<td class="text-right"><b>${this.money(r.revenue)}</b></td>
+							<td class="text-right">${this.pct((flt(r.revenue) / total) * 100)}</td>
+							<td class="text-right">${this.money(r.avg_check)}</td>
+							<td class="text-right">${this.money(r.service)}</td>
+							<td class="text-right">${flt(r.discount) ? `<span class="sd-neg">−${this.money(r.discount)}</span>` : `<span class="text-muted">—</span>`}</td>
+						</tr>`).join("")}
+					</tbody>
+				</table>
+			</div>
+		`);
+	}
+
+	/* ─────────────────────────── Mahsulotlar jadvali ─────────────────────────── */
 
 	columns() {
 		return [
@@ -322,6 +656,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			{ field: "discounted_qty", label: __("Chegirmada sotilgan"), type: "num" },
 			{ field: "discount", label: __("Umumiy chegirma"), type: "money" },
 			{ field: "net_amount", label: __("Sof summa"), type: "money" },
+			{ field: "share", label: __("Ulushi"), sortable: false },
 		];
 	}
 
@@ -346,9 +681,9 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 		return rows;
 	}
 
-	render_table() {
+	render_items() {
 		if (!this.data) return;
-		const $wrap = this.$root.find(".sd-table-wrap");
+		const $wrap = this.$root.find(".sd-items");
 
 		if (!this.data.items.length) {
 			$wrap.html(this.empty_state());
@@ -357,7 +692,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 
 		const cols = this.columns();
 		const rows = this.visible_rows();
-		const esc = frappe.utils.escape_html;
+		const all_net = flt(this.data.totals.net_amount) || 1;
 
 		const head = cols.map((c) => {
 			const sortable = c.sortable !== false;
@@ -372,16 +707,20 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 				case "idx":
 					return i + 1;
 				case "item_name":
-					return `<a href="/app/item/${encodeURIComponent(r.item_code)}" class="sd-item">${esc(r.item_name || r.item_code)}</a>
-						<div class="sd-code">${esc(r.item_code)}</div>`;
+					return `<a href="/app/item/${encodeURIComponent(r.item_code)}" class="sd-item">${this.esc(r.item_name || r.item_code)}</a>
+						<div class="sd-code">${this.esc(r.item_code)}</div>`;
 				case "item_group":
-					return `<span class="sd-group">${esc(v || "")}</span>`;
+					return `<span class="sd-group">${this.esc(v || "")}</span>`;
 				case "discounted_qty":
 					return flt(v) ? `<span class="sd-pill sd-pill-orange">${this.num(v)}</span>` : `<span class="text-muted">—</span>`;
 				case "discount":
 					return flt(v) ? `<span class="sd-neg">−${this.money(v)}</span>` : `<span class="text-muted">—</span>`;
 				case "net_amount":
 					return `<b>${this.money(v)}</b>`;
+				case "share": {
+					const share = (flt(r.net_amount) / all_net) * 100;
+					return `<div class="sd-share"><div class="sd-share-fill" style="width:${Math.max(0, Math.min(share, 100))}%"></div><span>${this.pct(share)}</span></div>`;
+				}
 			}
 			return c.type === "money" ? this.money(v) : this.num(v);
 		};
@@ -400,6 +739,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			<td class="text-right">${this.num(sum("discounted_qty"))}</td>
 			<td class="text-right sd-neg">${sum("discount") ? "−" + this.money(sum("discount")) : "—"}</td>
 			<td class="text-right">${this.money(sum("net_amount"))}</td>
+			<td></td>
 		</tr>`;
 
 		$wrap.html(`
@@ -418,7 +758,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			frappe.show_alert({ message: __("Yuklab olish uchun ma'lumot yo'q"), indicator: "orange" });
 			return;
 		}
-		// Fayl serverda quriladi (formatlar, jami qatori) — ekrandagi qidiruv va saralash bilan.
+		// Fayl serverda quriladi (bir nechta varaq) — ekrandagi qidiruv va saralash bilan.
 		const args = {
 			...this.get_filters(),
 			search: this.search,

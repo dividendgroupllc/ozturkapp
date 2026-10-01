@@ -8,6 +8,9 @@
 
 export const { features, slots, ui, util } = ozturk.cashier;
 export const { esc, hhmm } = util;
+/** To'lov usulining kassirga ko'rinadigan nomi (eski yadro yig'masida — nomning o'zi). */
+export const modeLabel =
+	util.modeLabel || ((mode) => (mode && (mode.label || mode.mode_of_payment)) || mode || "");
 
 /** Kassa smenasi ochiqmi. Hamma smena amali (server ham) faqat ochiq smenada ishlaydi. */
 export function shiftIsOpen(screen) {

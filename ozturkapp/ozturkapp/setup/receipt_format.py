@@ -162,7 +162,7 @@ RECEIPT_HTML = """
 <table class="oz-totals">
 	{%- for payment in doc.payments %}
 	{%- if payment.amount %}
-	<tr><td>{{ payment.mode_of_payment }}</td><td>{{ format_amount(payment.amount) }}</td></tr>
+	<tr><td>{{ pos_label(payment.mode_of_payment) }}</td><td>{{ format_amount(payment.amount) }}</td></tr>
 	{%- endif %}
 	{%- endfor %}
 	{%- if doc.change_amount %}

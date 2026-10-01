@@ -160,6 +160,27 @@ export function defaultTimeSlot() {
 	return { hour: pad2(hour), minute: pad2(minute) };
 }
 
+/**
+ * To'lov usulining KASSIRGA ko'rinadigan nomi (`Mode of Payment.custom_pos_label`).
+ *
+ * Masalan haqiqiy usul «Нахт Davron» — ekranda «Нахт». Server har bir to'lov
+ * qatoriga `label` qo'shadi; qator yoki nom berilsa va unda `label` bo'lmasa,
+ * `ctx.payment_methods` dan qidiriladi, topilmasa — nomning o'zi.
+ * DIQQAT: serverga doim HAQIQIY nom (`mode_of_payment`) yuboriladi.
+ *
+ * @param {string|{mode_of_payment, label}} mode
+ * @param {object} [ctx]  `screen.ctx` (ixtiyoriy)
+ */
+export function modeLabel(mode, ctx) {
+	if (mode && typeof mode === "object") {
+		return mode.label || modeLabel(mode.mode_of_payment, ctx);
+	}
+	if (!mode) return "";
+	const methods = (ctx && ctx.payment_methods) || [];
+	const found = methods.find((m) => m.mode_of_payment === mode);
+	return (found && found.label) || mode;
+}
+
 /** HTML'ga qo'yishdan oldin ekranlash — serverdan kelgan matnga ishonmaymiz. */
 export function esc(value) {
 	if (value === null || value === undefined) return "";

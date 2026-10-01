@@ -1024,7 +1024,10 @@ class TestCloseShift(ShiftTestCase):
 
         for hidden in ("expected_cash", "cash_diff", "total_sales"):
             self.assertNotIn(hidden, report)
-        self.assertEqual(report["payments"], [{"mode_of_payment": "Нахт", "closing_amount": 160000.0}])
+        self.assertEqual(
+            report["payments"],
+            [{"mode_of_payment": "Нахт", "label": "Нахт", "closing_amount": 160000.0}],
+        )
         self.assertEqual(report["total_invoices"], 3)
         self.assertNotIn(165000.0, _numbers(result))
         self.assertNotIn(-5000.0, _numbers(result))

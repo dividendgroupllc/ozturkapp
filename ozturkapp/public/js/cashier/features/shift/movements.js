@@ -12,7 +12,7 @@
  * chiqim limitdan oshsa — faqat menejer yoza oladi.
  */
 
-import { esc, features, hhmm, shiftIsOpen, slots, ui } from "./shared.js";
+import { esc, features, hhmm, modeLabel, shiftIsOpen, slots, ui } from "./shared.js";
 
 /**
  * Yo'nalish -> tur. Server `categories` ni beradi; bo'lmasa (eski javob)
@@ -158,7 +158,8 @@ async function askMovement(screen, kind, data, reload) {
 			type: "select",
 			name: "mode_of_payment",
 			label: __("Naqd usul"),
-			options: modes,
+			// Ko'rinadigan nom — POS nomi, qiymat — HAQIQIY usul nomi.
+			options: modes.map((mode) => ({ value: mode, label: modeLabel(mode, screen.ctx) })),
 			value: modes[0],
 			columns: Math.min(modes.length, 3),
 			required: true,

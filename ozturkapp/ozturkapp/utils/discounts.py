@@ -31,6 +31,15 @@ SIYOSAT
 Kassir istalgan chegirmani (100% dan kichik) menejer tasdig'isiz qo'yadi —
 sabab majburiy va chek tarixida qoladi.
 
+LOG
+===
+Har bir chegirma (va uni olib tashlash) uch joyda qoladi:
+
+    chek maydonlari   `custom_discount_by` / `custom_discount_at` — kim, qachon
+                      (sotuv dashboardining «Chegirmalar» bo'limi shundan o'qiydi)
+    chek tarixi       izoh: foiz, summa, sabab, kim
+    server logi       `ozturk_cashier` (logs/ozturk_cashier.log)
+
 100% VA UNDAN KATTA CHEGIRMA QABUL QILINMAYDI
 =============================================
 Nol summali chekni to'lab bo'lmaydi (to'lov qatori kerak, nol summa esa
@@ -50,7 +59,7 @@ import math
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, now_datetime
 
 from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
 
@@ -151,10 +160,14 @@ def apply_discount(invoice, scope, percent=None, amount=None, reason=None):
     doc.additional_discount_percentage = value
     doc.custom_discount_reason = reason
     doc.custom_discount_approved_by = None
+    _set_given_by(doc, frappe.session.user, now_datetime())
     _mark_stale_bill(doc)
     with cashier_billing.trusted_billing():
         doc.save()
 
+    _log(doc, _("Chegirma berildi: {0}% ({1}) — sabab: {2}").format(
+        flt(value, 2), frappe.format(doc.discount_amount, {"fieldtype": "Currency"}), reason,
+    ))
     return cashier_billing.build_bill(doc, scope)
 
 
@@ -168,13 +181,34 @@ def remove_discount(invoice, scope):
 
     doc.additional_discount_percentage = 0
     doc.discount_amount = 0
+    removed = flt(doc.discount_amount)
     doc.custom_discount_reason = None
     doc.custom_discount_approved_by = None
+    _set_given_by(doc, None, None)
     _mark_stale_bill(doc)
     with cashier_billing.trusted_billing():
         doc.save()
 
+    _log(doc, _("Chegirma olib tashlandi ({0})").format(
+        frappe.format(removed, {"fieldtype": "Currency"}),
+    ))
     return cashier_billing.build_bill(doc, scope)
+
+
+def _set_given_by(doc, user, at):
+    """Kim/qachon — maydonlar hali yaratilmagan saytda (migrate oldidan) jimgina o'tkaziladi:
+    chegirmaning o'zi buzilmasin, «kim» esa dashboardda Version tarixidan topiladi."""
+    if frappe.db.has_column("POS Invoice", "custom_discount_by"):
+        doc.custom_discount_by = user
+        doc.custom_discount_at = at
+
+
+def _log(doc, text):
+    """Chek tarixiga izoh va server logiga yozuv."""
+    doc.add_comment("Comment", text)
+    frappe.logger("ozturk_cashier").info(
+        "%s | %s | kassir=%s", doc.name, text, frappe.session.user,
+    )
 
 
 def _mark_stale_bill(doc):
