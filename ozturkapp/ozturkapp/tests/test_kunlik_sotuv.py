@@ -32,13 +32,20 @@ class TestKunlikSotuv(FrappeTestCase):
             elif field.startswith("disc_"):
                 self.assertAlmostEqual(total(field), disc.get(mode, 0), places=2, msg=mode)
 
-        # Har kuni: to'lovlar yig'indisi = tushum; chegirma ulushlari = kun chegirmasi.
+        # Har bir qator — bitta chek: to'lovlar = tushum; chegirma ulushlari = chek chegirmasi.
+        self.assertEqual(len({r["invoice"] for r in data}), len(data))
         for row in data:
             pays = sum(flt(v) for k, v in row.items() if k.startswith("pay_"))
             discs = sum(flt(v) for k, v in row.items() if k.startswith("disc_"))
-            self.assertAlmostEqual(pays, row["revenue"], places=2, msg=row["date"])
-            self.assertAlmostEqual(discs, row["discount"], places=2, msg=row["date"])
-            self.assertAlmostEqual(row["gross"] - row["discount"], row["net"], places=2, msg=row["date"])
+            self.assertAlmostEqual(pays, row["revenue"], places=2, msg=row["invoice"])
+            self.assertAlmostEqual(discs, row["discount"], places=2, msg=row["invoice"])
+            self.assertAlmostEqual(row["gross"] - row["discount"], row["net"], places=2, msg=row["invoice"])
+
+    def test_summary_cards_order(self):
+        frappe.set_user("Administrator")
+        _c, _d, _m, _ch, summary = report.execute(dict(from_date=add_days(today(), -30), to_date=today()))
+        self.assertEqual([s["label"] for s in summary],
+                         ["Yalpi sotuv", "Chegirma", "Tushum", "Xizmat haqi", "Cheklar soni"])
 
     def test_requires_dates(self):
         self.assertRaises(frappe.ValidationError, report.execute, {})
