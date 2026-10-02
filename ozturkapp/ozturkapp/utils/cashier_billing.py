@@ -10,9 +10,11 @@ Bu modul PUL HISOBLAMAYDI.
 
 12% xizmat haqi ERPNext'ning `Sales Taxes and Charges Template` qatori
 sifatida sozlanadi va `URY Restaurant.default_tax_template` orqali ulanadi.
-Hisoblashni butunlay ERPNext'ning `calculate_taxes_and_totals()` bajaradi —
+Hisoblashni ERPNext'ning `calculate_taxes_and_totals()` bajaradi —
 URY `get_order_invoice()` va `validate_price_list()` da bu shablonni
-allaqachon chekka qo'yadi.
+allaqachon chekka qo'yadi. Yagona istisno: xizmat haqi chek chegirmasidan
+OLDINGI taomlar summasidan olinadi — qoralama chekda qator "Actual" ga
+o'tkaziladi (`utils/service_charge.py`, `overrides/pos_invoice_totals.py`).
 
 Ya'ni:
 
@@ -270,7 +272,9 @@ def build_bill(invoice, scope=None, include_kitchen: bool = True) -> dict:
         is_tip = is_tip_row(row, tip_account)
         entry = {
             "description": row.description or row.account_head,
-            "rate": flt(row.rate),
+            # Xizmat haqi "Actual" qator (`utils/service_charge.py`): ERPNext unda
+            # `rate` ni o'chiradi — foiz sozlamadan ko'rsatiladi.
+            "rate": flt(row.rate) or (flt(service_config.get("rate")) if is_service else 0.0),
             "amount": flt(row.tax_amount),
             "charge_type": row.charge_type,
             "is_service_charge": is_service,
@@ -559,7 +563,9 @@ def cash_modes(pos_profile: str) -> list:
 # ═══════════════════════════════════════════════════════════════════
 #
 # Choychaqa "Actual" turidagi soliq qatori: summa qat'iy, xizmat haqi va
-# QQS'ga KIRMAYDI (ular "On Net Total" — qator summasi ularga ta'sir qilmaydi)
+# QQS'ga KIRMAYDI (xizmat haqi taomlar jamidan, QQS "On Net Total" — qator
+# summasi ularga ta'sir qilmaydi). Xizmat haqi ham "Actual" bo'lgani uchun
+# ikkalasi faqat HISOB bilan ajratiladi (`is_tip_row`).
 # va "On Previous Row" bazasi ham bo'lmaydi, chunki eng oxirgi qator.
 # Shu sababli grand_total/rounded_total avtomatik choychaqani o'z ichiga oladi
 # va smena yopilishidagi solishtiruv (to'lovlar yig'indisi = cheklar yig'indisi)

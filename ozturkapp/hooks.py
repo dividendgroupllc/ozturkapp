@@ -370,6 +370,9 @@ permission_query_conditions = {
 # cheklar kun bo'yicha alohida Sales Invoice'larga konsolidatsiya qilinadi.
 override_doctype_class = {
 	"POS Closing Entry": "ozturkapp.ozturkapp.overrides.pos_closing_entry.OzturkPOSClosingEntry",
+	# Xizmat haqi chek chegirmasidan OLDINGI taomlar summasidan olinadi
+	# (utils/service_charge.py). Faqat qoralama cheklar qayta hisoblanadi.
+	"POS Invoice": "ozturkapp.ozturkapp.overrides.pos_invoice_totals.OzturkPOSInvoice",
 }
 
 # Document Events

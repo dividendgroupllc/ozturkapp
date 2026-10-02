@@ -123,13 +123,18 @@ def make_closing_entry_from_opening(opening_entry):
         closing_entry.total_quantity += flt(invoice.total_qty)
 
         for tax in invoice.taxes:
+            # Xizmat haqi yangi cheklarda "Actual" (foizsiz, `utils/service_charge.py`),
+            # eskilarida "On Net Total" 12%. Bitta smenada ikkalasi bo'lsa ham bitta
+            # qator bo'lib ko'rinsin: foizsiz qator shu hisobning foizli qatoriga qo'shiladi.
             existing = [
                 row
                 for row in taxes
-                if row.account_head == tax.account_head and row.rate == tax.rate
+                if row.account_head == tax.account_head
+                and (row.rate == tax.rate or not flt(row.rate) or not flt(tax.rate))
             ]
             if existing:
                 existing[0].amount += flt(tax.tax_amount)
+                existing[0].rate = existing[0].rate or tax.rate
             else:
                 taxes.append(
                     frappe._dict(

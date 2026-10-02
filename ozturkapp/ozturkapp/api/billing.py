@@ -604,6 +604,8 @@ def _ensure_service_charge(invoice_name: str, restaurant: str):
     if any(t.account_head == config["account"] for t in doc.taxes):
         return
 
+    # Shablondagidek qo'shiladi; saqlashda `service_charge.apply()` uni "Actual"
+    # qilib, summasini chegirmagacha taomlar jamidan qo'yadi.
     doc.append(
         "taxes",
         {

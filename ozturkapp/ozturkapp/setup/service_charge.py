@@ -13,8 +13,8 @@
     URY Restaurant.default_tax_template
             |
             v
-    POS Invoice.taxes[]   <- ERPNext hisoblaydi
-            |
+    POS Invoice.taxes[]   <- qoralamada "Actual": foiz × chegirmagacha taomlar
+            |                (utils/service_charge.py), jamini ERPNext hisoblaydi
             v
     Kassa oynasi          <- faqat ko'rsatadi
 

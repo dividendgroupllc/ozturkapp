@@ -8,12 +8,12 @@ HISOB-KITOB ERPNEXT'NIKI
 ========================
 Bu modul chegirma summasini HISOBLAMAYDI. U faqat POS Invoice'ning
 `additional_discount_percentage` maydonini to'ldiradi va `save()` qiladi:
-ERPNext chegirmani mahsulot qatorlariga taqsimlaydi, xizmat haqini
-("On Net Total") qayta hisoblaydi va jami summani yangilaydi. Shuning uchun
-xizmat haqi chegirma bilan BIRGA kamayadi:
+ERPNext chegirmani mahsulot qatorlariga taqsimlaydi va jami summani
+yangilaydi. Xizmat haqi chegirmadan KAMAYMAYDI — u chek chegirmasidan
+OLDINGI taomlar summasidan olinadi (biznes qarori, `utils/service_charge.py`):
 
-    net 60 000, xizmat haqi 12%       -> 60 000 + 7 200 = 67 200
-    10% chegirma (Net Total bo'yicha) -> 54 000 + 6 480 = 60 480
+    taomlar 60 000, xizmat haqi 12%    -> 60 000 + 7 200 = 67 200
+    10% chegirma (Net Total bo'yicha)  -> 54 000 + 7 200 = 61 200
 
 `apply_discount_on` DOIM "Net Total" — "Grand Total" bo'lsa chegirma
 choychaqa qatoriga ham tegib ketardi (choychaqa chegirmadan tashqarida).

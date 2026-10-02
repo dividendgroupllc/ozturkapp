@@ -643,7 +643,10 @@ class TestDiscount(BillingCase):
             with self.assertRaises(frappe.PermissionError):
                 call()
 
-    def test_percent_discount_shrinks_the_service_charge_too(self):
+    def test_percent_discount_leaves_the_service_charge_on_the_food_total(self):
+        # Avval: xizmat haqi chegirma bilan birga kamayardi (12% × 54 000).
+        # Biznes qarori (2026-10-02): xizmat haqi chegirmagacha taomlar jamidan
+        # (12% × 60 000) — `utils/service_charge.py`.
         doc = self._invoice()
         rate = self.service["rate"]
 
@@ -653,8 +656,8 @@ class TestDiscount(BillingCase):
         self.assertEqual(flt(fresh.discount_amount), 6000)
         self.assertEqual(fresh.apply_discount_on, "Net Total")
         self.assertEqual(flt(fresh.net_total), 54000)
-        self.assertEqual(flt(self._tax(fresh, self.service["account"]).tax_amount), flt(54000 * rate / 100, 2))
-        self.assertEqual(flt(fresh.grand_total), flt(54000 * (1 + rate / 100), 2))
+        self.assertEqual(flt(self._tax(fresh, self.service["account"]).tax_amount), flt(60000 * rate / 100, 2))
+        self.assertEqual(flt(fresh.grand_total), flt(54000 + 60000 * rate / 100, 2))
         self.assertEqual(bill["discount"], 6000)
         self.assertEqual(bill["discount_percent"], 10)
         self.assertEqual(bill["discount_reason"], "Doimiy mijoz")
