@@ -362,17 +362,13 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			{
 				label: __("Jami tushum"), tone: "primary", scope,
 				value: this.money(c.revenue), delta: this.delta(c.revenue, p.revenue),
-				hint: __("Mijozlar to'lagan: sof sotuv + xizmat haqi + choychaqa"),
+				hint: __("O'rtacha kunlik: {0} ({1} kun)", [this.money(c.avg_daily), c.sales_days || 0]),
 			},
 			group ? {
 				label: __("Guruh sof sotuvi"), tone: "blue",
 				value: this.money(t.net_amount), delta: this.delta(t.net_amount, pt.net_amount),
 				hint: __("{0} dona, {1} xil mahsulot", [this.num(t.qty), t.items]),
-			} : {
-				label: __("Sof sotuv"), tone: "blue",
-				value: this.money(c.net), delta: this.delta(c.net, p.net),
-				hint: __("Taomlar, chegirmadan keyin · {0} dona", [this.num(t.qty)]),
-			},
+			} : null,
 			{
 				label: __("Xizmat haqi"), tone: "teal", scope,
 				value: this.money(c.service), delta: this.delta(c.service, p.service),
@@ -397,7 +393,7 @@ ozturk.sales_dashboard.Dashboard = class SalesDashboard {
 			},
 		];
 
-		this.$root.find(".sd-kpis").html(cards.map((k) => `
+		this.$root.find(".sd-kpis").html(cards.filter(Boolean).map((k) => `
 			<div class="sd-kpi sd-tone-${k.tone}">
 				<div class="sd-kpi-label">${k.label} ${k.scope || ""}</div>
 				<div class="sd-kpi-value">${k.value}</div>

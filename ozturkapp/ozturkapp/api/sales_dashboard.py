@@ -340,6 +340,9 @@ def _check_summary(invoices):
 	sales_amount = sum(x.amount for x in sales)
 	gross = sum(x.gross for x in invoices)
 	discount = sum(x.discount for x in invoices)
+	revenue = sum(x.amount for x in invoices)
+	# Savdo bo'lgan kunlar — bugun yoki yopiq kunlar o'rtachani tushirmasin
+	sales_days = len({getdate(x.posting_date) for x in sales})
 	return {
 		"invoices": len(sales),
 		"returns": len(returns),
@@ -351,7 +354,9 @@ def _check_summary(invoices):
 		"net": sum(flt(x.net_total) for x in invoices),
 		"service": sum(x.service for x in invoices),
 		"tips": sum(x.tips for x in invoices),
-		"revenue": sum(x.amount for x in invoices),
+		"revenue": revenue,
+		"sales_days": sales_days,
+		"avg_daily": revenue / sales_days if sales_days else 0,
 		"avg_check": sales_amount / len(sales) if sales else 0,
 	}
 
