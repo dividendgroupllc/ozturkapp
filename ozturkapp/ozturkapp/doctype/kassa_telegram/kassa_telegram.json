@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "creation": "2026-10-02 19:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "module": "Ozturkapp",
+ "name": "Kassa Telegram",
+ "owner": "Administrator",
+ "modified": "2026-10-02 19:00:00.000000",
+ "modified_by": "Administrator",
+ "field_order": [
+  "enabled",
+  "bot_token",
+  "chat_id",
+  "help"
+ ],
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Yoqilgan",
+   "default": "0",
+   "description": "Yoqilsa, kassa yopilganda guruhga kassa qoldig'i yuboriladi."
+  },
+  {
+   "fieldname": "bot_token",
+   "fieldtype": "Password",
+   "label": "Bot token",
+   "description": "@BotFather bergan token, masalan 123456789:AA..."
+  },
+  {
+   "fieldname": "chat_id",
+   "fieldtype": "Data",
+   "label": "Guruh ID",
+   "description": "Guruh chat ID'si, odatda -100 bilan boshlanadi. Bot guruhga qo'shilgan bo'lishi shart."
+  },
+  {
+   "fieldname": "help",
+   "fieldtype": "HTML",
+   "label": "",
+   "options": "<div class='text-muted small'>Saqlangandan keyin «Sinov xabari» tugmasi bilan tekshiring.</div>"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

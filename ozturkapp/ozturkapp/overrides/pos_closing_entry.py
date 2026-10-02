@@ -26,6 +26,8 @@ from erpnext.accounts.doctype.pos_closing_entry.pos_closing_entry import POSClos
 from erpnext.accounts.doctype.pos_invoice_merge_log import pos_invoice_merge_log as merge
 from frappe.utils import get_datetime, getdate
 
+from ozturkapp.ozturkapp.utils import kassa_telegram
+
 #: ERPNext ham shu chegaradan boshlab konsolidatsiyani fon jarayoniga beradi.
 QUEUE_THRESHOLD = 10
 
@@ -91,6 +93,7 @@ def _enqueue_after_commit(by_customer, closing_entry):
 class OzturkPOSClosingEntry(POSClosingEntry):
     def on_submit(self):
         consolidate_by_day(self)
+        kassa_telegram.enqueue_closing(self)
         frappe.publish_realtime(
             f"poe_{self.pos_opening_entry}_closed",
             self,
