@@ -455,12 +455,16 @@ def get_shift_closing_data():
 
 
 @frappe.whitelist()
-def close_shift(counted_cash):
+def close_shift(counted_cash, cash_expense=0):
     """Kassa smenasini yopish.
 
     Args:
         counted_cash: `{"Cash": 1250000}` — kassir SANAGAN naqd pul.
             Faqat naqd usullar qabul qilinadi.
+        cash_expense: kassir kiritgan naqd RASXOD (smena davomida g'aladondan
+            chiqarilgan pul). Sanalgan qoldiqqa QO'SHILIB solishtiriladi
+            (qoldiq + rasxod = kutilgan naqd), alohida saqlanadi va Telegram
+            xabarida «Расход» qatori bo'lib chiqadi. Provodka yaratilmaydi.
 
     Kutilayotgan summalar va naqd bo'lmagan usullar SERVERDA to'ldiriladi —
     mijozdan kelgan qiymatlarga ishonilmaydi.
@@ -514,6 +518,10 @@ def close_shift(counted_cash):
         )
 
     counted = _parse_counted_cash(counted_cash, scope.pos_profile)
+    cash_expense = flt(cash_expense)
+    if cash_expense < 0:
+        frappe.throw(_("Rasxod summasi manfiy bo'lishi mumkin emas"))
+    expense_left = cash_expense
 
     # ── Solishtiruv jadvalini SERVER quradi ───────────────────────────
     # ERPNext'nikining bulk o'qiydigan nusxasi — natija AYNAN bir xil,
@@ -529,8 +537,10 @@ def close_shift(counted_cash):
 
     for row in expected.get("payment_reconciliation") or []:
         if row.mode_of_payment in cash_modes:
-            # Naqd — kassir sanagan summa.
-            closing_amount = counted.get(row.mode_of_payment, 0.0)
+            # Naqd — kassir sanagan qoldiq + rasxod (rasxod birinchi naqd
+            # usulga yoziladi; odatda naqd usul bitta).
+            closing_amount = counted.get(row.mode_of_payment, 0.0) + expense_left
+            expense_left = 0.0
         else:
             # Bank/karta — terminal yozuvi bo'yicha, kassir kiritmaydi.
             closing_amount = flt(row.expected_amount)
@@ -550,6 +560,11 @@ def close_shift(counted_cash):
         pos_opening_entry=shift["name"],
         payment_reconciliation=reconciliation,
     )
+    if cash_expense and result.get("status") == "closed" and result.get("name"):
+        frappe.db.set_value(
+            "POS Closing Entry", result["name"], "custom_cash_expense", cash_expense,
+            update_modified=False,
+        )
     result["shift"] = _get_shift(scope)
     result["z_report_queued"] = _queue_z_report(scope, result)
     if not cashier_permissions.has_supervisor_role():

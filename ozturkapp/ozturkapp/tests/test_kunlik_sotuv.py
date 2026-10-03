@@ -8,7 +8,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, today
 
-from ozturkapp.ozturkapp.api.sales_dashboard import get_dashboard
+from ozturkapp.ozturkapp.api.sales_dashboard import LEGACY_MODE, get_dashboard
 from ozturkapp.ozturkapp.report.kunlik_sotuv import kunlik_sotuv as report
 
 
@@ -29,7 +29,7 @@ class TestKunlikSotuv(FrappeTestCase):
         for field, mode in labels.items():
             if field.startswith("pay_"):
                 self.assertAlmostEqual(total(field), paid.get(mode, 0), places=2, msg=mode)
-            elif field.startswith("disc_"):
+            elif field.startswith("disc_") and mode != LEGACY_MODE:
                 self.assertAlmostEqual(total(field), disc.get(mode, 0), places=2, msg=mode)
 
         # Har bir qator — bitta chek: to'lovlar = tushum; chegirma ulushlari = chek chegirmasi.
@@ -38,7 +38,8 @@ class TestKunlikSotuv(FrappeTestCase):
             pays = sum(flt(v) for k, v in row.items() if k.startswith("pay_"))
             discs = sum(flt(v) for k, v in row.items() if k.startswith("disc_"))
             self.assertAlmostEqual(pays, row["revenue"], places=2, msg=row["invoice"])
-            self.assertAlmostEqual(discs, row["discount"], places=2, msg=row["invoice"])
+            if not row.get("legacy"):   # eski sotuv jamlamasi: chegirma to'lov turlariga bo'linmaydi
+                self.assertAlmostEqual(discs, row["discount"], places=2, msg=row["invoice"])
             self.assertAlmostEqual(row["gross"] - row["discount"], row["net"], places=2, msg=row["invoice"])
 
     def test_summary_cards_order(self):

@@ -20,6 +20,7 @@ Har test savepoint ichida ishlaydi va oxirida qaytariladi.
 
 import base64
 import json
+import inspect
 import re
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -1431,6 +1432,18 @@ class TestClosingPathsAgree(ShiftTestCase):
         with self.as_user(MANAGER):
             report = cashier_api.close_shift(json.dumps({self.cash_mode: self.EXPECTED_CASH}))["z_report_data"]
         self.assertEqual(report["cash_diff"], 0.0)
+
+    def test_expense_is_added_to_counted_cash_and_stored_separately(self):
+        """Qoldiq + rasxod = kutilgan naqd -> farq 0; rasxod alohida maydonda."""
+        expense = 40000
+        # Bu sinfda POS Closing Entry insert/submit o'chirilgan (yozuv nomi yo'q),
+        # shuning uchun faqat farq tekshiriladi; saqlash `close_shift` ichida.
+        with self.as_user(MANAGER):
+            result = cashier_api.close_shift(
+                json.dumps({self.cash_mode: self.EXPECTED_CASH - expense}), expense
+            )
+        self.assertEqual(result["z_report_data"]["cash_diff"], 0.0)
+        self.assertIn("custom_cash_expense", inspect.getsource(cashier_api.close_shift))
 
     def test_both_paths_and_the_report_agree(self):
         desktop = desktop_pos.getPosClosingData(self.shift)

@@ -37,6 +37,8 @@ def execute(filters=None):
             date=str(getdate(inv.posting_date)),
             time=str(inv.posting_time or "")[:5],
             invoice=inv.name,
+            voucher_type=inv.get("voucher_type") or "POS Invoice",
+            legacy=1 if inv.get("legacy") else 0,
             is_return=inv.is_return,
             reason=reason,
             gross=flt(inv.gross),
@@ -69,7 +71,8 @@ def columns(ordered_modes):
     cols = [
         {"label": _("Sana"), "fieldname": "date", "fieldtype": "Date", "width": 95},
         {"label": _("Vaqt"), "fieldname": "time", "fieldtype": "Data", "width": 60},
-        {"label": _("Chek"), "fieldname": "invoice", "fieldtype": "Link", "options": "POS Invoice", "width": 105},
+        {"label": _("Chek"), "fieldname": "invoice", "fieldtype": "Dynamic Link", "options": "voucher_type", "width": 105},
+        {"label": _("Hujjat turi"), "fieldname": "voucher_type", "fieldtype": "Data", "hidden": 1, "width": 90},
         {"label": _("Chegirma sababi"), "fieldname": "reason", "fieldtype": "Data", "width": 115},
         {"label": _("Yalpi sotuv"), "fieldname": "gross", "fieldtype": "Currency", "width": 115},
         {"label": _("Chegirma"), "fieldname": "discount", "fieldtype": "Currency", "width": 105},
@@ -117,6 +120,6 @@ def summary(data):
         {"label": _("Chegirma"), "value": total("discount"), "datatype": "Currency", "indicator": "Red"},
         {"label": _("Tushum"), "value": total("revenue"), "datatype": "Currency", "indicator": "Blue"},
         {"label": _("Xizmat haqi"), "value": total("service"), "datatype": "Currency", "indicator": "Grey"},
-        {"label": _("Cheklar soni"), "value": sum(1 for r in data if not r.is_return),
+        {"label": _("Cheklar soni"), "value": sum(1 for r in data if not r.is_return and not r.legacy),
          "datatype": "Int", "indicator": "Grey"},
     ]

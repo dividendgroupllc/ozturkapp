@@ -63,6 +63,35 @@ CUSTOM_FIELDS = {
     # Kassir ekrani va chekdagi nom. Kassa moduli naqd egalarini ajratish
     # uchun usullar «Нахт Davron», «Kassa Oybek» deb nomlanadi — kassirga
     # esa qisqa «Нахт» ko'rinsin (utils/cashier_billing.pos_label).
+    # Kassa yopilganda kassir kiritgan naqd RASXOD (smena davomida g'aladondan
+    # chiqarilgan pul). Faqat yozuv — hisob provodkasi yaratilmaydi.
+    "POS Closing Entry": [
+        {
+            "fieldname": "custom_cash_expense",
+            "label": "Расход (naqd)",
+            "fieldtype": "Currency",
+            "insert_after": "total_quantity",
+            "read_only": 1,
+            "no_copy": 1,
+            "translatable": 0,
+        }
+    ],
+    # Qayta tiklangan ESKI sotuv (POS cheklari bekor qilingach kunlik jamlama
+    # sifatida kiritilgan, to'lovsiz). Sotuv dashboardi va «Kunlik sotuv» ularni
+    # POS cheklariga QO'SHIB ko'rsatadi; POS yopilishidan hosil bo'lgan
+    # (konsolidatsiya) Sales Invoice'lar bu belgiga ega emas — ikki marta sanalmaydi.
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_legacy_sale",
+            "label": "Eski sotuv (jamlama)",
+            "fieldtype": "Check",
+            "insert_after": "is_consolidated",
+            "default": "0",
+            "read_only": 1,
+            "no_copy": 1,
+            "translatable": 0,
+        }
+    ],
     "Mode of Payment": [
         {
             "fieldname": "custom_pos_label",

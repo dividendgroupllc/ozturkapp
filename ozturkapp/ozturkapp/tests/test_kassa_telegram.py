@@ -59,10 +59,20 @@ class TestKassaTelegram(FrappeTestCase):
             "",
             "Naxt  savdo - 15 490 466",
             "Naxt  yopildi - 262 000",
+            "Расход - 0",
             "",
             "Jami Sotuv: 20 880 026",
         ])
         self.assertIn("POS-CLO-TEST", lines[0])
+
+    def test_expense_shown_separately_from_balance(self):
+        doc = closing(self.ROWS)
+        doc["custom_cash_expense"] = 100000
+        with patch.object(kt.frappe.db, "get_value", side_effect=fake_type):
+            text = kt.build_message(doc)
+        self.assertIn("Naxt  yopildi - 162 000", text)
+        self.assertIn("Расход - 100 000", text)
+        self.assertIn("Naxt  savdo - 15 490 466", text)
 
     def test_opening_subtracted_and_missing_modes_zero(self):
         t = None
@@ -99,10 +109,45 @@ class TestKassaTelegram(FrappeTestCase):
     def test_notify_closing_never_raises(self):
         with patch.object(kt.frappe, "get_doc", return_value=closing(self.ROWS)), \
                 patch.object(kt, "build_message", return_value="x"), \
+                patch("ozturkapp.ozturkapp.utils.kassa_report.build_report_pdf", return_value=None), \
                 patch.object(kt, "send_message", side_effect=frappe.ValidationError("down")), \
                 patch.object(kt.frappe, "log_error") as log:
             kt.notify_closing("POS-CLO-TEST")
         log.assert_called_once()
+
+    def test_notify_closing_sends_pdf_with_summary_caption(self):
+        with patch.object(kt.frappe, "get_doc", return_value=closing(self.ROWS)), \
+                patch.object(kt, "build_message", return_value="xulosa"), \
+                patch("ozturkapp.ozturkapp.utils.kassa_report.build_report_pdf", return_value=b"%PDF"), \
+                patch.object(kt, "send_document") as doc, \
+                patch.object(kt, "send_message") as msg:
+            kt.notify_closing("POS-CLO-TEST")
+        doc.assert_called_once_with(b"%PDF", "Kassa_POS-CLO-TEST.pdf", caption="xulosa")
+        msg.assert_not_called()
+
+    def test_notify_closing_falls_back_to_text_when_pdf_fails(self):
+        with patch.object(kt.frappe, "get_doc", return_value=closing(self.ROWS)), \
+                patch.object(kt, "build_message", return_value="xulosa"), \
+                patch("ozturkapp.ozturkapp.utils.kassa_report.build_report_pdf", side_effect=RuntimeError("wk")), \
+                patch.object(kt, "send_document") as doc, \
+                patch.object(kt, "send_message") as msg, \
+                patch.object(kt.frappe, "log_error") as log:
+            kt.notify_closing("POS-CLO-TEST")
+        msg.assert_called_once_with("xulosa")
+        doc.assert_not_called()
+        log.assert_called_once()
+
+    def test_meat_kind_and_kg(self):
+        from ozturkapp.ozturkapp.utils.kassa_report import item_kg, meat_kind
+
+        self.assertEqual(meat_kind("ISKANDAR KABOB Mol go'shti 160 gr"), "beef")
+        self.assertEqual(meat_kind("TOMBIK DONAR Tovuq go'shti 80 gr"), "chicken")
+        self.assertEqual(meat_kind("PORTION DÖNER CHICKEN"), "chicken")
+        self.assertEqual(meat_kind("PORTION DÖNER"), "beef")
+        self.assertEqual(meat_kind("CLOSED PIDE"), "other")
+        self.assertAlmostEqual(item_kg("DURUM Tovuqli 120gr"), 0.12)
+        self.assertAlmostEqual(item_kg("GO'SHT Mol go'shti 0.5 kg"), 0.5)
+        self.assertEqual(item_kg("LAHMAJUN"), 0)
 
     def test_enqueue_only_when_enabled(self):
         doc = frappe._dict(name="POS-CLO-TEST")
@@ -130,3 +175,22 @@ class TestKassaTelegram(FrappeTestCase):
         settings.chat_id = ""
         self.assertRaises(frappe.ValidationError, settings.save, ignore_permissions=True)
         frappe.db.rollback()
+
+    def test_report_pdf_renders(self):
+        from datetime import date
+
+        from ozturkapp.ozturkapp.utils.kassa_report import render_pdf
+
+        table = {
+            "columns": [{"mode": "A", "label": "Нахт"}, {"mode": "B", "label": "Click"}],
+            "opening": [1000.0, 0.0],
+            "kirim": [{"label": "Savdo", "cells": [500.0, 250.0]}],
+            "chiqim": [{"label": "Postavshik", "cells": [200.0, 0.0]}],
+            "closing": [1300.0, 250.0],
+        }
+        kinds = {k: {"amount": 1.0, "kg": 0.5, "share": 33.3} for k in ("beef", "chicken", "other")}
+        stats = {"total": 750.0, "checks": 2, "average": 375.0, "discount": 0, "returns_count": 0,
+                 "returns_amount": 0, "kinds": kinds}
+        pdf = render_pdf(date(2026, 10, 3), table, stats, {"footer": "x"})
+        self.assertTrue(pdf.startswith(b"%PDF"))
+

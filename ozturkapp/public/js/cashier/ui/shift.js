@@ -5,6 +5,10 @@
 import { ui } from "../kit/index.js";
 import { esc, modeLabel, parseAmount, bindAmountInput } from "../util/format.js";
 
+// Kassa yopishdagi «Расход» maydoni (naqd rasxod) — sanoq inputlari bilan bir xil
+// ishlaydi (ikki marta kiritiladi), lekin serverga alohida parametr bo'lib ketadi.
+const EXPENSE_KEY = "__expense__";
+
 export class ShiftMethods {
 	/**
 	 * Kassani ochish — BLOKLOVCHI ekran (modal emas).
@@ -229,7 +233,7 @@ export class ShiftMethods {
 			<div class="rc-pay__label">${esc(
 				second
 					? __("Pulni qayta sanang va summani YANA kiriting")
-					: __("Qo'lingizdagi naqd pulni sanang")
+					: __("Qo'lingizdagi naqd pulni sanang va rasxodni kiriting")
 			)}</div>
 
 			${modes
@@ -244,6 +248,15 @@ export class ShiftMethods {
 					</div>`
 				)
 				.join("")}
+
+			<div class="rc-count__row">
+				<span>${esc(__("Расход"))}</span>
+				<input class="rc-pay__input rc-count-input" type="text" inputmode="${
+					ui.virtualKeyboard ? "none" : "numeric"
+				}"
+					value="" placeholder="0" data-mode="${EXPENSE_KEY}"
+					aria-label="${esc(__("Расход"))}">
+			</div>
 
 			${
 				second
@@ -317,7 +330,13 @@ export class ShiftMethods {
 			let missing = false;
 
 			$body.find(".rc-count-input").each((_, input) => {
-				if (String(input.value).trim() === "" && !allowEmpty) missing = true;
+				// Расход ixtiyoriy: bo'sh maydon = 0.
+				if (
+					input.dataset.mode !== EXPENSE_KEY &&
+					String(input.value).trim() === "" &&
+					!allowEmpty
+				)
+					missing = true;
 				counted[input.dataset.mode] = parseAmount(input.value);
 			});
 
@@ -385,8 +404,12 @@ export class ShiftMethods {
 				this.busy(e.currentTarget, true);
 				// So'rov ketayotganda oyna yopilmasin: xato ko'rinmay qolardi.
 				this.setModalLocked(true);
+				const cashExpense = flt(counted[EXPENSE_KEY]);
+				const cashCounted = { ...counted };
+				delete cashCounted[EXPENSE_KEY];
 				const result = await this.call("ozturkapp.ozturkapp.api.cashier.close_shift", {
-					counted_cash: JSON.stringify(counted),
+					counted_cash: JSON.stringify(cashCounted),
+					cash_expense: cashExpense,
 				});
 				this.setModalLocked(false);
 				this.closeModal();

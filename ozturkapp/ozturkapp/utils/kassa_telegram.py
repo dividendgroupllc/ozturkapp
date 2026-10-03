@@ -13,7 +13,8 @@ Summalar smena bo'yicha (`payment_reconciliation`, ochilish summasi ayirilgan):
 
     Bank turlari      = kutilgan − ochilish  (Paymee, Click, Terminal Uzcard, Terminal Humo, ...)
     Naxt savdo        = naqd kutilgan − ochilish
-    Naxt yopildi      = kassir sanab kiritgan naqd (closing_amount)
+    Naxt yopildi      = kassir sanagan naqd qoldiq (closing_amount − rasxod)
+    Расход            = kassir yopishda kiritgan naqd rasxod (custom_cash_expense)
     Jami Sotuv        = Bank Jami + Naxt savdo
 """
 
@@ -55,6 +56,11 @@ def closing_totals(closing) -> dict:
         else:
             others[row.mode_of_payment] = others.get(row.mode_of_payment, 0.0) + sold
 
+    # Kassir kiritgan «Расход» closing_amount ichida (qoldiq + rasxod = kutilgan
+    # naqd), shuning uchun qoldiq ulardan ayirib ko'rsatiladi.
+    cash_expense = flt(closing.get("custom_cash_expense"))
+    cash_counted -= cash_expense
+
     banks = [(label, known[key]) for key, label in BANK_ORDER]
     banks += list(others.items())
     bank_total = sum(amount for _label, amount in banks)
@@ -63,6 +69,7 @@ def closing_totals(closing) -> dict:
         "bank_total": bank_total,
         "cash_sales": cash_sales,
         "cash_counted": cash_counted,
+        "cash_expense": cash_expense,
         "total": bank_total + cash_sales,
     }
 
@@ -79,6 +86,7 @@ def build_message(closing) -> str:
         "",
         f"Naxt  savdo - {money(t['cash_sales'])}",
         f"Naxt  yopildi - {money(t['cash_counted'])}",
+        f"Расход - {money(t['cash_expense'])}",
         "",
         f"Jami Sotuv: {money(t['total'])}",
     ]
@@ -110,10 +118,46 @@ def send_message(text: str, raise_errors: bool = False):
     return body
 
 
-def notify_closing(closing_entry: str):
-    """Fon vazifasi: kassa yopilishi xabari. Xato kassa yopilishiga ta'sir qilmaydi."""
+def send_document(pdf: bytes, filename: str, caption: str = ""):
+    """Guruhga PDF fayl (sarlavha — qisqa xulosa matni)."""
+    _settings, token, chat_id = _config()
+    if not (token and chat_id):
+        frappe.throw(_("Kassa Telegram: Bot token va Guruh ID kiritilmagan"))
     try:
-        send_message(build_message(frappe.get_doc("POS Closing Entry", closing_entry)))
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendDocument",
+            data={"chat_id": chat_id, "caption": caption[:1024]},
+            files={"document": (filename, pdf, "application/pdf")},
+            timeout=TIMEOUT * 2,
+        )
+        body = response.json() if response.content else {}
+    except (requests.RequestException, ValueError) as exc:
+        frappe.throw(_("Telegram bilan aloqa yo'q: {0}").format(exc))
+    if not body.get("ok"):
+        frappe.throw(_("Telegram xatosi: {0}").format(body.get("description") or response.status_code))
+    return body
+
+
+def notify_closing(closing_entry: str):
+    """Fon vazifasi: kassa yopilishi — kunlik hisobot PDF'i + qisqa xulosa.
+
+    PDF tuzib bo'lmasa (xato Error Log'ga yoziladi) oddiy matnli xabar ketadi:
+    kassa ma'lumoti hech qachon yo'qolmasin. Xato kassa yopilishiga ta'sir qilmaydi.
+    """
+    try:
+        closing = frappe.get_doc("POS Closing Entry", closing_entry)
+        message = build_message(closing)
+        try:
+            from ozturkapp.ozturkapp.utils.kassa_report import build_report_pdf
+
+            pdf = build_report_pdf(closing)
+        except Exception:
+            frappe.log_error(title=f"Kassa hisoboti PDF: {closing_entry}")
+            pdf = None
+        if pdf:
+            send_document(pdf, f"Kassa_{closing_entry}.pdf", caption=message)
+        else:
+            send_message(message)
     except Exception:
         frappe.log_error(title=f"Kassa Telegram: {closing_entry}")
 

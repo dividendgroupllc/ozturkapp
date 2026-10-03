@@ -13,6 +13,16 @@ faqat topshirilgan (`docstatus = 1`) POS Invoice olinadi, holati (Paid yoki
 Consolidated) muhim emas. Qaytarishlar (`is_return = 1`) manfiy summa bilan
 keladi va yig'indini avtomatik kamaytiradi.
 
+ESKI SOTUV (JAMLAMA)
+====================
+POS cheklari bekor qilingach tiklangan eski kunlar `Sales Invoice` sifatida
+(`custom_legacy_sale = 1`, to'lovsiz, kuniga bitta) saqlanadi. Ular chek
+tafsiloti (ofitsiant, stol, soat) bo'lmagan holda shu yerda kunlik jamlama
+bo'lib ko'rinadi: tushum, tovarlar, chegirma. Faqat shu belgili invoice'lar
+qo'shiladi — POS yopilishidan hosil bo'lgan Sales Invoice'lar belgisiz, shuning
+uchun ikki marta sanalmaydi. Chek soni, o'rtacha chek va ofitsiant
+hisobiga ular KIRMAYDI (bu kunlarda chek soni noma'lum).
+
 IKKI DARAJA
 ===========
     mahsulot darajasi   POS Invoice Item — sotilgan soni, sof summa, chegirma
@@ -60,6 +70,9 @@ ALLOWED_ROLES = ("System Manager", "URY Manager", "Accounts Manager", "Accounts 
 
 # Chegirmani yaxlitlash qoldig'idan ajratish chegarasi (so'm).
 EPSILON = 0.5
+
+#: Eski sotuv jamlamasining «to'lov usuli» ustunidagi nomi (to'lov kiritilmagan).
+LEGACY_MODE = "Eski sotuv (qarz)"
 
 # Shundan uzun davr grafikda kunlar emas, oylar bo'yicha chiziladi.
 MAX_DAILY_BUCKETS = 62
@@ -124,6 +137,21 @@ def _item_where(filters):
 	return where
 
 
+def _legacy_where(filters):
+	"""Eski sotuv jamlamasi sharti; maydon hali yo'q bo'lsa (migrate oldidan) — None."""
+	if not frappe.db.has_column("Sales Invoice", "custom_legacy_sale"):
+		return None
+	conds = [
+		"si.docstatus = 1",
+		"si.custom_legacy_sale = 1",
+		"si.posting_date BETWEEN %(from_date)s AND %(to_date)s",
+	]
+	for field in ("company", "branch"):
+		if filters.get(field):
+			conds.append(f"si.{field} = %({field})s")
+	return " AND ".join(conds)
+
+
 # Qator darajasidagi ifodalar — bir joyda, hamma so'rov bir xil hisoblasin.
 LINE_DISCOUNT_SQL = "(IFNULL(i.discount_amount, 0) * i.qty)"
 DISCOUNT_SQL = f"({LINE_DISCOUNT_SQL} + IFNULL(i.distributed_discount_amount, 0))"
@@ -143,6 +171,8 @@ def get_dashboard(from_date=None, to_date=None, company=None, branch=None, item_
 	labels = _user_labels(
 		[x.waiter for x in invoices] + [x.cashier for x in invoices] + [x.owner for x in invoices]
 	)
+	# Eski sotuv jamlamasida ofitsiant, kassir va chegirma tafsiloti yo'q.
+	checks_only = [x for x in invoices if not x.get("legacy")]
 
 	return {
 		"items": items,
@@ -153,8 +183,8 @@ def get_dashboard(from_date=None, to_date=None, company=None, branch=None, item_
 		"previous": {"from_date": str(prev.from_date), "to_date": str(prev.to_date)},
 		"payments": _payment_summary(invoices),
 		"timeline": _timeline(filters),
-		"waiters": _waiters(invoices, labels),
-		"discounts": _discounts(invoices, labels),
+		"waiters": _waiters(checks_only, labels),
+		"discounts": _discounts(checks_only, labels),
 		"open_orders": _open_orders(filters, labels),
 		"group_filter": bool(filters.item_groups),
 		"currency": _currency(filters.get("company")),
@@ -186,10 +216,46 @@ def _items(filters):
 		filters,
 		as_dict=True,
 	)
+	items = _merge_legacy_items(items, filters)
 	for row in items:
 		row.gross_amount = flt(row.net_amount) + flt(row.discount)
 		row.avg_price = flt(row.gross_amount) / flt(row.qty) if flt(row.qty) else 0
 	return items
+
+
+def _merge_legacy_items(items, filters):
+	"""Eski sotuv jamlamasi tovarlarini POS tovarlariga qo'shadi (kod bo'yicha)."""
+	where = _legacy_where(filters)
+	if not where:
+		return items
+	if filters.item_groups:
+		where += " AND i.item_group IN %(item_groups)s"
+	legacy = frappe.db.sql(
+		f"""
+		SELECT i.item_code, MAX(i.item_name) AS item_name, MAX(i.item_group) AS item_group,
+			MAX(i.uom) AS uom, SUM(i.qty) AS qty, SUM(i.amount) AS net_amount,
+			SUM({DISCOUNT_SQL}) AS discount,
+			SUM(CASE WHEN ABS({DISCOUNT_SQL}) > {EPSILON} THEN i.qty ELSE 0 END) AS discounted_qty
+		FROM `tabSales Invoice Item` i
+		JOIN `tabSales Invoice` si ON si.name = i.parent
+		WHERE {where}
+		GROUP BY i.item_code
+		""",
+		filters,
+		as_dict=True,
+	)
+	if not legacy:
+		return items
+	by_code = {r.item_code: r for r in items}
+	for row in legacy:
+		if row.item_code in by_code:
+			base = by_code[row.item_code]
+			for f in ("qty", "net_amount", "discount", "discounted_qty"):
+				base[f] = flt(base[f]) + flt(row[f])
+		else:
+			row.invoices = 0
+			items.append(row)
+	return sorted(items, key=lambda r: -flt(r.net_amount))
 
 
 def _item_totals(items):
@@ -222,7 +288,29 @@ def _timeline(filters):
 		filters,
 		as_dict=True,
 	)
-	by_key = {str(r.bucket): r for r in rows}
+	rows = list(rows)
+	legacy_where = _legacy_where(filters)
+	if legacy_where:
+		legacy_bucket = "DATE_FORMAT(si.posting_date, '%%Y-%%m')" if monthly else "si.posting_date"
+		if filters.item_groups:
+			legacy_where += " AND i.item_group IN %(item_groups)s"
+		rows += frappe.db.sql(
+			f"""
+			SELECT {legacy_bucket} AS bucket, SUM(i.amount) AS net_amount, SUM({DISCOUNT_SQL}) AS discount
+			FROM `tabSales Invoice Item` i
+			JOIN `tabSales Invoice` si ON si.name = i.parent
+			WHERE {legacy_where}
+			GROUP BY bucket
+			""",
+			filters,
+			as_dict=True,
+		)
+	merged = {}
+	for r in rows:
+		slot = merged.setdefault(str(r.bucket), frappe._dict(bucket=r.bucket, net_amount=0, discount=0))
+		slot.net_amount += flt(r.net_amount)
+		slot.discount += flt(r.discount)
+	by_key = merged
 
 	keys, day = [], filters.from_date
 	while day <= filters.to_date:
@@ -267,8 +355,9 @@ def _invoices(filters):
 		filters,
 		as_dict=True,
 	)
+	legacy = _legacy_invoices(filters)
 	if not invoices:
-		return []
+		return legacy
 
 	line_discounts = dict(
 		frappe.db.sql(
@@ -331,18 +420,71 @@ def _invoices(filters):
 			)
 			if amount
 		]
-	return invoices
+	return invoices + legacy
+
+
+def _legacy_invoices(filters):
+	"""Eski sotuv jamlamasi — kuniga bitta «chek» ko'rinishida (tafsilotsiz)."""
+	where = _legacy_where(filters)
+	if not where:
+		return []
+	rows = frappe.db.sql(
+		f"""
+		SELECT si.name, si.posting_date, si.posting_time, si.total, si.net_total,
+			si.grand_total, si.rounded_total, si.owner
+		FROM `tabSales Invoice` si
+		WHERE {where}
+		ORDER BY si.posting_date, si.posting_time
+		""",
+		filters,
+		as_dict=True,
+	)
+	if not rows:
+		return []
+	names = [r.name for r in rows]
+	discounts = dict(
+		frappe.db.sql(
+			f"""
+			SELECT i.parent, SUM({DISCOUNT_SQL}) FROM `tabSales Invoice Item` i
+			WHERE i.parent IN %(names)s GROUP BY i.parent
+			""",
+			{"names": names},
+		)
+	)
+	service = dict(
+		frappe.db.sql(
+			"""
+			SELECT t.parent, SUM(t.tax_amount_after_discount_amount)
+			FROM `tabSales Taxes and Charges` t
+			WHERE t.parent IN %(names)s AND t.account_head NOT LIKE %(tips)s
+			GROUP BY t.parent
+			""",
+			{"names": names, "tips": f"{TIPS_ACCOUNT_NAME} - %"},
+		)
+	)
+	for r in rows:
+		r.legacy = 1
+		r.is_return = 0
+		r.voucher_type = "Sales Invoice"
+		r.discount = flt(discounts.get(r.name))
+		r.gross = flt(r.net_total) + r.discount
+		r.service = flt(service.get(r.name))
+		r.tips = 0
+		r.amount = flt(r.rounded_total) or flt(r.grand_total)
+		r.waiter = r.cashier = None
+		r.payments = [(LEGACY_MODE, r.amount)]
+	return rows
 
 
 def _check_summary(invoices):
-	sales = [x for x in invoices if not cint(x.is_return)]
+	sales = [x for x in invoices if not cint(x.is_return) and not x.get("legacy")]
 	returns = [x for x in invoices if cint(x.is_return)]
 	sales_amount = sum(x.amount for x in sales)
 	gross = sum(x.gross for x in invoices)
 	discount = sum(x.discount for x in invoices)
 	revenue = sum(x.amount for x in invoices)
 	# Savdo bo'lgan kunlar — bugun yoki yopiq kunlar o'rtachani tushirmasin
-	sales_days = len({getdate(x.posting_date) for x in sales})
+	sales_days = len({getdate(x.posting_date) for x in invoices if not cint(x.is_return)})
 	return {
 		"invoices": len(sales),
 		"returns": len(returns),
@@ -368,7 +510,7 @@ def _payment_summary(invoices):
 		for mode, amount in inv.payments:
 			row = by_mode.setdefault(mode, {"mode": mode, "amount": 0, "invoices": 0})
 			row["amount"] += amount
-			if not cint(inv.is_return):
+			if not cint(inv.is_return) and not inv.get("legacy"):
 				row["invoices"] += 1
 	return sorted(by_mode.values(), key=lambda r: -r["amount"])
 
