@@ -14,7 +14,11 @@ import frappe
 
 
 def run():
-	from ozturkapp.ozturkapp.setup.custom_fields import create_fields, create_property_setters
+	from ozturkapp.ozturkapp.setup.custom_fields import (
+		create_fields,
+		create_property_setters,
+		set_number_format,
+	)
 	from ozturkapp.ozturkapp.setup.kassa_setup import create_party_types, ensure_kassa_link_fields
 	from ozturkapp.ozturkapp.setup.print_format_setup import create_sales_order_print_format
 	from ozturkapp.ozturkapp.setup.receipt_format import setup as setup_receipt_format
@@ -45,6 +49,7 @@ def run():
 	tasks = [
 		create_fields,
 		create_property_setters,
+		set_number_format,
 		create_ury_pos_fields,
 		# DIQQAT: `create_ury_pos_fields` dan KEYIN — u
 		# `custom_cancelled_table` maydonini yaratadi va tozalash o'sha
