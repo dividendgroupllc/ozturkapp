@@ -153,6 +153,26 @@ def create_property_setters():
     print(f"✅ Property Setter'lar tayyor ({len(PROPERTY_SETTERS)} ta)")
 
 
+#: Summa formati: 11 224 341,00 (probel — minglik, vergul — o'nlik).
+NUMBER_FORMAT = "# ###,##"
+
+
+def set_number_format():
+    """Barcha hujjat va hisobotlarda summa formatini bir xil qiladi.
+
+    Currency.number_format System Settings'dan USTUN turadi, shuning uchun
+    UZS'ning o'zida ham o'rnatiladi.
+    """
+    frappe.db.set_single_value("System Settings", "number_format", NUMBER_FORMAT)
+    # fmt_money formatni System Settings'dan emas, default'lar jadvalidan
+    # o'qiydi (System Settings.on_update shuni yozadi).
+    frappe.db.set_default("number_format", NUMBER_FORMAT)
+    if frappe.db.exists("Currency", "UZS"):
+        frappe.db.set_value("Currency", "UZS", "number_format", NUMBER_FORMAT)
+    print(f"✅ Summa formati: {NUMBER_FORMAT}")
+
+
 def run():
     create_fields()
     create_property_setters()
+    set_number_format()
