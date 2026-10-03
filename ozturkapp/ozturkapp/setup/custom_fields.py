@@ -78,6 +78,8 @@ CUSTOM_FIELDS = {
 # (doctype, fieldname, property, value, property_type)
 # fieldname None bo'lsa — DocType darajasidagi property
 PROPERTY_SETTERS = [
+    # Kassa va boshqa Link maydonlarda xodim ISMI asosiy, ID izohda ko'rinadi
+    ("Employee", "", "show_title_field_in_link", "1", "Check"),
     # Barcode skanerlash maydonlari restoran oqimida ishlatilmaydi
     ("Sales Invoice", "scan_barcode", "hidden", "1", "Check"),
     ("POS Invoice", "scan_barcode", "hidden", "1", "Check"),
@@ -97,6 +99,39 @@ PROPERTY_SETTERS = [
     # Qo'shimcha chegirma hisobi yashiriladi
     ("Sales Invoice", "additional_discount_account", "hidden", "1", "Check"),
     ("Sales Invoice", "additional_discount_account", "mandatory_depends_on", "", "Code"),
+    # Sales Invoice — soliq bo'limlari yashiriladi (Jazira bilan bir xil)
+    ("Sales Invoice", "section_break_40", "hidden", "1", "Check"),
+    ("Sales Invoice", "taxes_section", "hidden", "1", "Check"),
+    # Purchase Invoice — keraksiz bo'limlar yashiriladi (Jazira bilan bir xil)
+    ("Purchase Invoice", "accounting_details_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "accounting_dimensions_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "advances_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "apply_tds", "hidden", "1", "Check"),
+    ("Purchase Invoice", "column_break2", "hidden", "1", "Check"),
+    ("Purchase Invoice", "company_billing_address_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "company_shipping_address_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "currency_and_price_list", "hidden", "1", "Check"),
+    ("Purchase Invoice", "due_date", "hidden", "1", "Check"),
+    ("Purchase Invoice", "is_subcontracted", "hidden", "1", "Check"),
+    ("Purchase Invoice", "payment_schedule_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "payments_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "pricing_rule_details", "hidden", "1", "Check"),
+    ("Purchase Invoice", "raw_materials_supplied", "hidden", "1", "Check"),
+    ("Purchase Invoice", "rejected_warehouse", "hidden", "1", "Check"),
+    ("Purchase Invoice", "scan_barcode", "hidden", "1", "Check"),
+    ("Purchase Invoice", "sec_tax_breakup", "hidden", "1", "Check"),
+    ("Purchase Invoice", "section_addresses", "hidden", "1", "Check"),
+    ("Purchase Invoice", "section_break_44", "hidden", "1", "Check"),
+    ("Purchase Invoice", "section_break_49", "hidden", "1", "Check"),
+    ("Purchase Invoice", "section_break_51", "hidden", "1", "Check"),
+    ("Purchase Invoice", "status_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "subscription_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "supplier_invoice_details", "hidden", "1", "Check"),
+    ("Purchase Invoice", "tax_withheld_vouchers_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "taxes_section", "hidden", "1", "Check"),
+    ("Purchase Invoice", "terms_section_break", "hidden", "1", "Check"),
+    ("Purchase Invoice", "totals", "hidden", "1", "Check"),
+    ("Purchase Invoice", "write_off", "hidden", "1", "Check"),
 ]
 
 
