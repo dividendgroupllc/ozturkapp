@@ -18,17 +18,23 @@ Barcha yo'llar shu BITTA metoddan o'tadi, shuning uchun qoida shu yerda:
        summasini foiz × `doc.total` ga qo'yadi;
     3. o'zgargan bo'lsa ERPNext jami summani qayta hisoblaydi.
 
-Qoidaning o'zi va sabablari: `utils/service_charge.py`.
+Qoidaning o'zi va sabablari: `utils/service_charge.py`. Shu yerda
+«Aksiya» chegirmasi ham ichimliklarsiz hisoblanadi (`utils/promo_discount.py`).
 ERPNext kodi o'zgartirilmaydi (upstream).
 """
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import POSInvoice
 
-from ozturkapp.ozturkapp.utils import service_charge
+from ozturkapp.ozturkapp.utils import promo_discount, service_charge
 
 
 class OzturkPOSInvoice(POSInvoice):
     def calculate_taxes_and_totals(self):
         super().calculate_taxes_and_totals()
-        if service_charge.apply(self):
-            super().calculate_taxes_and_totals()
+        # «Aksiya» chegirmasi ichimliklarsiz summadan (`utils/promo_discount.py`).
+        with promo_discount.fixed_amount(self) as promo:
+            if promo:
+                super().calculate_taxes_and_totals()
+            if service_charge.apply(self):
+                super().calculate_taxes_and_totals()
+        promo_discount.redistribute(self)

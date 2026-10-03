@@ -240,9 +240,9 @@ class TestKassa(FrappeTestCase):
         self._assert_cancelled(k, "payment_entry")
 
     # ── Journal Entry oqimlari ────────────────────────────────────
-    def test_expense_with_filial(self):
+    def test_expense_journal_entry(self):
         k = self._submit(oborot="Расход", source_account=MOP, party_type="Расходы",
-                         filial=FILIAL, expense_kontragent=self.expense)
+                         expense_kontragent=self.expense)
         self.assertFalse(k.payment_entry)
         company, gl = self._gl(k.journal_entry)
         self.assertEqual(company, COMPANY)

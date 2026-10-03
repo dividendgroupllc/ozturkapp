@@ -61,7 +61,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
 
-from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions
+from ozturkapp.ozturkapp.utils import cashier_billing, cashier_permissions, promo_discount
 
 AUDIT_COLUMNS = ("custom_discount_reason", "custom_discount_approved_by", "custom_reprint_needed")
 
@@ -95,7 +95,7 @@ def _load_draft(invoice: str, scope):
     return doc
 
 
-def effective_percent(doc, percent=None, amount=None) -> float:
+def effective_percent(doc, percent=None, amount=None, base=None) -> float:
     """Kiritilgan foiz yoki summani samarali foizga aylantiradi va tekshiradi.
 
     Aynan bittasi berilishi shart. Summa mahsulotlar jamiga (`doc.total`,
@@ -119,7 +119,7 @@ def effective_percent(doc, percent=None, amount=None) -> float:
     if has_percent:
         value = given
     else:
-        base = flt(doc.total)
+        base = flt(doc.total if base is None else base)
         if base <= 0:
             frappe.throw(_("Chek summasi nol — chegirma qo'yib bo'lmaydi"))
         value = given / base * 100
@@ -149,7 +149,16 @@ def apply_discount(invoice, scope, percent=None, amount=None, reason=None):
         frappe.throw(_("Chegirma sababini kiriting"), title=_("Sabab majburiy"))
 
     doc = _load_draft(invoice, scope)
-    value = effective_percent(doc, percent, amount)
+    base = None
+    if reason.lower() == promo_discount.REASON.lower():
+        # «Aksiya» ichimliklarga tegmaydi — summa ham faqat taomlardan foizga aylanadi.
+        base = promo_discount.eligible_total(doc)
+        if base <= 0:
+            frappe.throw(
+                _("«{0}» chegirmasi ichimliklarga qo'llanmaydi — chekda boshqa taom yo'q.").format(reason),
+                title=_("Chegirma qo'llanmaydi"),
+            )
+    value = effective_percent(doc, percent, amount, base)
 
     # Choychaqa to'lov paytida qo'yiladi va mutlaq summa — chegirma o'zgarsa
     # eskirgan choychaqa qolib ketmasligi uchun olib tashlanadi.

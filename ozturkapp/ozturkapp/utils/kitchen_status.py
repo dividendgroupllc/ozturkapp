@@ -59,8 +59,14 @@ TRANSITIONS = {
 #: "Kutilmoqda" da osilib qolardi.
 #:
 #: Shuning uchun bunday nuqtada BITTA o'tish bor: Kutilmoqda -> Berildi.
+#:
+#: Oshxona planshetsiz ishlaydi, shuning uchun bu oqim BARCHA mahsulotga
+#: qo'llanadi (`waiter.mark_delivered`). Eski KDS orqali PREPARING/READY
+#: ga o'tib qolgan qatorni ham ofitsant yopa oladi.
 SELF_SERVICE_TRANSITIONS = {
     PENDING: (SERVED, CANCELLED),
+    PREPARING: (SERVED,),
+    READY: (SERVED,),
     SERVED: (),
     CANCELLED: (),
 }

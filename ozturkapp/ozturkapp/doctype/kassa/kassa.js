@@ -101,11 +101,6 @@ frappe.ui.form.on('Kassa', {
             return mop_query(frm, frm.doc.transfer_source_display);
         });
 
-        // Filial - faqat faol
-        frm.set_query('filial', () => ({
-            filters: { is_active: 1 }
-        }));
-
         // Party Type - barchasi
         frm.set_query('party_type', () => ({}));
 
@@ -118,21 +113,11 @@ frappe.ui.form.on('Kassa', {
             return {};
         });
 
-        // Xarajat kontragenti — kompaniyaning xarajat hisoblari.
-        // Filial tanlangan bo'lsa, uning «Xarajat guruhi» ostidagilar bilan
-        // filtrlanadi; tanlanmagan bo'lsa barcha xarajat hisoblari chiqadi.
+        // Xarajat hisobi — faqat «Адм» va «Операционный» guruhlari ichidagi hisoblar.
         frm.set_query('expense_kontragent', () => ({
             query: KASSA_API + 'get_filial_expense_accounts',
-            filters: {
-                filial: frm.doc.filial || '',
-                company: frm.doc.company || ''
-            }
+            filters: { company: frm.doc.company || '' }
         }));
-    },
-
-    // Filial o'zgarsa - xarajat hisobini tozalash (guruh/kompaniya o'zgaradi)
-    filial(frm) {
-        frm.set_value('expense_kontragent', '');
     },
 
     // =========================================================================
@@ -168,7 +153,6 @@ frappe.ui.form.on('Kassa', {
         frm.set_value('party_type', '');
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
-        frm.set_value('filial', '');
         frm.set_value('payment_account', '');
         frm.set_value('payment_account_2', '');
 
@@ -253,7 +237,6 @@ frappe.ui.form.on('Kassa', {
     party_type(frm) {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
-        frm.set_value('filial', '');
 
         frm.trigger('toggle_fields');
     },

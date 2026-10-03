@@ -380,15 +380,17 @@ class TestSelfServiceStation(FrappeTestCase):
         with self.assertRaises(k.InvalidTransition):
             k.assert_transition(k.PENDING, k.SERVED)
 
-    def test_waiter_cannot_deliver_kitchen_item(self):
-        """Ofitsant oshxona taomini «berildi» deb belgilay olmaydi."""
+    def test_waiter_can_deliver_any_item(self):
+        """Oshxona planshetsiz: ofitsant taomni ham «berildi» deb belgilaydi."""
         import inspect
 
         from ozturkapp.ozturkapp.api import waiter
+        from ozturkapp.ozturkapp.utils import kitchen_status as k
 
         source = inspect.getsource(waiter.mark_delivered)
-        self.assertIn("self_service_stations", source)
-        self.assertIn("oshxona tayyorlaydi", source)
+        self.assertNotIn("self_service_stations", source)
+        for status in (k.PENDING, k.PREPARING, k.READY):
+            k.assert_transition(status, k.SERVED, self_service=True)
 
     def test_self_service_station_hidden_from_kitchen(self):
         """Bar KOT'lari oshxona ekranida ko'rinmaydi — stansiya tanlanmasa ham."""

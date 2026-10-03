@@ -42,6 +42,9 @@ DIVIDEND_PARTY_PREFIX = "Divident"
 # Kontragent bilan pul muomalasi Payment Entry orqali yuritiladi
 PARTY_TYPES_PE = ("Customer", "Supplier", "Employee", "Shareholder")
 
+#: «Qaysi hisobga yoziladi» ro'yxati faqat shu xarajat guruhlari ichidan chiqadi.
+EXPENSE_GROUPS = ("Адм", "Операционный")
+
 
 def _pe_link(name):
     return f'<a href="/app/payment-entry/{name}">{name}</a>'
@@ -220,7 +223,6 @@ class Kassa(Document):
             self.party_type = None
             self.kontragent = None
             self.expense_kontragent = None
-            self.filial = None
             self.source_account = None
             self.source_balance = 0
         else:
@@ -229,9 +231,6 @@ class Kassa(Document):
             self.target_account = None
             self.target_balance = 0
             self.payment_account_2 = None
-
-            if self.party_type != "Расходы":
-                self.filial = None
 
     # =========================================================================
     # ACCOUNTING (Payment Entry / Journal Entry)
@@ -706,51 +705,26 @@ def get_filtered_mode_of_payments(doctype, txt, searchfield, start, page_len, fi
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_filial_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
-    """«Xarajat kontragenti» uchun query.
+    """«Qaysi hisobga yoziladi» uchun query: faqat «Адм» va «Операционный»
+    xarajat guruhlari ichidagi leaf hisoblar."""
+    company = filters.get("company") or frappe.defaults.get_user_default("Company")
 
-    - Filial tanlangan va uning «Xarajat guruhi» sozlangan bo'lsa — faqat shu
-      guruh ostidagi leaf xarajat hisoblari.
-    - Aks holda — kompaniyaning barcha leaf xarajat hisoblari.
+    groups = frappe.get_all(
+        "Account",
+        filters={"account_name": ["in", EXPENSE_GROUPS], "is_group": 1, "company": company},
+        fields=["lft", "rgt"],
+    )
+    if not groups:
+        return []
 
-    (Jazira'dan farqi: bitta kompaniya bo'lgani uchun filial MAJBURIY emas.)
-    """
-    filial = filters.get("filial")
-    company = filters.get("company")
-
-    params = {
-        "txt": f"%{txt}%",
-        "start": start,
-        "page_len": page_len,
-    }
-    conds = ["is_group = 0", "root_type = 'Expense'", "name LIKE %(txt)s"]
-
-    grp = None
-    if filial:
-        fc = frappe.db.get_value(
-            "Kassa Filial", filial, ["company", "expense_group"], as_dict=True
-        )
-        if fc:
-            company = fc.company or company
-            if fc.expense_group:
-                grp = frappe.db.get_value(
-                    "Account", fc.expense_group, ["lft", "rgt"], as_dict=True
-                )
-
-    if grp:
-        conds.append("lft > %(lft)s AND rgt < %(rgt)s")
-        params["lft"] = grp.lft
-        params["rgt"] = grp.rgt
-
-    if not company:
-        company = frappe.defaults.get_user_default("Company")
-    if company:
-        conds.append("company = %(company)s")
-        params["company"] = company
-
+    ranges = " OR ".join(
+        f"(lft > {int(g.lft)} AND rgt < {int(g.rgt)})" for g in groups
+    )
     return frappe.db.sql(f"""
         SELECT name
         FROM `tabAccount`
-        WHERE {" AND ".join(conds)}
+        WHERE is_group = 0 AND root_type = 'Expense' AND disabled = 0
+          AND company = %(company)s AND name LIKE %(txt)s AND ({ranges})
         ORDER BY name
         LIMIT %(start)s, %(page_len)s
-    """, params)
+    """, {"company": company, "txt": f"%{txt}%", "start": start, "page_len": page_len})

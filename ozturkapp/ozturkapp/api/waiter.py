@@ -263,19 +263,16 @@ def get_menu(room=None):
 
 @frappe.whitelist()
 def mark_delivered(kot_item):
-    """Ichimlikni «yetkazib berildi» deb belgilaydi.
+    """Taom yoki ichimlikni «berildi» deb belgilaydi (ofitsant o'zi).
 
-    NEGA ALOHIDA ENDPOINT
-    =====================
-    Ichimlikni oshxona tayyorlamaydi: ofitsant barga borib oladi va
-    mijozga eltadi. Unga "Tayyorlanmoqda -> Tayyor" bosqichlari ma'nosiz,
-    shuning uchun oqim ikki bosqichli: Kutilmoqda -> Berildi.
+    OSHXONA BOSQICHLARI YO'Q
+    ========================
+    Oshxonaga planshet qo'yilmaydi: hech kim "Tayyorlanmoqda" / "Tayyor"
+    ni bosmaydi. Ofitsant taomni o'zi olib boradi va shu endpoint bilan
+    yopadi: Kutilmoqda -> Berildi. Taom ham, ichimlik ham bir xil.
 
     Oshxona endpointi (`kitchen.update_kot_item_status`) ISHLATILMAYDI —
-    u `URY Kitchen` rolini talab qiladi va ofitsantda u yo'q. Ikkinchi
-    tomondan, ofitsantga oshxona mahsulotini yopishga ruxsat berib
-    bo'lmaydi: u faqat O'ZI olib boradigan nuqtaning mahsulotini yopadi.
-    Shu cheklov quyida serverda tekshiriladi.
+    u `URY Kitchen` rolini talab qiladi va ofitsantda u yo'q.
 
     Args:
         kot_item: `URY KOT Items` qatorining `name` si
@@ -305,18 +302,6 @@ def mark_delivered(kot_item):
 
     if cint(row.docstatus) != 1:
         frappe.throw(_("KOT bekor qilingan yoki tasdiqlanmagan"))
-
-    # ENG MUHIM TEKSHIRUV: ofitsant faqat "o'zi olib boriladi" nuqtasining
-    # mahsulotini yopa oladi. Oshxona taomini u BERILDI deb belgilay
-    # olmasligi kerak — buni oshpaz qiladi.
-    if row.production not in kitchen_status.self_service_stations():
-        frappe.throw(
-            _(
-                "Bu mahsulotni oshxona tayyorlaydi — uni ofitsant «berildi» "
-                "deb belgilay olmaydi."
-            ),
-            title=_("Ruxsat yo'q"),
-        )
 
     current = kitchen_status.normalize(row.status)
     kitchen_status.assert_transition(current, kitchen_status.SERVED, self_service=True)
