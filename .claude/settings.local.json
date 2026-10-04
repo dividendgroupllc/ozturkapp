@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Agent",
-      "Bash(ssh frappe@ozturk.erpcontrol.uz:*)"
+      "Bash(ssh frappe@ozturk.erpcontrol.uz:*)",
+      "Bash(ssh *)"
     ]
   }
 }

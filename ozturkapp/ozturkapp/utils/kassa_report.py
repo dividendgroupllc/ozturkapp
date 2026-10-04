@@ -124,11 +124,11 @@ def _unconsolidated_payments(day, company: str) -> list[dict]:
     return out
 
 
-def _kassa_docs(day) -> dict:
+def _kassa_docs(start, day) -> dict:
     """voucher_no -> Kassa hujjati (JE yoki PE orqali bog'langan)."""
     docs = frappe.get_all(
         "Kassa",
-        filters={"docstatus": 1, "date": day},
+        filters={"docstatus": 1, "date": ["between", [start, day]]},
         fields=[
             "name", "oborot", "party_type", "kontragent", "expense_kontragent",
             "journal_entry", "payment_entry",
@@ -152,10 +152,14 @@ def _party_label(doc) -> str:
     return doc.party_type or doc.oborot
 
 
-def day_table(day, company: str) -> dict:
-    """Kassa jadvali: ustunlar, qatorlar va jami'lar."""
+def day_table(day, company: str, start=None) -> dict:
+    """Kassa jadvali: ustunlar, qatorlar va jami'lar.
+
+    `start` berilsa, jadval start..day oralig'ini qamraydi (yarim tundan o'tgan smena).
+    """
+    start = start or day
     columns = _kassa_columns(company)
-    kassa_by_voucher = _kassa_docs(day)
+    kassa_by_voucher = _kassa_docs(start, day)
     pending = _unconsolidated_payments(day, company)
 
     opening = {c["mode"]: 0.0 for c in columns}
@@ -171,16 +175,16 @@ def day_table(day, company: str) -> dict:
         before = frappe.db.sql(
             """SELECT IFNULL(SUM(debit - credit), 0) FROM `tabGL Entry`
                WHERE account = %s AND is_cancelled = 0 AND posting_date < %s""",
-            (account, day),
+            (account, start),
         )[0][0]
         opening[mode] = flt(before) + sum(
-            p["amount"] for p in pending if p["mode"] == mode and p["date"] < day
+            p["amount"] for p in pending if p["mode"] == mode and p["date"] < start
         )
 
         entries = frappe.db.sql(
             """SELECT voucher_type, voucher_no, debit, credit FROM `tabGL Entry`
-               WHERE account = %s AND is_cancelled = 0 AND posting_date = %s""",
-            (account, day),
+               WHERE account = %s AND is_cancelled = 0 AND posting_date BETWEEN %s AND %s""",
+            (account, start, day),
             as_dict=True,
         )
         for entry in entries:
@@ -202,7 +206,7 @@ def day_table(day, company: str) -> dict:
                 add(chiqim, label, mode, -net)
 
         for p in pending:
-            if p["mode"] == mode and p["date"] == day:
+            if p["mode"] == mode and start <= p["date"] <= day:
                 add(kirim, SALES_LABEL, mode, p["amount"])
 
     def rows_of(bucket, first=None):
@@ -244,12 +248,13 @@ def day_table(day, company: str) -> dict:
     }
 
 
-def day_stats(day, company: str) -> dict:
-    """Kun ko'rsatkichlari va mol/tovuq go'shti bo'yicha sotuv."""
+def day_stats(day, company: str, start=None) -> dict:
+    """Kun ko'rsatkichlari va mol/tovuq go'shti bo'yicha sotuv (start..day)."""
+    start = start or day
     invoices = frappe.db.sql(
         """SELECT name, grand_total, discount_amount, is_return FROM `tabPOS Invoice`
-           WHERE docstatus = 1 AND company = %s AND posting_date = %s""",
-        (company, day),
+           WHERE docstatus = 1 AND company = %s AND posting_date BETWEEN %s AND %s""",
+        (company, start, day),
         as_dict=True,
     )
     sales = [i for i in invoices if not i.is_return]
@@ -260,9 +265,9 @@ def day_stats(day, company: str) -> dict:
     items = frappe.db.sql(
         """SELECT it.item_name, it.qty, it.net_amount FROM `tabPOS Invoice Item` it
            JOIN `tabPOS Invoice` inv ON inv.name = it.parent
-           WHERE inv.docstatus = 1 AND inv.company = %s AND inv.posting_date = %s
+           WHERE inv.docstatus = 1 AND inv.company = %s AND inv.posting_date BETWEEN %s AND %s
              AND inv.is_return = 0""",
-        (company, day),
+        (company, start, day),
         as_dict=True,
     )
     kinds = {k: {"amount": 0.0, "kg": 0.0} for k in ("beef", "chicken", "other")}
@@ -308,13 +313,16 @@ def _num(value) -> str:
     return format_amount(value) if abs(flt(value)) > 0.004 else "0"
 
 
-def render_pdf(day, table: dict, stats: dict, extra: dict) -> bytes:
+def render_pdf(day, table: dict, stats: dict, extra: dict, start=None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.platypus import Image, SimpleDocTemplate, Spacer, Table, TableStyle
 
     font, bold = _register_fonts()
+    date_label = formatdate(day, "dd.MM.yyyy")
+    if start and getdate(start) != getdate(day):
+        date_label = f"{formatdate(start, 'dd.MM.yyyy')} – {date_label}"
     grid = colors.HexColor("#999999")
     shade = colors.HexColor("#f2f2f2")
     shade_dark = colors.HexColor("#e2e2e2")
@@ -322,7 +330,7 @@ def render_pdf(day, table: dict, stats: dict, extra: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm,
-        topMargin=8 * mm, bottomMargin=8 * mm, title=f"Kassa hisoboti {formatdate(day, 'dd.MM.yyyy')}",
+        topMargin=8 * mm, bottomMargin=8 * mm, title=f"Kassa hisoboti {date_label}",
     )
     width = doc.width
 
@@ -334,7 +342,7 @@ def render_pdf(day, table: dict, stats: dict, extra: dict) -> bytes:
     columns = table["columns"]
     count = len(columns)
     ncols = count + 2
-    cells = [["Sana", formatdate(day, "dd.MM.yyyy")] + [""] * count]
+    cells = [["Sana", date_label] + [""] * count]
     cells.append([""] + [c["label"] for c in columns] + ["Jami"])
     style = [
         ("FONT", (0, 0), (-1, -1), font, 8),
@@ -427,15 +435,35 @@ def _footer(text, font):
         "foot", fontName=font, fontSize=7, textColor=colors.HexColor("#777777")))
 
 
+def shift_range(closing) -> tuple:
+    """Smena qamragan sanalar (start, end).
+
+    Smena yarim tundan keyin yopilsa, savdo smena ochilgan kunga yoziladi —
+    shuning uchun yopilish sanasi emas, smena ichidagi cheklar sanasi olinadi.
+    """
+    opened = getdate(closing.get("period_start_date") or closing.posting_date)
+    closed = getdate(closing.get("period_end_date") or closing.posting_date)
+    start, end = opened, closed
+    if closing.get("period_start_date") and closing.get("period_end_date"):
+        row = frappe.db.sql(
+            """SELECT MIN(posting_date), MAX(posting_date) FROM `tabPOS Invoice`
+               WHERE docstatus = 1 AND company = %s AND creation BETWEEN %s AND %s""",
+            (closing.company, closing.period_start_date, closing.period_end_date),
+        )[0]
+        if row[0]:
+            start, end = min(start, getdate(row[0])), min(closed, max(getdate(row[1]), opened))
+    return start, max(start, end)
+
+
 def build_report_pdf(closing) -> bytes:
-    """POS Closing Entry kuni uchun hisobot PDF'i."""
-    day = getdate(closing.get("period_end_date") or closing.posting_date)
+    """POS Closing Entry smenasi uchun hisobot PDF'i."""
+    start, day = shift_range(closing)
     company = closing.company
-    table = day_table(day, company)
-    stats = day_stats(day, company)
+    table = day_table(day, company, start)
+    stats = day_stats(day, company, start)
 
     cashier = frappe.db.get_value("User", closing.user, "full_name") or closing.user
     extra = {
         "footer": f"{closing.name} · kassir: {cashier}",
     }
-    return render_pdf(day, table, stats, extra)
+    return render_pdf(day, table, stats, extra, start)
