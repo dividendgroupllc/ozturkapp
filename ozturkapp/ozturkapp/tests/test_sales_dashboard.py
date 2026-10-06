@@ -215,3 +215,39 @@ class TestDashboard(DashboardCase):
         sales_dashboard.download_excel(today(), today())
 
         self.assertTrue(frappe.response["filecontent"].startswith(b"PK"))
+
+
+class TestDashboardAccess(DashboardCase):
+    """Kim ko'ra olishi faqat Page sozlamasidagi rollardan olinadi."""
+
+    ROLE = "Dashboard Test Investor"
+    VIEWER = "dash-investor@example.com"
+
+    def setUp(self):
+        super().setUp()
+        if not frappe.db.exists("Role", self.ROLE):
+            frappe.get_doc({"doctype": "Role", "role_name": self.ROLE, "desk_access": 1}).insert(
+                ignore_permissions=True
+            )
+        self._make_user(self.VIEWER, [self.ROLE])
+
+    def _call(self):
+        return sales_dashboard.get_dashboard(today(), today())
+
+    def test_role_not_on_page_is_denied(self):
+        frappe.set_user(self.VIEWER)
+        with self.assertRaises(frappe.PermissionError):
+            self._call()
+
+    def test_role_added_to_page_is_allowed(self):
+        page = frappe.get_doc("Page", sales_dashboard.PAGE)
+        page.append("roles", {"role": self.ROLE})
+        page.db_update_all()
+        frappe.set_user(self.VIEWER)
+        self.assertIn("totals", self._call())
+
+    def test_empty_page_roles_deny_everyone(self):
+        frappe.db.delete("Has Role", {"parent": sales_dashboard.PAGE, "parenttype": "Page"})
+        frappe.set_user(self.CASHIER)
+        with self.assertRaises(frappe.PermissionError):
+            self._call()

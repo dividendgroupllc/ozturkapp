@@ -66,7 +66,9 @@ from frappe.utils.nestedset import get_descendants_of
 from ozturkapp.ozturkapp.utils.cashier_billing import TIPS_ACCOUNT_NAME
 from ozturkapp.ozturkapp.utils.pos_closing import net_payments
 
-ALLOWED_ROLES = ("System Manager", "URY Manager", "Accounts Manager", "Accounts User")
+#: Kim ko'ra olishi Desk'dagi Page sozlamasida (Rollar jadvali) belgilanadi —
+#: kodda rollar ro'yxati YO'Q. Sahifa va uning API'si bir xil qoidaga bo'ysunadi.
+PAGE = "sales-dashboard"
 
 # Chegirmani yaxlitlash qoldig'idan ajratish chegarasi (so'm).
 EPSILON = 0.5
@@ -81,8 +83,21 @@ MAX_DAILY_BUCKETS = 62
 MAX_STALE_ORDERS = 30
 
 
+def allowed_roles() -> set:
+	"""Page sozlamasidagi rollar va «Custom Role» orqali qo'shilganlari."""
+	from frappe.core.doctype.custom_role.custom_role import get_custom_allowed_roles
+
+	roles = set(frappe.get_all("Has Role", filters={"parent": PAGE, "parenttype": "Page"}, pluck="role"))
+	roles.update(get_custom_allowed_roles("page", PAGE))
+	return roles
+
+
 def _check_access():
-	if not set(frappe.get_roles()).intersection(ALLOWED_ROLES):
+	# Frappe Page'ning o'zi rollar jadvali bo'sh bo'lsa hammaga ochadi — moliyaviy
+	# ma'lumot uchun bu xavfli, shuning uchun bo'sh ro'yxat = hech kim (Administrator'dan tashqari).
+	if frappe.session.user == "Administrator":
+		return
+	if not set(frappe.get_roles()).intersection(allowed_roles()):
 		frappe.throw(_("Sotuv dashboardini ko'rishga ruxsat yo'q"), frappe.PermissionError)
 
 
