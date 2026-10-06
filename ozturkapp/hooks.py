@@ -30,11 +30,22 @@ doc_events = {
 		# signal POS Invoice'ning o'zidan olinadi: ofitsant buyurtma
 		# yaratganda `sync_order()` -> `invoice.save()` shu hook'ni uyg'otadi.
 		"after_insert": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
-		"on_update": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
-		"on_cancel": "ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+		"on_update": [
+			"ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+			# Yarim tayyor mahsulot buyurtma bo'yicha avtomatik ishlab
+			# chiqariladi/bekor qilinadi (utils/auto_manufacture.py).
+			"ozturkapp.ozturkapp.utils.auto_manufacture.on_doc_change",
+		],
+		"on_cancel": [
+			"ozturkapp.ozturkapp.utils.cashier_realtime.on_pos_invoice_change",
+			"ozturkapp.ozturkapp.utils.auto_manufacture.on_doc_change",
+		],
 		# To'lovdan keyin stol holatini YAKUNIY hal qiladi. `ury` dan keyin
 		# ishlaydi va uning shartsiz bo'shatishini to'g'rilaydi (TZ §23).
-		"on_submit": "ozturkapp.ozturkapp.overrides.pos_invoice.on_submit",
+		"on_submit": [
+			"ozturkapp.ozturkapp.overrides.pos_invoice.on_submit",
+			"ozturkapp.ozturkapp.utils.auto_manufacture.on_doc_change",
+		],
 		# URY kassirga POS Invoice'da write/submit/cancel bergan: qaytarish, tasdiq izi,
 		# chegirma va bekor qilish qoidalari generic REST orqali chetlab o'tilmasin.
 		# Faqat oddiy kassirga qo'llanadi (utils/cashier_billing.py).
@@ -53,7 +64,12 @@ doc_events = {
 		# Oshxona ekrani uchun realtime (TZ §12). URY'ning o'z
 		# `kotDisplayRealtime()` metodi faqat Mosaic kanaliga yuboradi —
 		# KOT yaratish/bekor qilish mantig'iga TEGILMAYDI.
-		"on_submit": "ozturkapp.ozturkapp.utils.kitchen_realtime.on_kot_submit",
+		"on_submit": [
+			"ozturkapp.ozturkapp.utils.kitchen_realtime.on_kot_submit",
+			# URY `cancel_order` chekni hodisasiz bekor qiladi — avto ishlab
+			# chiqarish bekor-KOT orqali qaytariladi (utils/auto_manufacture.py).
+			"ozturkapp.ozturkapp.utils.auto_manufacture.on_kot_submit",
+		],
 		"on_cancel": "ozturkapp.ozturkapp.utils.kitchen_realtime.on_kot_cancel",
 	},
 	# ── Kassa smenasi ──────────────────────────────────────────────
@@ -373,6 +389,9 @@ override_doctype_class = {
 	# Xizmat haqi chek chegirmasidan OLDINGI taomlar summasidan olinadi
 	# (utils/service_charge.py). Faqat qoralama cheklar qayta hisoblanadi.
 	"POS Invoice": "ozturkapp.ozturkapp.overrides.pos_invoice_totals.OzturkPOSInvoice",
+	# Avto ishlab chiqarishda kasr dona (masalan 0.1 tuxum) ruxsat
+	# (overrides/stock_entry.py).
+	"Stock Entry": "ozturkapp.ozturkapp.overrides.stock_entry.OzturkStockEntry",
 }
 
 # Document Events

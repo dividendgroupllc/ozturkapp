@@ -17,6 +17,9 @@ class StockEntryConfig:
     posting_date: str
     posting_time: str = "23:59:59"
     allow_negative_stock: bool = True
+    # Har bir Stock Entry'ga qo'shimcha yoziladigan maydonlar va flaglar
+    extra_fields: Optional[Dict] = None
+    flags: Optional[Dict] = None
 
 
 class StockService:
@@ -105,6 +108,10 @@ class StockService:
         se.to_warehouse = config.warehouse
         se.bom_no = bom
         se.fg_completed_qty = qty
+        if config.extra_fields:
+            se.update(config.extra_fields)
+        if config.flags:
+            se.flags.update(config.flags)
         
         # Add raw materials (consumed). Exploded BOM rows that round to zero
         # (e.g. a trace ingredient at low sold qty) are skipped — ERPNext

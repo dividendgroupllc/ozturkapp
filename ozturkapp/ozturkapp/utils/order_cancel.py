@@ -35,7 +35,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from ozturkapp.ozturkapp.utils import cashier_permissions, kitchen_status, table_status
+from ozturkapp.ozturkapp.utils import auto_manufacture, cashier_permissions, kitchen_status, table_status
 from ozturkapp.ozturkapp.utils.cashier_realtime import emit_floor_change, emit_order_change
 from ozturkapp.ozturkapp.utils.kitchen_realtime import emit_kot_change
 
@@ -233,6 +233,9 @@ def cancel_invoice(row, reason, scope=None) -> dict:
         values["custom_merged_tables"] = None
 
     frappe.db.set_value("POS Invoice", invoice, values, update_modified=True)
+    # `set_value` hujjat hodisasini ishga tushirmaydi — avto ishlab
+    # chiqarilgan yarim tayyor mahsulot shu yerdan bekor qilinadi.
+    auto_manufacture.schedule(invoice)
 
     cancelled_items = _close_kitchen_tickets(invoice, branch)
     freed = free_empty_tables(branch, tables)

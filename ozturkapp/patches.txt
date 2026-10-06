@@ -7,3 +7,4 @@
 ozturkapp.patches.v1_0.rename_kassa_workspace
 ozturkapp.patches.v1_0.remove_intercompany_features
 ozturkapp.patches.v1_0.remove_intercompany_kassa
+ozturkapp.patches.v1_0.enable_auto_manufacture

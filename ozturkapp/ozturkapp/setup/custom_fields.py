@@ -58,6 +58,34 @@ CUSTOM_FIELDS = {
             "no_copy": 1,
             "print_hide": 1,
             "translatable": 0,
+        },
+        # Buyurtma asosida avtomatik ishlab chiqarilgan yarim tayyor mahsulot
+        # qaysi chekka tegishli (utils/auto_manufacture.py)
+        {
+            "fieldname": "custom_pos_invoice",
+            "label": "POS Invoice",
+            "fieldtype": "Link",
+            "options": "POS Invoice",
+            "insert_after": "custom_production_entry",
+            "read_only": 1,
+            "no_copy": 1,
+            "print_hide": 1,
+            "search_index": 1,
+            "translatable": 0,
+        },
+    ],
+    # Belgilangan yarim tayyor mahsulot buyurtma berilganda o'z BOM'i bo'yicha
+    # avtomatik ishlab chiqariladi (utils/auto_manufacture.py)
+    "Item": [
+        {
+            "fieldname": "custom_auto_manufacture",
+            "label": "Buyurtmada avto ishlab chiqarish",
+            "fieldtype": "Check",
+            "default": "0",
+            "insert_after": "is_stock_item",
+            "description": "Buyurtma berilganda tarkibidagi miqdor default BOM bo'yicha "
+            "ishlab chiqariladi, buyurtma bekor qilinsa ishlab chiqarish ham bekor bo'ladi.",
+            "translatable": 0,
         }
     ],
     # Kassir ekrani va chekdagi nom. Kassa moduli naqd egalarini ajratish
