@@ -71,10 +71,11 @@
 	cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .rc-orders-card:active { filter: brightness(.92); }
+/* Nom TO'LIQ chiqadi — qirqilmaydi: oxiridagi gramaj va "(1+1)" taomlarni
+   bir-biridan ajratadi. Uzun nomda kartochka balandroq bo'ladi. */
 .rc-orders-card__name {
 	padding-right: 28px; font-size: 15px; font-weight: 700; line-height: 1.2;
-	display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
-	overflow-wrap: anywhere;
+	overflow-wrap: break-word;
 }
 .rc-orders-card__price { font-size: 14px; font-weight: 600; color: var(--rc-muted); }
 .rc-orders-card__star { color: var(--rc-reserved-ink); }
