@@ -424,6 +424,7 @@ ozturk.kitchen.Screen = class KitchenScreen {
 					)}</span>
 					<span class="kds-ticket__kot">${esc(kot.kot)}</span>
 				</div>
+				${orderTypeBadge(kot.order_type)}
 				<div class="kds-ticket__meta">
 					${kot.order_no ? `<span>#${esc(kot.order_no)}</span>` : ""}
 					${kot.waiter ? `<span>${esc(kot.waiter)}</span>` : ""}
@@ -585,6 +586,7 @@ ozturk.kitchen.Screen = class KitchenScreen {
 				p { margin: 4px 0; font-size: 14px; }
 			</style></head><body>
 			<h1>${esc(ticket.item_name || "")} ×${cint(ticket.quantity)}</h1>
+			${orderTypeLabel(ticket.order_type) ? `<p><b>${esc(orderTypeLabel(ticket.order_type))}</b></p>` : ""}
 			<p>${esc(ticket.station || "")}</p>
 			${ticket.table ? `<p>${__("Stol")}: ${esc(ticket.table)}</p>` : ""}
 			<p>${esc(frappe.datetime.str_to_user(ticket.printed_at))}</p>
@@ -719,6 +721,30 @@ function esc(value) {
 				"'": "&#39;",
 			}[ch])
 	);
+}
+
+/**
+ * Serverdagi `order_type` (URY qiymatlari) -> ekrandagi nom. Bosma chekdagi
+ * yozuvlar bilan bir xil (`utils/escpos.ORDER_TYPE_LABELS`).
+ */
+const ORDER_TYPE_LABELS = {
+	"Dine In": __("ZALDA"),
+	"Take Away": __("OLIB KETISH"),
+	Delivery: __("YETKAZIB BERISH"),
+	"Phone In": __("TELEFON BUYURTMA"),
+	Aggregators: __("AGREGATOR"),
+};
+
+function orderTypeLabel(orderType) {
+	return ORDER_TYPE_LABELS[orderType] || "";
+}
+
+/** Kartadagi buyurtma turi belgisi; noma'lum turda hech narsa chiqmaydi. */
+function orderTypeBadge(orderType) {
+	const label = orderTypeLabel(orderType);
+	if (!label) return "";
+	const modifier = String(orderType).replace(/\s+/g, "");
+	return `<div class="kds-order-type kds-order-type--${esc(modifier)}">${esc(label)}</div>`;
 }
 
 /** Soniyani `MM:SS` yoki `H:MM:SS` ko'rinishiga keltiradi. */

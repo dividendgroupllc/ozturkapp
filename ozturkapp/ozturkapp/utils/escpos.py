@@ -41,6 +41,22 @@ GS = b"\x1d"
 #: Sanoq ustunlari: Font A da 80mm -> 48, 58mm -> 32 belgi.
 COLUMNS = {"80": 48, "58": 32}
 
+#: `POS Invoice.order_type` (URY qiymatlari) -> chekdagi yozuv. Oshpaz taom
+#: zalgami, olib ketishgami yoki kuryergami — bir qarashda ko'rishi kerak.
+#: Olib ketish stoli (`URY Table.is_take_away`) ham URY'da `Take Away` bo'ladi.
+ORDER_TYPE_LABELS = {
+    "Dine In": "ZALDA",
+    "Take Away": "OLIB KETISH",
+    "Delivery": "YETKAZIB BERISH",
+    "Phone In": "TELEFON BUYURTMA",
+    "Aggregators": "AGREGATOR",
+}
+
+
+def order_type_label(order_type) -> str:
+    """Buyurtma turining chekdagi nomi; noma'lum yoki bo'sh tur — bo'sh satr."""
+    return ORDER_TYPE_LABELS.get((order_type or "").strip(), "")
+
 #: Choychaqa soliq qatorining nomi (`Sales Taxes and Charges.description`). Chekda
 #: tip qatori AYNAN shu nom bo'yicha taniladi; `cashier_billing.TIPS_DESCRIPTION`
 #: bilan bir xil bo'lishi shart (bu fayl `ozturkapp` modullariga bog'liq emas,
@@ -281,15 +297,31 @@ class Receipt:
             pass
         return self
 
-    def text(self, text: str, align: str = "left", bold: bool = False, size: str = "normal"):
+    def invert(self, on: bool):
+        """Oq matn qora fonda (`GS B n`)."""
+        self._buf += GS + b"B" + (b"\x01" if on else b"\x00")
+        return self
+
+    def text(self, text: str, align: str = "left", bold: bool = False, size: str = "normal",
+             invert: bool = False):
         width = self.columns // 2 if size in ("double", "wide") else self.columns
+        # Qora fon matn chetiga yopishmasin: har qator ikki yonidan bo'shliq
+        # bilan o'raladi, shuning uchun 2 belgi torroq bo'linadi.
+        if invert:
+            width -= 2
         self.align(align)
         if bold:
             self.bold(True)
         if size != "normal":
             self.size(size)
+        if invert:
+            self.invert(True)
         for chunk in self.wrap(text, width):
+            if invert:
+                chunk = f" {chunk} "
             self._buf += self._enc(chunk) + b"\n"
+        if invert:
+            self.invert(False)
         if size != "normal":
             self.size("normal")
         if bold:
@@ -424,6 +456,11 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
         r.text("QAYTARISH", align="center", bold=True, size="double")
         if bill.get("return_against"):
             r.text(f"Asl chek: {bill['return_against']}", align="center")
+    # Zal cheki stol bilan tanilib turadi; olib ketish va yetkazish chekida
+    # stol yo'q — turi bo'lmasa paket qaysi mijozniki ekani adashadi.
+    order_type = order_type_label(bill.get("order_type"))
+    if order_type and bill.get("order_type") != "Dine In":
+        r.text(order_type, align="center", bold=True)
     r.feed(1)
 
     r.line(fmt_dt(bill.get("opened_at")))
@@ -435,7 +472,8 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
         r.line(f"Kassir: {bill.get('cashier_name')}")
     delivery = bill.get("delivery")
     if isinstance(delivery, dict) and (delivery.get("phone") or delivery.get("address")):
-        r.line("Yetkazib berish")
+        if bill.get("order_type") != "Delivery":
+            r.line("Yetkazib berish")
         if delivery.get("phone"):
             r.line(f"Telefon: {delivery['phone']}")
         if delivery.get("address"):
@@ -509,7 +547,14 @@ def build_kot(kot: dict, printer) -> bytes:
     """Oshxona buyurtma cheki (KOT) — yangi buyurtma tushganda.
 
     `kot` = {"station", "kot", "order_number", "table", "waiter", "time",
-             "type", "comments", "items": [{"item_name", "qty", "comment"}]}
+             "type", "order_type", "comments",
+             "items": [{"item_name", "qty", "comment"}]}
+
+    BUYURTMA TURI
+    =============
+    Stansiya nomidan keyin qora fonda katta harflar bilan: ZALDA /
+    OLIB KETISH / YETKAZIB BERISH. Olib ketish va yetkazishda stol yo'q —
+    turi chiqmasa oshpaz taom qayerga ketishini bilmaydi.
 
     MARKAZLASH
     ==========
@@ -523,6 +568,9 @@ def build_kot(kot: dict, printer) -> bytes:
 
     station = kot.get("station") or "OSHXONA"
     r.text(station.upper(), align=align, bold=True, size="double")
+    order_type = order_type_label(kot.get("order_type"))
+    if order_type:
+        r.text(order_type, align=align, bold=True, size="double", invert=True)
     if kot.get("type") and kot["type"] not in ("Order", "New Order"):
         r.text(str(kot["type"]).upper(), align=align, bold=True)
     # Qog'oz tejash: raqam va vaqt bitta qatorda, sanasiz — oshxonaga
@@ -553,6 +601,9 @@ def build_item_ticket(ticket: dict, printer) -> bytes:
     r = _receipt_for(printer)
     align = "center"
     r.text("TAYYOR", align=align, bold=True, size="double")
+    order_type = order_type_label(ticket.get("order_type"))
+    if order_type:
+        r.text(order_type, align=align, bold=True, size="tall", invert=True)
     r.feed(1)
     r.text(f"{fmt_qty(ticket.get('quantity'))} x {ticket.get('item_name') or ''}",
            align=align, bold=True, size="tall")

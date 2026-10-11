@@ -423,6 +423,20 @@ def build_menu(scope, room=None, order_type=None) -> dict:
             seen.add(course)
             courses.append(course)
 
+    # Kurs tugmalari tartibi — `URY Menu Course.custom_serving_priority`
+    # (admin drag-drop shuni saqlaydi). Priority'siz kurslar oxirida,
+    # menyuda uchragan tartibida qoladi.
+    if courses:
+        priority = dict(
+            frappe.get_all(
+                "URY Menu Course",
+                filters={"name": ["in", courses]},
+                fields=["name", "custom_serving_priority"],
+                as_list=True,
+            )
+        )
+        courses.sort(key=lambda name: cint(priority.get(name)) or float("inf"))
+
     return {
         "menu": menu.get("name"),
         "modified": str(menu.get("modified_time") or ""),

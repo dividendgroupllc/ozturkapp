@@ -18,7 +18,7 @@ def _strip_escpos(raw: bytes) -> bytes:
     import re
 
     raw = raw.replace(b"\x1b@", b"").replace(b"\x1bt\x11", b"")
-    return re.sub(rb"\x1b[aEt].|\x1d!.|\x1dV\x42\x00", b"", raw)
+    return re.sub(rb"\x1b[aEt].|\x1d[!B].|\x1dV\x42\x00", b"", raw)
 
 
 def _decode_escpos(raw: bytes, start: str = "cp866") -> str:
@@ -204,6 +204,100 @@ class TestEscpos(FrappeTestCase):
         self.assertIn("78 400", txt)
         for line in txt.splitlines():
             self.assertLessEqual(len(line), 32, line)
+
+
+class TestOrderTypeOnTickets(FrappeTestCase):
+    """Oshxona cheki, «Tayyor» cheki va mijoz chekida buyurtma turi."""
+
+    PRINTER = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
+
+    def kot(self, **extra):
+        kot = {
+            "station": "Oshxona", "order_number": "12", "time": "2026-10-09 14:32:00",
+            "type": "New Order", "items": [{"item_name": "Lahmacun", "qty": 2}],
+        }
+        kot.update(extra)
+        return escpos.build_kot(kot, self.PRINTER)
+
+    def test_kot_shows_each_order_type_inverted(self):
+        for order_type, label in (
+            ("Dine In", "ZALDA"),
+            ("Take Away", "OLIB KETISH"),
+            ("Delivery", "YETKAZIB BERISH"),
+        ):
+            raw = self.kot(order_type=order_type)
+            txt = _decode_escpos(raw)
+            self.assertIn(label, txt, order_type)
+            # Qora fon yoqiladi va o'chiriladi — keyingi qatorlar oddiy chiqsin.
+            self.assertEqual(raw.count(b"\x1dB\x01"), 1, order_type)
+            self.assertEqual(raw.count(b"\x1dB\x00"), 1, order_type)
+            # Banner stansiya nomidan keyin, taomlardan oldin.
+            self.assertLess(txt.index("OSHXONA"), txt.index(label))
+            self.assertLess(txt.index(label), txt.index("Lahmacun"))
+
+    def test_kot_dine_in_keeps_table(self):
+        txt = _decode_escpos(self.kot(order_type="Dine In", table="5"))
+        self.assertIn("ZALDA", txt)
+        self.assertIn("STOL: 5", txt)
+
+    def test_kot_without_or_unknown_order_type_has_no_banner(self):
+        for extra in ({}, {"order_type": None}, {"order_type": "Nimadir"}):
+            raw = self.kot(**extra)
+            self.assertNotIn(b"\x1dB\x01", raw, extra)
+            self.assertIn("Lahmacun", _decode_escpos(raw))
+
+    def test_inverted_banner_fits_58mm(self):
+        printer = dict(self.PRINTER, paper_width="58")
+        raw = escpos.build_kot(
+            {"station": "Oshxona", "order_type": "Delivery",
+             "items": [{"item_name": "Lahmacun", "qty": 1}]},
+            printer,
+        )
+        # `double` shriftda 58mm = 16 belgi; bo'shliqlar bilan ham sig'ishi kerak.
+        for line in _strip_escpos(raw).decode("cp866").splitlines():
+            if "YETKAZIB" in line or "BERISH" in line:
+                self.assertLessEqual(len(line), 16, line)
+
+    def test_item_ticket_shows_order_type(self):
+        raw = escpos.build_item_ticket(
+            {"item_name": "Choy", "quantity": 1, "order_type": "Take Away",
+             "printed_at": "2026-10-09 14:40:00"},
+            self.PRINTER,
+        )
+        self.assertIn("OLIB KETISH", _decode_escpos(raw))
+
+    def bill(self, **extra):
+        bill = {
+            "items": [{"item_name": "Lahmacun", "qty": 1, "rate": 50000, "amount": 50000}],
+            "total": 50000, "taxes": [], "discount": 0,
+            "grand_total": 50000, "rounded_total": 50000, "paid": False, "payments": [],
+        }
+        bill.update(extra)
+        return _strip_escpos(escpos.build_bill(bill, self.PRINTER, {"line1": "TEST"})).decode("cp866")
+
+    def test_bill_shows_takeaway_and_delivery_but_not_dine_in(self):
+        self.assertIn("OLIB KETISH", self.bill(order_type="Take Away"))
+        self.assertNotIn("ZALDA", self.bill(order_type="Dine In", table="5"))
+
+        txt = self.bill(order_type="Delivery", delivery={"phone": "+998901234567", "address": "Gorkiy 5"})
+        self.assertIn("YETKAZIB BERISH", txt)
+        # Sarlavha turi bor — eski «Yetkazib berish» qatori takrorlanmaydi.
+        self.assertNotIn("Yetkazib berish", txt)
+        self.assertIn("Telefon: +998901234567", txt)
+        self.assertIn("Manzil: Gorkiy 5", txt)
+
+    def test_kot_payload_reads_order_type_from_invoice(self):
+        from unittest.mock import patch
+
+        doc = frappe._dict(
+            invoice="POS-TEST-1", production="Oshxona", name="KOT-TEST-1", type="New Order",
+            kot_items=[frappe._dict(item_name="Lahmacun", quantity=1)],
+        )
+        meta = frappe._dict(order_type="Delivery", waiter=None, restaurant_table=None)
+        with patch.object(print_queue.frappe.db, "exists", return_value=True), \
+                patch.object(print_queue.frappe.db, "get_value", return_value=meta):
+            data = print_queue._kot_payload_data(doc)
+        self.assertEqual(data["order_type"], "Delivery")
 
 
 TEST_USER = "_test_print_agent@example.com"

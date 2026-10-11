@@ -213,6 +213,8 @@ def get_active_kots(station=None, include_served=0):
                 "table": kot.restaurant_table,
                 "merged_tables": invoice_meta.get(kot.invoice, {}).get("merged_tables"),
                 "takeaway": bool(cint(kot.table_takeaway)),
+                # Zalda / Olib ketish / Yetkazib berish — kartada rangli belgi.
+                "order_type": invoice_meta.get(kot.invoice, {}).get("order_type"),
                 "customer": kot.customer_name,
                 "waiter": invoice_meta.get(kot.invoice, {}).get("waiter", ""),
                 "station": kot.production,
@@ -311,7 +313,7 @@ def _load_items(kot_names: list) -> dict:
 
 
 def _invoice_meta(invoices: list) -> dict:
-    """Chek -> {waiter, merged_tables} (bitta so'rov).
+    """Chek -> {waiter, merged_tables, order_type} (bitta so'rov).
 
     `URY KOT` da ofitsant ham, birlashtirilgan stollar ham saqlanmaydi —
     ikkalasi ham `POS Invoice` da turadi.
@@ -323,7 +325,7 @@ def _invoice_meta(invoices: list) -> dict:
     rows = frappe.get_all(
         "POS Invoice",
         filters={"name": ["in", names]},
-        fields=["name", "waiter", "custom_merged_tables"],
+        fields=["name", "waiter", "custom_merged_tables", "order_type"],
     )
 
     users = {r.waiter for r in rows if r.waiter}
@@ -342,6 +344,7 @@ def _invoice_meta(invoices: list) -> dict:
         r.name: {
             "waiter": full_names.get(r.waiter, r.waiter or ""),
             "merged_tables": r.custom_merged_tables,
+            "order_type": r.order_type,
         }
         for r in rows
     }
@@ -462,7 +465,7 @@ def update_kot_item_status(kot_item, status):
             "URY KOT Items", kot_item, ["item", "item_name", "quantity"], as_dict=True
         )
         invoice_row = frappe.db.get_value(
-            "POS Invoice", row.invoice, ["restaurant_table", "waiter"], as_dict=True
+            "POS Invoice", row.invoice, ["restaurant_table", "waiter", "order_type"], as_dict=True
         ) or frappe._dict()
         item_label = (item_row or {}).get("item_name") or (item_row or {}).get("item") or ""
         notifications.item_ready(
@@ -484,6 +487,7 @@ def update_kot_item_status(kot_item, status):
                 "item_name": item_label,
                 "quantity": (item_row or {}).get("quantity"),
                 "table": invoice_row.get("restaurant_table") or "",
+                "order_type": invoice_row.get("order_type") or "",
                 "station": row.production,
                 "waiter": _user_label(invoice_row.get("waiter")),
                 "printed_at": frappe.utils.now(),

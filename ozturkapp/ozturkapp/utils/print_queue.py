@@ -181,7 +181,8 @@ def _kot_payload_data(doc) -> dict:
     if doc.get("invoice") and frappe.db.exists("POS Invoice", doc.invoice):
         invoice_meta = frappe.db.get_value(
             "POS Invoice", doc.invoice,
-            ["waiter", "custom_ury_order_number", "custom_ticket_number", "restaurant_table"],
+            ["waiter", "custom_ury_order_number", "custom_ticket_number", "restaurant_table",
+             "order_type"],
             as_dict=True,
         ) or frappe._dict()
     waiter = invoice_meta.get("waiter")
@@ -209,6 +210,7 @@ def _kot_payload_data(doc) -> dict:
         "waiter": waiter_name or waiter,
         "time": time_value or doc.get("creation"),
         "type": doc.get("type"),
+        "order_type": invoice_meta.get("order_type"),
         "comments": doc.get("comments"),
         "items": items,
     }
