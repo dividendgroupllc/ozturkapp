@@ -274,6 +274,14 @@ export class OrderDialog {
 			const target = event.target.closest("[data-act]");
 			if (target) this.act(target.dataset.act, target);
 		});
+		// Taom kartochkasi `<div role="button">` — klaviaturadan ham qo'shiladi.
+		this.el.items.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter" && event.key !== " ") return;
+			const card = event.target.closest(".rc-orders-card");
+			if (!card) return;
+			event.preventDefault();
+			this.act(card.dataset.act, card);
+		});
 
 		this.el.search.addEventListener("input", () => {
 			this.query = this.el.search.value;
@@ -358,7 +366,9 @@ export class OrderDialog {
 
 		this.el.items.innerHTML = items
 			.map(
-				(entry) => `<button type="button" class="rc-orders-card" data-act="add"
+				// `<div role="button">`, `<button>` EMAS: grid ichidagi <button> uzun
+				// (o'ralgan) nomda bo'yiga o'smaydi — narx nom ustiga tushardi.
+				(entry) => `<div role="button" tabindex="0" class="rc-orders-card" data-act="add"
 					data-item="${esc(entry.item)}" data-qty="${this.cart.qty(entry.item)}">
 					<span class="rc-orders-card__qty" aria-hidden="true">${fmtQty(this.cart.qty(entry.item))}</span>
 					<span class="rc-orders-card__name">${esc(entry.item_name)}</span>
@@ -369,7 +379,7 @@ export class OrderDialog {
 						  )}" aria-label="${esc(__("Maxsus taom"))}">★</span>`
 						: ""
 				}</span>
-				</button>`
+				</div>`
 			)
 			.join("");
 	}

@@ -85,8 +85,10 @@
 
 /* Fokus halqasi FAQAT klaviatura bilan (`:focus-visible`). Sichqoncha/barmoq bosishidan keyin
    Desk'ning ko'k halqasi tugmada qolib ketmasligi uchun `:focus` uslubi bekor qilinadi. */
-.rc-root button:focus, .rc-root a:focus, .rc-root summary:focus { outline: none; box-shadow: none; }
-.rc-root button:focus-visible, .rc-root a:focus-visible, .rc-root summary:focus-visible {
+.rc-root button:focus, .rc-root a:focus, .rc-root summary:focus,
+.rc-root [role="button"]:focus { outline: none; box-shadow: none; }
+.rc-root button:focus-visible, .rc-root a:focus-visible, .rc-root summary:focus-visible,
+.rc-root [role="button"]:focus-visible {
 	outline: 2px solid var(--rc-accent-ink); outline-offset: 2px; box-shadow: none;
 }
 /* Desk `[hidden]` ni `display: none !important` qiladi — bizning `display: flex`

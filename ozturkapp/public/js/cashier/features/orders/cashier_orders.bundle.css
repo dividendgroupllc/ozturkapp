@@ -63,27 +63,24 @@
 .rc-orders-items--loading { opacity: .5; pointer-events: none; }
 .rc-orders-items > .rc-empty { grid-column: 1 / -1; }
 
-/* Kartochka oddiy blok: balandligini FAQAT nom belgilaydi, narx esa pastki
-   chetga qotirilgan (padding-bottom uning joyi). Avval flex-ustun edi —
-   `<button>` ichidagi flex'da brauzer uzun nomli kartochkani o'stirmay,
-   narx chegaradan tashqariga chiqib qolardi. */
+/* Kartochka `<div role="button">` (order_dialog.js): bo'yi nom uzunligiga
+   qarab o'sadi, narx doim nom ostida, pastki chetda. */
 .rc-orders-card {
-	position: relative; display: block; width: 100%;
-	min-height: 84px; padding: 10px 12px 33px; text-align: left;
+	position: relative; display: flex; flex-direction: column; gap: 6px;
+	min-height: 84px; padding: 10px 12px; text-align: left;
 	border: 2px solid var(--rc-border); border-radius: var(--rc-radius);
 	background: var(--rc-surface); color: var(--rc-text);
-	cursor: pointer; -webkit-tap-highlight-color: transparent;
+	cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
 }
 .rc-orders-card:active { filter: brightness(.92); }
 /* Nom TO'LIQ chiqadi — qirqilmaydi: oxiridagi gramaj va "(1+1)" taomlarni
-   bir-biridan ajratadi. Uzun nomda kartochka balandroq bo'ladi. */
+   bir-biridan ajratadi. */
 .rc-orders-card__name {
-	display: block; padding-right: 28px; font-size: 15px; font-weight: 700; line-height: 1.2;
+	padding-right: 28px; font-size: 15px; font-weight: 700; line-height: 1.2;
 	overflow-wrap: break-word;
 }
 .rc-orders-card__price {
-	position: absolute; left: 12px; right: 12px; bottom: 10px;
-	font-size: 14px; font-weight: 600; line-height: 1.2; color: var(--rc-muted);
+	margin-top: auto; font-size: 14px; font-weight: 600; line-height: 1.2; color: var(--rc-muted);
 }
 .rc-orders-card__star { color: var(--rc-reserved-ink); }
 .rc-orders-card__qty {
