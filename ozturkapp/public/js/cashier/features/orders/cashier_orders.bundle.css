@@ -59,12 +59,14 @@
 	flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
 	display: grid; align-content: start; gap: 8px;
 	grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+	/* `auto` qator aylanadigan konteynerda kartochkaning `min-height` idan
+	   o'smaydi (bo'sh joy yo'q) — uzun nom narx ustiga tushardi. */
+	grid-auto-rows: max-content;
 }
 .rc-orders-items--loading { opacity: .5; pointer-events: none; }
 .rc-orders-items > .rc-empty { grid-column: 1 / -1; }
 
-/* Kartochka `<div role="button">` (order_dialog.js): bo'yi nom uzunligiga
-   qarab o'sadi, narx doim nom ostida, pastki chetda. */
+/* Kartochka `<div role="button">` (order_dialog.js); bo'yi nomga qarab o'sadi. */
 .rc-orders-card {
 	position: relative; display: flex; flex-direction: column; gap: 6px;
 	min-height: 84px; padding: 10px 12px; text-align: left;
