@@ -300,6 +300,89 @@ class TestOrderTypeOnTickets(FrappeTestCase):
         self.assertEqual(data["order_type"], "Delivery")
 
 
+class TestCancelAndAddedItemTickets(FrappeTestCase):
+    """Taom bekor qilinganda / zakazga qo'shilganda oshxona cheki.
+
+    Misol: 1 Et dürüm + 1 Tombik + 1 Iskandar. Iskandar bekor qilinsa chek
+    FAQAT Iskandar uchun «BEKOR QILINDI» bo'lib chiqadi; o'rniga Tandır beyti
+    qo'shilsa chekda FAQAT Tandır beyti chiqadi, to'liq zakaz emas.
+    """
+
+    PRINTER = {"paper_width": "80", "codepage": "cp866", "codepage_number": 17, "cut_paper": 1}
+
+    def payload(self, kot_type, rows):
+        from unittest.mock import patch
+
+        doc = frappe._dict(
+            invoice="POS-TEST-1", production="Oshxona", name="KOT-TEST-1", type=kot_type,
+            kot_items=[frappe._dict(r) for r in rows],
+        )
+        meta = frappe._dict(order_type="Dine In", waiter=None, restaurant_table="5")
+        with patch.object(print_queue.frappe.db, "exists", return_value=True), \
+                patch.object(print_queue.frappe.db, "get_value", return_value=meta):
+            return print_queue._kot_payload_data(doc)
+
+    def test_cancel_types_match_kitchen_status(self):
+        from ozturkapp.ozturkapp.utils import kitchen_status
+
+        self.assertEqual(set(escpos.KOT_CANCEL_TYPES), set(kitchen_status.CANCELLATION_KOT_TYPES))
+
+    def test_cancel_ticket_shows_only_cancelled_item_and_qty(self):
+        # 3 ta Iskandardan 1 tasi bekor: URY quantity=3 (qolgan), cancelled_qty=1.
+        data = self.payload("Partially cancelled", [
+            {"item_name": "Iskandar kabob", "quantity": "3", "cancelled_qty": "1"},
+        ])
+        self.assertEqual([i["qty"] for i in data["items"]], ["1"])
+        txt = _decode_escpos(escpos.build_kot(data, self.PRINTER))
+        self.assertIn("BEKOR QILINDI", txt)
+        self.assertIn("TAYYORLAMANG", txt)
+        self.assertIn("1 x Iskandar kabob", txt)
+        self.assertNotIn("3 x", txt)
+        self.assertNotIn("QO'SHIMCHA", txt)
+
+    def test_cancel_ticket_falls_back_to_quantity(self):
+        data = self.payload("Cancelled", [{"item_name": "Iskandar kabob", "quantity": "2"}])
+        self.assertEqual(data["items"][0]["qty"], "2")
+
+    def test_added_item_ticket_is_marked_and_not_cancel(self):
+        data = self.payload("Order Modified", [{"item_name": "Tandir beyti", "quantity": "1"}])
+        txt = _decode_escpos(escpos.build_kot(data, self.PRINTER))
+        self.assertIn("QO'SHIMCHA", txt)
+        self.assertIn("1 x Tandir beyti", txt)
+        self.assertNotIn("BEKOR", txt)
+
+    def test_new_order_has_no_extra_banner(self):
+        data = self.payload("New Order", [{"item_name": "Et durum", "quantity": "1"}])
+        txt = _decode_escpos(escpos.build_kot(data, self.PRINTER))
+        self.assertNotIn("BEKOR", txt)
+        self.assertNotIn("QO'SHIMCHA", txt)
+
+    def test_cancel_banner_fits_58mm(self):
+        raw = escpos.build_kot(
+            {"station": "Oshxona", "type": "Partially cancelled",
+             "items": [{"item_name": "Iskandar", "qty": 1}]},
+            dict(self.PRINTER, paper_width="58"),
+        )
+        for line in _strip_escpos(raw).decode("cp866").splitlines():
+            if "BEKOR" in line:
+                self.assertLessEqual(len(line), 16, line)
+
+    def test_cancellation_kot_is_printed(self):
+        import ast
+        import inspect
+        import textwrap
+
+        from ozturkapp.ozturkapp.utils import kitchen_realtime
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(kitchen_realtime._on_cancellation_kot)))
+        calls = {
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        self.assertIn("enqueue_kot", calls)
+
+
 TEST_USER = "_test_print_agent@example.com"
 
 #: Test qoldig'ini har ehtimolga qarshi tozalash uchun (ba'zi metodlar —

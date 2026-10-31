@@ -166,6 +166,17 @@ def _on_cancellation_kot(doc):
     branch = doc.get("branch")
     nothing_to_stop = order_cancel.apply_item_cancellation(doc)
 
+    # BEKOR QILISH CHEKI -> OSHXONA PRINTERI. Oshxona boshlagan-boshlamaganidan
+    # qat'i nazar chiqadi: qog'ozdagi asl chek oshpaz qo'lida turibdi, uni
+    # faqat qog'oz bilan bekor qilish mumkin. Chekda FAQAT bekor qilingan
+    # taom(lar) bo'ladi — URY bekor-KOT'ga boshqa taom qo'ymaydi.
+    try:
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        print_queue.enqueue_kot(doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "kitchen_realtime: print_queue.enqueue_kot (bekor)")
+
     if nothing_to_stop:
         # Chiptani darhol "ko'rilgan" deb yopamiz. `verified` +
         # `order_status` — URY'ning O'Z mexanizmi

@@ -34,7 +34,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, cint, now_datetime
+from frappe.utils import add_to_date, cint, flt, now_datetime
 
 from ozturkapp.ozturkapp.utils import escpos
 
@@ -188,9 +188,15 @@ def _kot_payload_data(doc) -> dict:
     waiter = invoice_meta.get("waiter")
     waiter_name = frappe.db.get_value("User", waiter, "full_name") if waiter else None
 
+    # Bekor-KOT'da URY `quantity` ga zakazda QOLGAN miqdorni, `cancelled_qty`
+    # ga esa BEKOR QILINGAN miqdorni yozadi. Chekda faqat bekor qilingani
+    # chiqishi kerak (3 tadan 1 tasi bekor -> «1 x», «3 x» emas).
+    cancelled = doc.get("type") in escpos.KOT_CANCEL_TYPES
     items = []
     for row in doc.get("kot_items") or []:
         qty = row.get("quantity")
+        if cancelled and flt(row.get("cancelled_qty")):
+            qty = row.get("cancelled_qty")
         items.append({
             "item_name": row.get("item_name") or row.get("item"),
             "qty": qty,
@@ -217,7 +223,13 @@ def _kot_payload_data(doc) -> dict:
 
 
 def enqueue_kot(doc) -> list:
-    """Yangi KOT — stansiya printer(lar)iga. Printer yo'q bo'lsa bo'sh ro'yxat."""
+    """KOT — stansiya printer(lar)iga. Printer yo'q bo'lsa bo'sh ro'yxat.
+
+    Har KOT'da FAQAT o'z taomlari bor: «New Order» — birinchi zakaz,
+    «Order Modified» — keyin QO'SHILGAN taomlar, bekor-KOT — faqat bekor
+    qilingan taomlar. Shuning uchun chek hech qachon to'liq zakazni
+    takrorlamaydi.
+    """
     printers = kitchen_printers(doc.get("branch"), doc.get("production"))
     if not printers:
         return []
@@ -230,7 +242,8 @@ def enqueue_kot(doc) -> list:
         jobs.append(enqueue(
             "KOT", printer, payload, doc.get("branch"),
             ref_doctype="URY KOT", ref_name=doc.name,
-            title=f"KOT {data.get('order_number') or doc.name}"
+            title=("BEKOR " if doc.get("type") in escpos.KOT_CANCEL_TYPES else "")
+            + f"KOT {data.get('order_number') or doc.name}"
             + (f" | Stol {data['table']}" if data.get("table") else "")
             + f" | {data.get('station') or ''}",
         ))

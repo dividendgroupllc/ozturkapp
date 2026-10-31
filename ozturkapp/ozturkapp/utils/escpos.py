@@ -543,6 +543,11 @@ def build_bill(bill: dict, printer, header: dict | None = None) -> bytes:
     return r.finish()
 
 
+#: URY bekor-KOT turlari — `kitchen_status.CANCELLATION_KOT_TYPES` bilan bir xil
+#: bo'lishi shart (test tekshiradi).
+KOT_CANCEL_TYPES = ("Cancelled", "Partially cancelled")
+
+
 def build_kot(kot: dict, printer) -> bytes:
     """Oshxona buyurtma cheki (KOT) — yangi buyurtma tushganda.
 
@@ -571,8 +576,16 @@ def build_kot(kot: dict, printer) -> bytes:
     order_type = order_type_label(kot.get("order_type"))
     if order_type:
         r.text(order_type, align=align, bold=True, size="double", invert=True)
-    if kot.get("type") and kot["type"] not in ("Order", "New Order"):
-        r.text(str(kot["type"]).upper(), align=align, bold=True)
+    kot_type = kot.get("type")
+    cancelled = kot_type in KOT_CANCEL_TYPES
+    if cancelled:
+        # Bekor qilish cheki — oshpaz bir qarashda ajratsin: katta, qora fonda.
+        r.text("BEKOR QILINDI", align=align, bold=True, size="double", invert=True)
+    elif kot_type == "Order Modified":
+        # Mavjud zakazga QO'SHILGAN taom — chekda faqat yangi taomlar bor.
+        r.text("QO'SHIMCHA", align=align, bold=True, size="double")
+    elif kot_type and kot_type not in ("Order", "New Order"):
+        r.text(str(kot_type).upper(), align=align, bold=True)
     # Qog'oz tejash: raqam va vaqt bitta qatorda, sanasiz — oshxonaga
     # bugungi buyurtmaning vaqti yetarli.
     r.text(f"Buyurtma: {kot.get('order_number') or kot.get('kot') or ''}  |  "
@@ -588,6 +601,8 @@ def build_kot(kot: dict, printer) -> bytes:
         if item.get("comment"):
             r.text(f"* {item['comment']}", align=align)
     r.text(sep, align=align)
+    if cancelled:
+        r.text("TAYYORLAMANG!", align=align, bold=True, size="tall")
     if kot.get("comments"):
         r.text(f"Izoh: {kot['comments']}", align=align)
     return r.finish()
