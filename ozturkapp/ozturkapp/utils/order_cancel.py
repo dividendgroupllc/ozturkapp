@@ -297,6 +297,8 @@ def _close_kitchen_tickets(invoice: str, branch: str) -> int:
     )
 
     touched, count = {}, 0
+    #: KOT -> shu chaqiruvda bekor qilingan qatorlar (chek uchun).
+    cancelled_rows = {}
 
     for row in rows:
         status = kitchen_status.normalize(row.status)
@@ -319,12 +321,53 @@ def _close_kitchen_tickets(invoice: str, branch: str) -> int:
         )
         count += 1
         touched[row.kot] = row.production
+        cancelled_rows.setdefault(row.kot, set()).add(row.kot_item)
 
     for kot, production in touched.items():
         _sync_cancelled_kot(kot)
         emit_kot_change(branch, kot, REASON_CODE, production, invoice)
+        _print_cancellation(kot, cancelled_rows[kot])
 
     return count
+
+
+def _print_cancellation(kot: str, kot_items: set):
+    """Butun zakaz bekor qilinganda oshxona printeriga «BEKOR QILINDI» cheki.
+
+    Taomni zakazdan olib tashlashda URY bekor-KOT yaratadi va chek
+    `kitchen_realtime._on_cancellation_kot()` orqali chiqadi. Butun zakazni
+    bekor qilishda esa bekor-KOT YARATILMAYDI (`cancel_invoice()` faqat
+    bayroq qo'yadi) — busiz oshpaz qo'lidagi qog'oz chek bo'yicha
+    bekor qilingan taomni tayyorlab yuborardi.
+
+    Chek asl KOT nusxasidan yig'iladi: `type = "Cancelled"` va FAQAT shu
+    yerda bekor qilingan qatorlar (berilgan / avval bekor qilingan
+    taomlar chiqmaydi). Qatordagi `quantity` — qolgan miqdor, aynan u
+    bekor bo'ldi, shuning uchun `cancelled_qty` ga o'sha yoziladi
+    (`print_queue._kot_payload_data` bekor chekda shu maydonni o'qiydi).
+
+    Printer xatosi bekor qilishni TO'XTATMAYDI — Error Log'ga yoziladi.
+    """
+    try:
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        doc = frappe.get_doc("URY KOT", kot)
+        items = []
+        for row in doc.get("kot_items") or []:
+            if row.name not in kot_items:
+                continue
+            data = frappe._dict(row.as_dict())
+            data.cancelled_qty = data.quantity
+            items.append(data)
+        if not items:
+            return
+
+        ticket = frappe._dict(doc.as_dict())
+        ticket.type = "Cancelled"
+        ticket.kot_items = items
+        print_queue.enqueue_kot(ticket)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "order_cancel: bekor qilish cheki")
 
 
 def apply_item_cancellation(cancel_kot, repair: bool = False) -> bool:

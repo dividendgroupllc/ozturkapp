@@ -3050,6 +3050,42 @@ class TestOrderCancellation(FrappeTestCase):
             sorted([kitchen_status.CANCELLED, kitchen_status.SERVED]),
         )
 
+    def test_cancelling_prints_a_cancellation_ticket(self):
+        """Butun zakaz bekor qilinsa oshxonaga «BEKOR QILINDI» cheki ketadi.
+
+        Faqat shu yerda bekor qilingan taomlar chiqadi — berilgan taom
+        chekka tushmaydi.
+        """
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        invoice = self._draft()
+        kot = self._kot(invoice, [kitchen_status.SERVED, kitchen_status.PENDING])
+        self._as_cashier(supervisor=True)
+
+        with mock.patch.object(print_queue, "enqueue_kot", return_value=["PJ"]) as enqueue:
+            order_cancel.cancel_invoice(self._row(invoice), "xato zakaz", self.scope)
+
+        enqueue.assert_called_once()
+        ticket = enqueue.call_args.args[0]
+        self.assertEqual(ticket.name, kot)
+        self.assertEqual(ticket.type, "Cancelled")
+        self.assertEqual([r.item for r in ticket.kot_items], ["TEST-TAOM-2"])
+        self.assertEqual(flt(ticket.kot_items[0].cancelled_qty), 1)
+
+    def test_printer_failure_does_not_block_cancellation(self):
+        from ozturkapp.ozturkapp.utils import print_queue
+
+        invoice = self._draft()
+        self._kot(invoice, [kitchen_status.PENDING])
+        self._as_cashier(supervisor=False)
+
+        with mock.patch.object(print_queue, "enqueue_kot", side_effect=RuntimeError("printer")):
+            order_cancel.cancel_invoice(self._row(invoice), "xato zakaz", self.scope)
+
+        self.assertEqual(
+            frappe.db.get_value("POS Invoice", invoice, "custom_cancelled"), 1
+        )
+
     def test_cancelling_frees_the_table(self):
         invoice = self._draft()
         frappe.db.set_value(

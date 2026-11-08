@@ -25,10 +25,26 @@ ERPNext kodi o'zgartirilmaydi (upstream).
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import POSInvoice
 
+from ozturkapp.ozturkapp.overrides import ury_order_number
 from ozturkapp.ozturkapp.utils import promo_discount, service_charge
+
+# Amend chek (`INV-00871-1`) URY tartib raqami hook'ini yiqitmasin.
+ury_order_number.patch()
 
 
 class OzturkPOSInvoice(POSInvoice):
+    def before_insert(self):
+        parent = getattr(super(), "before_insert", None)
+        if parent:
+            parent()
+        # Amend: Frappe `copy_doc(from_amend=True)` `no_copy` maydonlarni
+        # HAM nusxalaydi, shuning uchun bekor qilingan chekning
+        # `custom_client_ref` (unique) yangi hujjatga o'tib, saqlashda
+        # «Client Ref (UUID) must be unique» xatosi chiqadi. Amend — yangi
+        # hujjat, ofitsant/kassa idempotency kaliti unga tegishli emas.
+        if self.amended_from:
+            self.custom_client_ref = None
+
     def calculate_taxes_and_totals(self):
         super().calculate_taxes_and_totals()
         # «Aksiya» chegirmasi ichimliklarsiz summadan (`utils/promo_discount.py`).
